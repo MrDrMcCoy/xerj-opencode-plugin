@@ -63,6 +63,20 @@ describe("Ledger", () => {
     await accounting.flush();
   });
 
+  test("ranks cited files by how often they were cited", async () => {
+    await writeFile(join(root, "x.txt"), "x".repeat(10));
+    await writeFile(join(root, "y.txt"), "y".repeat(20));
+    const { storage } = store();
+    const accounting = ledger(storage);
+
+    await accounting.recordQuery("s", ["x.txt", "y.txt"], 0, 2);
+    await accounting.recordQuery("s", ["x.txt"], 0, 1);
+
+    const top = accounting.snapshot("s").topFiles;
+    expect(top[0]).toEqual({ path: "x.txt", citations: 2, bytes: 10 });
+    expect(top[1]).toEqual({ path: "y.txt", citations: 1, bytes: 20 });
+  });
+
   test("does not double count a file cited twice", async () => {
     await writeFile(join(root, "c.txt"), "c".repeat(50));
     const { storage } = store();
@@ -121,5 +135,6 @@ describe("Ledger", () => {
 
     expect(second.snapshot().queries).toBe(2);
     expect(second.snapshot().baselineBytes).toBe(40);
+    expect(second.snapshot().topFiles[0]?.path).toBe("d.txt");
   });
 });

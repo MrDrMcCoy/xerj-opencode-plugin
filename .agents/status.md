@@ -34,6 +34,14 @@ Updated: 2026-11-03
 - The journal lives at `<data root>/state/<prefix>/`, not in `.xerj`:
   `--watch` refuses a state dir inside the watched tree, because journal writes
   are filesystem events that would restart the pass forever.
+- M5 is implemented: the sidebar follows the RPC `updated` event with a 30 s
+  fallback, a `session.panel` claim renders the details view, and `/xerj` plus
+  `/xerj-reindex`, `/xerj-remember`, `/xerj-search` cover the commands. The
+  server part gained `remember` and `search` RPC methods and the status now
+  carries datasets, memory count, top cited files, and recent warnings.
+- The TUI was exercised with a stub host: 4 commands registered, 2 slot claims,
+  event refresh, panel open, search alert, and remember toast all fired. Actual
+  rendering needs a real terminal, which this session cannot observe.
 - Binary management is multi-platform: target triples for Linux (musl or gnu),
   macOS, and Windows; Rosetta shells and x64 Node on Windows ARM64 resolve to
   the native arm64 build; installs live under `bin/<ver>-<target>/`; a
@@ -50,7 +58,7 @@ Updated: 2026-11-03
 - The index root is `ctx.location.project.canonical`, not the session directory:
   a session opened in `.agents/` was deriving
   `xop-agents-<hash>` before the fix.
-- `bun test test/unit` passes (108 tests); `tsc --noEmit` is clean.
+- `bun test test/unit` passes (117 tests); `tsc --noEmit` is clean.
 
 ## Layout
 
@@ -72,7 +80,8 @@ src/stats/ledger.ts    measured savings with partial-read subtraction
 src/memory/store.ts    project memory, ids, formatting
 src/remote/spool.ts    fetched-page spool, external _bulk ingest, redaction
 src/hooks/session.ts   prompt retrieval + memory recall + injection
-src/tools/search.ts    search, def, status tools
+src/tools/search.ts    search, def, remember, recall, forget, index, status
+src/ui/format.ts       sidebar lines and panel sections (pure)
 src/rpc.ts             typed RPC contract + status types
 src/index.ts           server part
 src/tui.tsx            sidebar slot + /xerj commands
@@ -82,18 +91,16 @@ test/unit/*.test.ts    pure-function tests
 
 ## Next actions
 
-1. M5: TUI. Sidebar already exists; add the details panel, the memory count, and
-   a live `stats.updated` subscription instead of the 5 s poll.
-2. Confirm the prompt-to-context path on the next real user turn: `queries` in
-   `xerj_status` should increment without a tool call, and the model should see
-   the `<xerj-corpus>` and `<xerj-memory>` blocks.
+1. M6: consume brain edges (`/_graph/<brain>/ego`, one hop, 200-token cap) and
+   expose the anomaly tool. Both need the graph and detector shapes verified.
+2. Verify the details panel and the four commands in a real terminal session;
+   the stub host stops where the renderer starts.
 3. Retrieval quality: a rare-term query still puts `package-lock.json` above the
    exact match. Consider skipping lockfiles at index time or in the baseline.
 
 ## Work in progress
 
-Nothing. M0–M4 are committed; the next slice is M5 (TUI polish), then M6
-(brain and anomaly).
+Nothing. M0–M5 are committed; the next slice is M6 (brain and anomaly).
 
 ## Blocked / unknown
 
@@ -122,6 +129,10 @@ Nothing. M0–M4 are committed; the next slice is M5 (TUI polish), then M6
 - `_cat/indices?format=json` fields and human size strings; `_stats` is not a
   route.
 - `xerj gain --json` shape (searches, hit_rate, took_ms, top_indices).
+- `GET /_memory/<namespace>?size=1` returns `count` with a one-entry page, so
+  the panel counts memories without paging through them.
+- `_cat/indices` groups cleanly into project (`<prefix>-*`), web, external, and
+  memory; the memory index is exactly `.xerj-memory-<namespace>`.
 
 ## Log
 
@@ -164,3 +175,7 @@ Nothing. M0–M4 are committed; the next slice is M5 (TUI polish), then M6
   download, and the status snapshot reports the target. Smoke installs into a
   temp root and a fresh-import status check both pass; the live server keeps
   the old module until restart.
+- 2026-11-03: M5 implemented: event-driven sidebar, details panel, four TUI
+  commands, RPC `remember`/`search`, and status fields for datasets, memory,
+  top cited files, and recent warnings. Stub-host run passed; live rendering
+  is the remaining check.

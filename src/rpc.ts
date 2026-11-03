@@ -20,6 +20,23 @@ export interface BinaryStatus {
   readonly target: string | null;
 }
 
+export interface DatasetStatus {
+  readonly name: string;
+  readonly docs: number;
+  readonly bytes: number;
+}
+
+export interface MemoryStatus {
+  readonly namespace: string;
+  readonly count: number;
+}
+
+export interface CitedFileStatus {
+  readonly path: string;
+  readonly citations: number;
+  readonly bytes: number;
+}
+
 export interface IndexStatus {
   readonly prefix: string;
   readonly docs: number;
@@ -31,6 +48,7 @@ export interface IndexStatus {
   readonly lastRecords: number | null;
   readonly restarts: number;
   readonly lastError: string | null;
+  readonly datasets: ReadonlyArray<DatasetStatus>;
 }
 
 export interface UsageStatus {
@@ -39,7 +57,10 @@ export interface UsageStatus {
   readonly hitRate: number;
   readonly bytesReturned: number;
   readonly bytesRead: number;
+  readonly baselineBytes: number;
+  readonly savedBytes: number;
   readonly tokensSaved: number;
+  readonly topFiles: ReadonlyArray<CitedFileStatus>;
 }
 
 export interface ConfigStatus {
@@ -57,6 +78,8 @@ export interface StatusSnapshot {
   readonly index: IndexStatus;
   readonly config: ConfigStatus;
   readonly usage: UsageStatus;
+  readonly memory: MemoryStatus;
+  readonly recent: ReadonlyArray<string>;
   readonly warnings: ReadonlyArray<string>;
   readonly errors: ReadonlyArray<string>;
 }
@@ -116,6 +139,14 @@ const definition = {
           lastRecords: { type: ["number", "null"] },
           restarts: { type: "number" },
           lastError: { type: ["string", "null"] },
+          datasets: {
+            type: "array",
+            items: object({
+              name: { type: "string" },
+              docs: { type: "number" },
+              bytes: { type: "number" },
+            }),
+          },
         }),
         config: object({
           indexRoot: { type: "string" },
@@ -129,8 +160,23 @@ const definition = {
           hitRate: { type: "number" },
           bytesReturned: { type: "number" },
           bytesRead: { type: "number" },
+          baselineBytes: { type: "number" },
+          savedBytes: { type: "number" },
           tokensSaved: { type: "number" },
+          topFiles: {
+            type: "array",
+            items: object({
+              path: { type: "string" },
+              citations: { type: "number" },
+              bytes: { type: "number" },
+            }),
+          },
         }),
+        memory: object({
+          namespace: { type: "string" },
+          count: { type: "number" },
+        }),
+        recent: { type: "array", items: { type: "string" } },
         warnings: { type: "array", items: { type: "string" } },
         errors: { type: "array", items: { type: "string" } },
       }),
@@ -138,6 +184,21 @@ const definition = {
     reindex: {
       input: valueSchema({}),
       output: valueSchema({ queued: { type: "boolean" } }),
+    },
+    remember: {
+      input: valueSchema({ text: { type: "string" } }),
+      output: valueSchema({
+        id: { type: "string" },
+        created: { type: "boolean" },
+      }),
+    },
+    search: {
+      input: valueSchema({ query: { type: "string" } }),
+      output: valueSchema({
+        text: { type: "string" },
+        hits: { type: "number" },
+        bytes: { type: "number" },
+      }),
     },
   },
   events: {
@@ -149,4 +210,4 @@ const definition = {
 
 export const XerjRpc = Rpc.define(definition);
 
-export const PLUGIN_VERSION = "0.1.1";
+export const PLUGIN_VERSION = "0.2.0";

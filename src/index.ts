@@ -10,8 +10,8 @@ import { ensureBinary, externalBinary, type InstalledBinary } from "./binary/man
 import { loadConfig } from "./config.ts";
 import { registerSessionHooks } from "./hooks/session.ts";
 import { CorpusService, type CorpusSnapshot } from "./index/watcher.ts";
-import { createLogger, type KeyValueStorage } from "./log.ts";
-import { XerjClient } from "./node/client.ts";
+import { createLogger, type KeyValueStorage, type Logger } from "./log.ts";
+import { XerjClient, type IndexSummary } from "./node/client.ts";
 import {
   ensureNode,
   persistPort,
@@ -27,7 +27,12 @@ import {
   projectStateDir,
   webPrefix,
 } from "./paths.ts";
-import { PLUGIN_VERSION, XerjRpc, type StatusSnapshot } from "./rpc.ts";
+import {
+  PLUGIN_VERSION,
+  XerjRpc,
+  type DatasetStatus,
+  type StatusSnapshot,
+} from "./rpc.ts";
 import { MemoryStore } from "./memory/store.ts";
 import { RemoteSpool } from "./remote/spool.ts";
 import { SearchService } from "./search/service.ts";
@@ -95,6 +100,8 @@ export default Plugin.define({
       logger.error(runtime.error);
     }
 
+    const memoryNs = memoryNamespace(projectRoot);
+
     const snapshot = async (): Promise<StatusSnapshot> => {
       const usage = ledger.snapshot();
       const base: StatusSnapshot = {
@@ -118,6 +125,7 @@ export default Plugin.define({
           docs: 0,
           bytes: 0,
           indices: 0,
+          datasets: [],
           ...corpusStatus(runtime.corpus),
         },
         config: {
@@ -132,8 +140,13 @@ export default Plugin.define({
           hitRate: usage.hitRate,
           bytesReturned: usage.bytesReturned,
           bytesRead: usage.bytesRead,
+          baselineBytes: usage.baselineBytes,
+          savedBytes: usage.savedBytes,
           tokensSaved: usage.tokensSaved,
+          topFiles: usage.topFiles,
         },
+        memory: { namespace: memoryNs, count: 0 },
+        recent: await recentMessages(logger),
         warnings: runtime.warnings,
         errors: runtime.error ? [runtime.error] : [],
       };
@@ -142,16 +155,35 @@ export default Plugin.define({
 
       try {
         const client = new XerjClient(runtime.node.baseUrl);
-        const indices = await client.indices();
-        const mine = indices.filter((entry) => entry.index.startsWith(`${prefix}-`));
+        const [indices, summary] = await Promise.all([
+          client.indices(),
+          client.memorySummary(memoryNs).catch(() => null),
+        ]);
+        const datasets = datasetRows(
+          indices,
+          prefix,
+          webPrefix(projectRoot),
+          externalPrefix(projectRoot),
+          memoryNs,
+        );
+        const corpus = datasets.filter((dataset) => dataset.name !== "memory");
+
         return {
           ...base,
           index: {
             prefix,
-            docs: mine.reduce((total, entry) => total + entry.docs, 0),
-            bytes: mine.reduce((total, entry) => total + entry.bytes, 0),
-            indices: mine.length,
+            docs: corpus.reduce((total, dataset) => total + dataset.docs, 0),
+            bytes: corpus.reduce((total, dataset) => total + dataset.bytes, 0),
+            indices: corpus.filter((dataset) => dataset.docs > 0).length,
+            datasets,
             ...corpusStatus(runtime.corpus),
+          },
+          memory: {
+            namespace: memoryNs,
+            count:
+              summary?.count ??
+              datasets.find((dataset) => dataset.name === "memory")?.docs ??
+              0,
           },
         };
       } catch (error) {
@@ -162,8 +194,19 @@ export default Plugin.define({
     const registration = await ctx.rpc.register(XerjRpc, {
       status: async () => snapshot(),
       reindex: async () => {
-        await runtime.corpus?.reindex();
-        return { queued: runtime.corpus !== null };
+        await Promise.all([runtime.corpus?.reindex(), runtime.web?.reindex()]);
+        return { queued: runtime.corpus !== null || runtime.web !== null };
+      },
+      remember: async (input) => {
+        if (!runtime.memory) throw new Error("XERJ memory is not available yet");
+        const args = input as { text: string };
+        return runtime.memory.remember({ text: args.text });
+      },
+      search: async (input) => {
+        if (!runtime.search) throw new Error("XERJ search is not available yet");
+        const args = input as { query: string };
+        const result = await runtime.search.search(args.query);
+        return { text: result.text, hits: result.hits.length, bytes: result.bytes };
       },
     });
 
@@ -389,6 +432,41 @@ function corpusStatus(corpus: CorpusService | null): Pick<
     restarts: snapshot?.restarts ?? 0,
     lastError: snapshot?.lastError ?? null,
   };
+}
+
+/** Groups the node's indices into the corpora this plugin maintains. */
+function datasetRows(
+  indices: ReadonlyArray<IndexSummary>,
+  project: string,
+  web: string,
+  external: string,
+  memoryNs: string,
+): DatasetStatus[] {
+  const groups = [
+    { name: "project", matches: (index: string) => index.startsWith(`${project}-`) },
+    { name: "web", matches: (index: string) => index.startsWith(`${web}-`) },
+    { name: "external", matches: (index: string) => index.startsWith(`${external}-`) },
+    { name: "memory", matches: (index: string) => index === `.xerj-memory-${memoryNs}` },
+  ];
+
+  return groups
+    .map((group) => {
+      const matched = indices.filter((entry) => group.matches(entry.index));
+      return {
+        name: group.name,
+        docs: matched.reduce((total, entry) => total + entry.docs, 0),
+        bytes: matched.reduce((total, entry) => total + entry.bytes, 0),
+      };
+    })
+    .filter((dataset) => dataset.docs > 0 || dataset.bytes > 0);
+}
+
+async function recentMessages(logger: Logger): Promise<string[]> {
+  const entries = await logger.entries().catch(() => []);
+  return entries
+    .filter((entry) => entry.level === "warn" || entry.level === "error")
+    .slice(-4)
+    .map((entry) => `${entry.level}: ${entry.message}`);
 }
 
 function contentBytes(content: unknown): number {

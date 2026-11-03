@@ -410,12 +410,15 @@ panel only, capped at 20 entries.
 Counters (durable in `ctx.storage`, mirrored per session):
 
 ```
-queries, hits, misses, injected_turns
-bytes_returned, bytes_baseline, bytes_read_by_model
-files_cited, files_read, docs_indexed, index_bytes
-index_runs, index_failures, index_seconds
-node_spawns, node_restarts, http_429s
+queries, hits
+bytes_returned, baseline_bytes, bytes_read, saved_bytes, tokens_saved
+files_cited, files_read
+citations per file (top cited files)
+docs and store size per dataset (project, web, external, memory)
 ```
+
+Index runs, node spawns, 429s, and injection counts are not tracked yet. They
+are cheap to add once something consumes them.
 
 Definitions:
 
@@ -428,10 +431,18 @@ Definitions:
   read only removes what it covered.
 - **saved bytes** = `baseline − bytes_returned`, floored at 0.
 - **tokens saved** = `saved / bytesPerToken`, rendered with `~`.
+- **top cited files**: each file gains one citation per query that cited it,
+  deduped within the query. Counts are persisted with the ledger.
+- **datasets**: indices grouped by prefix: project (`<prefix>-*`), web
+  (`xop-web-*`), external (`xop-ext-*`), memory (`.xerj-memory-<namespace>`).
+  Sizes parse the human strings from `_cat/indices`.
+- **recent**: the last four warn/error entries from the logger's ring buffer,
+  shown in the panel's health section.
 
 Index size and doc counts come from `_cat/indices?format=json`; freshness from
-the last successful `autoindex` result and the journal mtime. `xerj gain` is
-the node's own accounting and is used as a cross-check, not as the source.
+the last successful `autoindex` run document (generation, records, timestamp).
+`xerj gain` is the node's own accounting and is used as a cross-check, not as
+the source.
 
 Verified sources on `v1.0.0-rc.100`:
 
@@ -454,30 +465,40 @@ Verified sources on `v1.0.0-rc.100`:
 
 ## 11. TUI
 
-`sidebar.content` (append), four lines, reactive to the RPC `stats.updated`
-event with a 5 s poll fallback:
+`sidebar.content` (append), four lines, reactive to the RPC `updated` event
+with a 30 s poll fallback for missed events:
 
 ```
-XERJ  ● ready   1,284 docs  12.4 MB
+XERJ  ● ready · 1,284 docs · 12.4 MB
 q 37  hit 78%  ~1.9M tok saved
-idx 2m ago · last: 3 changed
+idx 2m ago · 1,284 records
 ▸ /xerj for details
 ```
 
-Details panel (`session.panel`, name `xerj.stats`): datasets, freshness,
-top cited files, savings breakdown, memory count, node health, last errors.
+The third line reports the last run's record count, not a change count: the
+run document gives totals, and a change delta would need a second source.
+
+Details panel: a `session.panel` append claim that renders only when
+`input.name` is `xerj.stats`, so other plugins' panels are unaffected.
+Sections: node, binary, index, datasets, memory, usage (saved/baseline/
+returned/read), top cited files, health (config warnings, recent ring-buffer
+warnings and errors). `ui.panel.open("xerj.stats")` selects it; when no
+session can host a panel the command falls back to an alert with the same
+text.
 
 Commands (keymap layer, `palette: true`, slash names):
 
 | Command | Action |
 |---|---|
-| `/xerj` | open stats panel |
-| `/xerj-reindex` | queue an incremental run, toast on completion |
+| `/xerj` | open the panel; subcommands `status`, `reindex`, `remember`, `search` |
+| `/xerj-reindex` | queue an incremental project and web run, toast on completion |
 | `/xerj-remember` | prompt for text, store a memory |
-| `/xerj-search` | prompt for a query, show results in a dialog |
+| `/xerj-search` | prompt for a query, show cited passages in a dialog |
 
-Server-side `ctx.command.transform` mirrors `xerj-reindex` and `xerj-stats` so
-they work without the TUI part.
+`ctx.command.transform` on the server part is deliberately not used. A
+server-side command cannot open a panel or a dialog, so it could only toast or
+emit a synthetic message. The TUI owns the commands; the server part owns the
+RPC methods they call.
 
 ## 12. Telemetry and anomaly detection
 

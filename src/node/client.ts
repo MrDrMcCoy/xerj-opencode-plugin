@@ -19,6 +19,11 @@ export interface MemoryHit {
   readonly score: number | null;
 }
 
+export interface MemorySummary {
+  readonly count: number;
+  readonly exists: boolean;
+}
+
 export interface IndexSummary {
   readonly index: string;
   readonly docs: number;
@@ -200,6 +205,19 @@ export class XerjClient {
         },
       ];
     });
+  }
+
+  /** Counts entries without paging through them; `size=1` returns the total. */
+  async memorySummary(namespace: string): Promise<MemorySummary> {
+    const result = await this.get(
+      `/_memory/${encodeURIComponent(namespace)}?size=1`,
+      "memory list failed",
+    );
+    if (!isRecord(result)) return { count: 0, exists: false };
+    return {
+      count: toNumber(result.count),
+      exists: result.exists === true,
+    };
   }
 
   async memoryForget(namespace: string, id: string): Promise<boolean> {

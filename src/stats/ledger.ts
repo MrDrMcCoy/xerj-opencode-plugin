@@ -8,6 +8,12 @@ import { stat } from "node:fs/promises";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import type { KeyValueStorage, Logger } from "../log.ts";
 
+export interface CitedFile {
+  readonly path: string;
+  readonly citations: number;
+  readonly bytes: number;
+}
+
 export interface LedgerSnapshot {
   readonly queries: number;
   readonly hits: number;
@@ -19,6 +25,7 @@ export interface LedgerSnapshot {
   readonly bytesRead: number;
   readonly savedBytes: number;
   readonly tokensSaved: number;
+  readonly topFiles: ReadonlyArray<CitedFile>;
 }
 
 export interface LedgerOptions {
@@ -31,6 +38,7 @@ export interface LedgerOptions {
 
 interface SessionState {
   readonly cited: Map<string, number>;
+  readonly citations: Map<string, number>;
   /** Bytes the model already read from a cited file. */
   readonly read: Map<string, number>;
   queries: number;
@@ -44,6 +52,7 @@ interface LifetimeState {
   returned: number;
   bytesRead: number;
   readonly cited: Map<string, number>;
+  readonly citations: Map<string, number>;
   readonly read: Map<string, number>;
 }
 
@@ -60,6 +69,7 @@ export class Ledger {
     returned: 0,
     bytesRead: 0,
     cited: new Map(),
+    citations: new Map(),
     read: new Map(),
   };
   private loadPromise: Promise<void> | null = null;
@@ -89,7 +99,13 @@ export class Ledger {
       this.lifetime.hits += 1;
     }
 
-    for (const path of paths) {
+    for (const path of new Set(paths)) {
+      session.citations.set(path, (session.citations.get(path) ?? 0) + 1);
+      this.lifetime.citations.set(
+        path,
+        (this.lifetime.citations.get(path) ?? 0) + 1,
+      );
+
       if (!session.cited.has(path)) {
         const size = await this.fileSize(path);
         if (size === null) continue;
@@ -123,6 +139,7 @@ export class Ledger {
   snapshot(sessionID?: string): LedgerSnapshot {
     const session = sessionID ? this.sessions.get(sessionID) : undefined;
     const cited = session?.cited ?? this.lifetime.cited;
+    const citations = session?.citations ?? this.lifetime.citations;
     const read = session?.read ?? this.lifetime.read;
     const queries = session?.queries ?? this.lifetime.queries;
     const hits = session?.hits ?? this.lifetime.hits;
@@ -148,6 +165,7 @@ export class Ledger {
       bytesRead: this.lifetime.bytesRead,
       savedBytes: saved,
       tokensSaved: Math.round(saved / this.options.bytesPerToken),
+      topFiles: topCited(citations, cited),
     };
   }
 
@@ -175,6 +193,7 @@ export class Ledger {
       returned: numberOr(record.returned, 0),
       bytesRead: numberOr(record.bytesRead, 0),
       cited: fileMap(record.cited),
+      citations: countMap(record.citations),
       read: fileMap(record.read),
     };
   }
@@ -182,7 +201,14 @@ export class Ledger {
   private session(sessionID: string): SessionState {
     let session = this.sessions.get(sessionID);
     if (!session) {
-      session = { cited: new Map(), read: new Map(), queries: 0, hits: 0, returned: 0 };
+      session = {
+        cited: new Map(),
+        citations: new Map(),
+        read: new Map(),
+        queries: 0,
+        hits: 0,
+        returned: 0,
+      };
       this.sessions.set(sessionID, session);
     }
     return session;
@@ -224,6 +250,11 @@ export class Ledger {
       if (oldest === undefined) break;
       this.lifetime.cited.delete(oldest);
     }
+    while (this.lifetime.citations.size > MAX_TRACKED_FILES) {
+      const oldest = this.lifetime.citations.keys().next().value;
+      if (oldest === undefined) break;
+      this.lifetime.citations.delete(oldest);
+    }
     while (this.lifetime.read.size > MAX_TRACKED_FILES) {
       const oldest = this.lifetime.read.keys().next().value;
       if (oldest === undefined) break;
@@ -246,6 +277,7 @@ export class Ledger {
       returned: this.lifetime.returned,
       bytesRead: this.lifetime.bytesRead,
       cited: [...this.lifetime.cited].slice(-MAX_TRACKED_FILES),
+      citations: [...this.lifetime.citations].slice(-MAX_TRACKED_FILES),
       // Infinity is not JSON; -1 means "the whole file was read".
       read: [...this.lifetime.read]
         .slice(-MAX_TRACKED_FILES)
@@ -274,6 +306,32 @@ function fileMap(value: unknown): Map<string, number> {
     }
   }
   return map;
+}
+
+function countMap(value: unknown): Map<string, number> {
+  const map = new Map<string, number>();
+  if (!Array.isArray(value)) return map;
+
+  for (const entry of value) {
+    if (!Array.isArray(entry) || entry.length !== 2) continue;
+    const [path, count] = entry;
+    if (typeof path === "string" && typeof count === "number" && count > 0) {
+      map.set(path, count);
+    }
+  }
+  return map;
+}
+
+const TOP_FILES = 5;
+
+function topCited(
+  citations: ReadonlyMap<string, number>,
+  cited: ReadonlyMap<string, number>,
+): CitedFile[] {
+  return [...citations.entries()]
+    .map(([path, count]) => ({ path, citations: count, bytes: cited.get(path) ?? 0 }))
+    .sort((left, right) => right.citations - left.citations || left.path.localeCompare(right.path))
+    .slice(0, TOP_FILES);
 }
 
 function bumpRead(map: Map<string, number>, path: string, amount: number): void {
