@@ -1,0 +1,556 @@
+# Implementation plan
+
+This refines `goals.md` into a buildable design. Goals stay the source of
+intent; this file decides *how*, in what order, and what counts as done.
+
+## 1. What the plugin is
+
+One OpenCode V2 plugin package with three parts:
+
+| Part | Entry | Runs in | Responsibility |
+|---|---|---|---|
+| Server | `.` → `src/index.ts` | OpenCode server | binary + node lifecycle, indexing, retrieval, memory, hooks, tools, accounting |
+| RPC | `./rpc` → `src/rpc.ts` | shared contract | typed `stats`, `search`, `memory`, `reindex` methods + `stats.updated` event |
+| TUI | `./tui` → `src/tui.tsx` | terminal UI | sidebar stats, `/xerj` commands, details panel |
+
+No GUI part in v1. No MCP server: the plugin talks HTTP to the node directly
+so it can shape output, enforce token budgets, and account for every byte. MCP
+stays available to users who want it independently.
+
+### Layers
+
+```
+TUI  ──RPC──►  server part
+                  ├── hooks (prompt, context, tool.execute.*)
+                  ├── tools (xerj_*)
+                  ├── stats/accounting
+                  └── services
+                        ├── retrieval (query, format, inject)
+                        ├── memory (store, capture)
+                        ├── index (corpus, scheduler, remote, brain)
+                        ├── node (supervisor, client)
+                        └── binary (release, manager)
+```
+
+Rules: UI never touches HTTP or the filesystem; hooks and tools never spawn
+processes directly; only `binary/` and `node/` may exec or open sockets.
+
+## 2. Decisions
+
+These are defaults, not laws. Each is one config key away from the other
+choice.
+
+| # | Decision | Rationale |
+|---|---|---|
+| D1 | Node runs `--insecure` on `127.0.0.1` only, data dir `0700` | Matches every documented recipe; TLS + key management buys nothing on a single-user loopback socket. Auth-on can be added later if a shared-host case appears. |
+| D2 | One node per user, shared across projects | The engine's data dir is global; one node avoids N× memory and port churn. Projects are separated by index prefix. |
+| D3 | Node is detached and outlives the OpenCode server | Index survives restarts and plugin reloads. A pidfile + health probe makes attach idempotent. |
+| D4 | Native tools, not MCP | Token budgets, citation formatting, and savings accounting need control over the response. |
+| D5 | Index with `autoindex --no-graph` | That path reconciles additions, changes, deletions and renames incrementally. The graph path refuses deletions. |
+| D6 | Second brain is opt-in and separate | `xerj brain <folder>` builds its own edge index. Running it over the whole repo duplicates indexing. |
+| D7 | Lexical embedder by default | Offline, deterministic, no 90 MB download. Neural is opt-in and documented as re-index-required. |
+| D8 | Context injection is on, budgeted, and killable | This is the product. It gets a hard token cap, a score threshold, per-turn dedupe, and `context.enabled=false`. |
+| D9 | `.xerj/` holds project state, not the engine index | Engine data lives outside the indexed tree (required by XERJ). `.xerj/` holds the autoindex journal, config, and a self-ignoring `.gitignore`. |
+| D10 | Savings are measured, not asserted | Baseline = full size of each cited file, counted once per session, and only for files the model did not read anyway. |
+| D11 | Fetched documents persist across sessions | Re-fetching a URL is a no-op, and yesterday's page is still searchable today. Bounded by `remote.maxBytes`, redacted, and killable with `remote.enabled=false`. |
+| D12 | Package name `@mrdrmccoy/xerj-opencode-plugin` | Matches the repo owner. No unscoped-name risk, and the scoped name installs the same way from any project. |
+
+## 3. Configuration
+
+Plugin options in `opencode.json(c)`; every value has a default.
+
+```jsonc
+{
+  "plugins": [{
+    "package": "@mrdrmccoy/xerj-opencode-plugin",
+    "options": {
+      "binary":  { "version": "auto", "path": null },
+      "node":    { "url": null, "port": 9200, "dataDir": null },
+      "index":   { "auto": true, "debounceMs": 5000, "periodicMs": 900000,
+                   "workers": null, "brain": [] },
+      "remote":  { "enabled": true, "maxBytes": 2000000 },
+      "context": { "enabled": true, "maxTokens": 1500, "memoryTokens": 400,
+                   "minScore": 0.2, "timeoutMs": 400 },
+      "memory":  { "enabled": true },
+      "stats":   { "enabled": true, "bytesPerToken": 4 },
+      "telemetry": { "anomaly": false }
+    }
+  }]
+}
+```
+
+`binary.version: "auto"` means "latest minor, pin the resolved patch".
+`node.url` set means "attach, never spawn".
+
+This repo dogfoods its own plugin. `.opencode/opencode.json` here loads the
+package with `.agents` as the example brain:
+
+```jsonc
+{
+  "plugins": [{
+    "package": "@mrdrmccoy/xerj-opencode-plugin",
+    "options": { "index": { "brain": [".agents"] } }
+  }]
+}
+```
+
+`.agents` is then indexed twice, once as project docs and once as a brain. Two
+markdown files is an acceptable duplicate for the dogfood; revisit if the tree
+grows.
+
+## 4. Paths and identity
+
+```
+data dir      ~/.local/share/opencode/xerj/data        (engine storage, 0700)
+binary        ~/.local/share/opencode/xerj/bin/<ver>/xerj
+port          <data dir>/port                          (resolved, persisted)
+pid           <data dir>/node.pid
+spool         <data dir>/spool/<prefix>/               (remote documents)
+project       <project>/.xerj/                         (journal, config, cache)
+journal       <project>/.xerj/state/journal.ndjson
+```
+
+Index prefix, stable per canonical project path:
+
+```
+slug   = basename(canonical path), lowercased, non-[a-z0-9] → "-", max 24
+hash   = sha256(canonical path)[0..8]
+prefix = "xop-" + slug + "-" + hash        e.g. xop-xerj-opencode-plugin-1a2b3c4d
+```
+
+Remote documents get `xop-web-<hash>`, external single files
+`xop-ext-<hash>`. One prefix is one folder; that is a XERJ invariant.
+
+`autoindex` refuses a single file (`... is not a directory`), so external
+single-file ingest has to go through `_bulk`. Hidden files and directories are
+skipped unconditionally: `.env`, `.git`, and this repo's own `.agents/` never
+reach the project index. That is why the brain is the only way `.agents` is
+searchable, and why `index.brain` is not redundant with the project corpus.
+
+`.xerj/.gitignore` contains `*` so project state never lands in git.
+
+## 5. Binary management
+
+1. Resolve the installed version by running `<bin>/<ver>/xerj --version`; cache
+   the result in `ctx.storage`.
+2. If `version` is pinned, use it and stop.
+3. Else resolve the latest release at most once per 24 h through the
+   `https://github.com/xerj-org/xerj/releases/latest` redirect (read the tag
+   from the final URL). This avoids the api.github.com rate limit.
+4. Compare full semver, **including prerelease identifiers numerically**:
+   `1.0.0-rc.99 < 1.0.0-rc.100`. Upgrade when remote > installed and the major
+   matches; never downgrade. A minor-only rule would never fire here, because
+   every rc release keeps minor at 0.
+5. Pick the target triple: `linux → <cpu>-unknown-linux-musl` (static, jemalloc,
+   no glibc floor), `darwin → <cpu>-apple-darwin`, `windows → zip`. On darwin,
+   if `sysctl -n sysctl.proc_translated` is `1`, use `aarch64` regardless of
+   `uname -m`.
+6. Download `xerj-<ver>-<target>.tar.gz` and its `.sha256` sidecar. Require 64
+   lowercase hex; a missing or malformed checksum aborts the install (fail
+   closed, same as the official installer).
+7. Extract into `<bin>/<ver>.partial/`, expect `xerj-<ver>-<target>/xerj`,
+   fall back to a recursive search for a regular file named `xerj`,
+   `chmod 0755`, then `rename()` the directory into `<bin>/<ver>`. Remove the
+   partial on failure.
+8. On any failure: keep the current binary, log once, surface in TUI as
+   `xerj: binary upgrade failed` with the reason. Never block startup.
+
+The official installer remains a fallback (`XERJ_VERSION` + `XERJ_INSTALL_DIR`
+pinned into a temp dir), under the same verify-then-rename contract. The `.deb`
+assets are ignored: no root, no dpkg.
+
+## 6. Node lifecycle
+
+`ensureNode()`:
+
+1. Probe `node.url` or `http://127.0.0.1:<port>/` for the XERJ banner.
+2. If a non-XERJ service answers, advance the port (9200 → 9399) and persist.
+3. If nothing answers, take `<data dir>/.spawn-lock` (`mkdir` is atomic, stale
+   after 60 s), spawn detached:
+   `xerj --insecure --data-dir <data dir> --bind 127.0.0.1`, stdio to
+   `<data dir>/node.log`, then poll health for up to 30 s.
+4. If another process holds the lock, poll instead of spawning.
+
+Teardown: the plugin never kills the node. `xerj_stop` (a TUI command) kills
+the PID from the pidfile after confirmation. Indexing and memory outlive
+sessions by design.
+
+Verified on `v1.0.0-rc.100`:
+
+- The server has `--port P`, which also claims `P+1` (native REST) and `P+2`
+  (gRPC). `--auto-port` is opt-in; the default fails when a port is taken. The
+  supervisor therefore checks all three ports before spawning.
+- `GET /` returns Elasticsearch-shaped JSON with `cluster_name: "xerj"`.
+  Identify a node by that field, never by the port. `version.number` is the
+  *wire* version (`8.13.0`), not the XERJ release; the release comes from the
+  binary.
+- `xerj --version` prints `xerj v1.0.0-rc.100`, so the installed version is
+  parsed from that line.
+
+## 7. Indexing
+
+### Project corpus
+
+On setup, asynchronously:
+
+```
+xerj autoindex <project root>
+  --url <node> --prefix <prefix> --state-dir <project>/.xerj/state
+  --no-graph --json --progress none
+```
+
+Add `--no-semantic` when `index.semantic=false`. Cap `--workers` when
+configured. Exit codes: `0` clean, `3` completed-with-junk (success — do not
+retry), `4` needs-a-decision (nothing indexed; a JSON decision request is on
+stdout), `1` failure (record, retry with backoff, surface once).
+
+### Refresh: prefer `--watch`
+
+`autoindex --watch` is the better trigger than a debounce loop: OS watches per
+indexed directory, no polling, the same ignore rules, and a `--debounce` quiet
+period (default 400 ms). It requires `--no-graph`, which is the mode we use
+anyway. The plan is:
+
+| Trigger | Action |
+|---|---|
+| plugin setup | start `autoindex --watch --no-graph` as a supervised resident process |
+| watcher exits | restart with exponential backoff (1 s → 60 s, max 5), then fall back to periodic runs |
+| `write`/`edit`/`patch` tool result | mark dirty; the watcher picks it up (fallback: debounce 5 s) |
+| periodic timer | only when the watcher is unavailable |
+| `/xerj reindex` | run `--watch` once more, or a one-shot run when watch is disabled |
+
+Watch mode is one process per project. With several projects open that is
+acceptable (each is idle when nothing changes), but `index.watch=false` must
+exist for users who disagree.
+
+Before the first index, write `.xerjignore` defaults if absent:
+
+```
+.env
+.env.*
+*.pem
+*.key
+**/secrets/**
+```
+
+XERJ already honors `.gitignore`, nested gitignore, `.git/info/exclude`, and a
+built-in list (`node_modules`, `target`, `dist`, …). This file only adds
+secret-shaped names.
+
+### Refresh triggers
+
+| Trigger | Action |
+|---|---|
+| plugin setup | full incremental run in background |
+| `write`, `edit`, `patch`, `apply_patch` tool result | mark dirty, debounce 5 s |
+| `bash` tool result | mark dirty, debounce 30 s (no path info) |
+| periodic timer | incremental run every `periodicMs` |
+| `/xerj reindex` | incremental run now; `--fresh` variant for a rebuild |
+
+A single-flight queue per prefix: at most one `autoindex` process, at most one
+queued rerun. Runs are `nice -n 10`; the node's 429 back-pressure is handled by
+`autoindex` itself (it re-offers rejected records).
+
+### Remote documents
+
+`webfetch` and MCP extract/fetch results are spooled when `remote.enabled`:
+
+```
+<data dir>/spool/<prefix>/<sha256(url)>.<ext>
+<data dir>/spool/<prefix>/<sha256(url)>.meta.json
+```
+
+Then `autoindex <spool dir> --prefix xop-web-<hash> --no-graph`. Same
+debounce. Bounded by `remote.maxBytes`; only `text/*`, `application/json`,
+`application/xml`; error results are skipped. Redact obvious bearer tokens and
+`sk-…` keys before writing.
+
+External single files (`read` outside the project root) are indexed by content
+into `xop-ext-<hash>` via `_bulk`, with `path`, `abs_path`, `mtime` fields.
+Plain text only; no AST. Document that limitation.
+
+### Second brain (opt-in)
+
+`index.brain: ["docs", "notes"]`. Do **not** use `xerj brain`: it hardcodes
+the `ax` prefix, has no `--prefix`, and would collide with the only other
+folder under `ax`. Use the autoindex path instead:
+
+```
+xerj autoindex <dir> --prefix xop-<brain>-<hash> --brain <name> --state-dir ...
+```
+
+That writes documents under the given prefix and edges to
+`.xerj-memory-<name>-edges`, which is exactly what the graph tools read.
+
+Verified edge types on this repo's `.agents`: `sequence`, `same_dir`,
+`pathcite` (not the `wikilink`/`mdlink` names the prose recipe uses). Filter on
+the types the overview reports, not on a hardcoded list.
+
+`GET /_graph/<brain>/overview` returns `nodes_index`, node and edge counts,
+`types`, `detectors`, and `hubs`; `nodes.total` counts section records, not
+files, so do not label it as a file count in the UI.
+
+## 8. Retrieval and context injection
+
+### Query path
+
+1. Prompt hook records `{sessionID, text, messageID}` and starts retrieval.
+2. Retrieval: `xerj_search` semantics over the project prefix, plus the web
+   prefix when the prompt contains a URL or a domain, plus memory recall.
+3. Merge by reciprocal rank, cut at `context.maxTokens` (XERJ's UAX #29 word
+   budget, not BPE), drop hits below `context.minScore`.
+4. Format as compact passages with `path:line` citations and one line of
+   provenance (`index`, `score`). No vectors, no `_source` noise.
+5. Cache by `sha256(last user message)`; the context hook splices the block in
+   and marks the passage ids as injected.
+
+### Context hook
+
+`session.hook("context")`:
+
+- On the first model call of a session, append a `<xerj-corpus>` system part:
+  dataset map from `autoindex-catalog`, doc counts, freshness, and one line
+  telling the model when to prefer `xerj_search` over reading whole files.
+  Budget 300 tokens, refresh when the index generation changes.
+- On every call, append `<xerj-context>` with the cached retrieval block for
+  the current turn, if any and if not already injected.
+- Never touch `event.messages`; never delete tools.
+
+If retrieval missed the `timeoutMs` deadline, inject nothing. Tools remain.
+
+### Tool surface
+
+| Tool | Input | Notes |
+|---|---|---|
+| `xerj_search` | `query`, `k?`, `max_tokens?`, `scope?` | `scope` ∈ project/web/external/all |
+| `xerj_def` | `symbol`, `lang?`, `kind?`, `k?` | go-to-definition with signature |
+| `xerj_remember` | `text`, `kind`, `topic?` | project namespace |
+| `xerj_recall` | `query`, `k?` | relevance + recency blend |
+| `xerj_forget` | `id` | retraction |
+| `xerj_status` | — | node, index, freshness, counters |
+| `xerj_index` | `path?` / `url?`, `force?` | explicit ingest |
+
+Namespaced as `xerj` with a one-line description that says when to use it
+("search the indexed project instead of reading files"). Tool results carry
+`metadata.xerj = {hits, bytes, files}` so accounting and the TUI do not have to
+parse prose.
+
+Deliberately not done: rewriting `read`/`grep` inputs. Silent semantic changes
+to built-in tools break trust and debugging. Guidance lives in the system part.
+
+## 9. Memory
+
+Namespace: `proj-<slug>-<hash8>`; global `user` for cross-project preferences.
+
+Writes:
+
+- `xerj_remember` (explicit, model-driven).
+- Compaction hook: store `{kind: "session-summary", sessionID, text}` from the
+  summary OpenCode produces, deduped by content hash.
+- Retraction on `xerj_forget`.
+
+IDs are `sha256(namespace + text)[0..16]`, so re-remembering the same fact is
+idempotent. Metadata: `kind`, `topic`, `source`, `sessionID`, `created`.
+
+Reads:
+
+- Prompt-time recall, top 3, `recency_weight: 0.2`, injected under
+  `context.memoryTokens`. Only above `minScore`.
+- `xerj_recall` for explicit lookups.
+- Graph-aware recall when a brain is configured
+  (`graph: {mode: "restrict", seeds, hops: 1}`).
+
+Memory is never dumped wholesale. `GET /_memory/{ns}` is for the TUI details
+panel only, capped at 20 entries.
+
+## 10. Stats, hit rate, savings
+
+Counters (durable in `ctx.storage`, mirrored per session):
+
+```
+queries, hits, misses, injected_turns
+bytes_returned, bytes_baseline, bytes_read_by_model
+files_cited, files_read, docs_indexed, index_bytes
+index_runs, index_failures, index_seconds
+node_spawns, node_restarts, http_429s
+```
+
+Definitions:
+
+- **hit**: a query whose top passage passed `minScore` and reached the model
+  (injected or returned by a tool).
+- **hit rate** = `hits / queries`, per session and lifetime.
+- **baseline bytes**: for each cited file, its size, counted at most once per
+  session. If the model later reads that file in full, subtract it from the
+  baseline (the retrieval did not save that read).
+- **saved bytes** = `baseline − bytes_returned`, floored at 0.
+- **tokens saved** = `saved / bytesPerToken`, rendered with `~`.
+
+Index size and doc counts come from `_cat/indices?format=json`; freshness from
+the last successful `autoindex` result and the journal mtime. `xerj gain` is
+the node's own accounting and is used as a cross-check, not as the source.
+
+Verified sources on `v1.0.0-rc.100`:
+
+- `xerj gain --json` returns `searches`, `with_hits`, `zero_hit`, `hit_rate`,
+  `took_ms: {p50, p95}`, `top_indices[]`, and
+  `excluded_machine_searches: {counting_probes, catalog_sweeps}`. That is the
+  node-side hit rate; read it instead of recomputing it.
+- Search responses carry `_savings: {bytes, measured, note}` describing
+  `_source` narrowing inside that response, and `_xerj.hints` when a request
+  would pull whole files. Record `_savings.bytes` as
+  `responseNarrowingBytes`; it is not a file-level baseline.
+- `_cat/indices?format=json` fields: `health`, `status`, `index`, `uuid`,
+  `pri`, `rep`, `docs.count`, `docs.deleted`, `store.size`, `pri.store.size`.
+  Sizes are human strings (`1.2mb`).
+- `_stats` is not a route: a bare `GET /_stats` is parsed as an index name and
+  400s. Use `_cat/indices` plus `/_stats/index` when needed.
+- `autoindex status` does not list indices under a custom prefix and has no
+  `--json`. Do not parse its text; query `_cat/indices` and keep our own
+  last-run record.
+
+## 11. TUI
+
+`sidebar.content` (append), four lines, reactive to the RPC `stats.updated`
+event with a 5 s poll fallback:
+
+```
+XERJ  ● ready   1,284 docs  12.4 MB
+q 37  hit 78%  ~1.9M tok saved
+idx 2m ago · last: 3 changed
+▸ /xerj for details
+```
+
+Details panel (`session.panel`, name `xerj.stats`): datasets, freshness,
+top cited files, savings breakdown, memory count, node health, last errors.
+
+Commands (keymap layer, `palette: true`, slash names):
+
+| Command | Action |
+|---|---|
+| `/xerj` | open stats panel |
+| `/xerj-reindex` | queue an incremental run, toast on completion |
+| `/xerj-remember` | prompt for text, store a memory |
+| `/xerj-search` | prompt for a query, show results in a dialog |
+
+Server-side `ctx.command.transform` mirrors `xerj-reindex` and `xerj-stats` so
+they work without the TUI part.
+
+## 12. Telemetry and anomaly detection
+
+Off by default. When `telemetry.anomaly=true`:
+
+- Write one doc per index run and per retrieval batch to `xop-telemetry`.
+- Create two detectors on first use: `count` per 15 m over index failures, and
+  `mean(index_seconds)` per 1 h.
+- Surface `anomaly_count` in the panel; never auto-act.
+
+User-facing anomaly tool: `xerj_anomaly {index, time_field, function, field,
+bucket_span}` → `POST /_ml/anomaly_detectors/{id}/_score` with a stable
+detector id, returns flagged buckets only. This is the recipe as a feature, not
+a background job (XERJ has no datafeed).
+
+## 13. Failure and degraded modes
+
+| Failure | Behaviour |
+|---|---|
+| binary download fails | plugin loads; tools return a clear "xerj unavailable" error; TUI shows the reason |
+| node won't start | same; one retry per session, then stop trying |
+| index run fails | keep the old index; retry with exponential backoff (max 3), then wait for the next trigger |
+| node 429 | `autoindex` waits it out; retrieval returns a retryable error |
+| index too large | `--dry-run`/`index_budget` before the first run; refuse above `index.maxBytes` with an actionable message |
+| retrieval timeout | inject nothing for that turn |
+| storage corrupt | reset the key, log, continue |
+
+Every failure is logged to the plugin's storage ring buffer (last 50) and
+visible in the panel. Nothing throws out of `setup`.
+
+## 14. Testing
+
+- Unit (`bun test`): semver compare, asset selection, prefix derivation, budget
+  trimming, savings math (including the "model read it anyway" subtraction),
+  context assembly, dedupe, config validation, redaction.
+- Integration (podman, per AGENTS.md): a pinned xerj binary, temp data dir, a
+  fixture repo with a deleted file, a renamed file, a binary blob, a `.env`, a
+  large file. Assert: clean index, junk recorded, deletion reconciled,
+  `.env` absent from the index, search returns the right `path:line`, memory
+  store/recall/forget round-trips, namespace isolation holds.
+- Hook tests with a fake context object: no injection when disabled, no
+  duplicate passages across turns, deadline respected.
+- TUI: render the slot and panel against a stub RPC; assert the strings and the
+  command registration.
+- CI: Linux x86_64 first; macOS arm64 once the binary manager is proven.
+
+## 15. Milestones
+
+| M | Scope | Done when |
+|---|---|---|
+| M0 | package skeleton (server + RPC + TUI), config, paths, storage, binary manager, node supervisor | `opencode` loads the plugin on a clean machine, downloads and starts a node, `xerj_status` answers |
+| M1 | project corpus: prefix, `.xerj` state, first index, debounced refresh, status | a fresh repo indexes without intervention; editing a file changes search results within 10 s; deleting a file removes its docs |
+| M2 | retrieval: `xerj_search`/`xerj_def`, formatting, context injection, budgets, accounting | the model answers a repo question from a citation without reading the file; counters match the transcript |
+| M3 | memory: namespace, remember/recall/forget, compaction capture, prompt-time recall | a fact stored in one session is recalled in the next; forget removes it; namespaces don't leak |
+| M4 | remote: spool + web index, external single files, `xerj_index` | fetching a URL makes its content searchable in the same session |
+| M5 | TUI: sidebar, panel, commands, RPC events | sidebar shows live docs/hit rate/savings; `/xerj` opens the panel |
+| M6 | opt-in brain, anomaly tool, telemetry detectors, docs, release | brain neighbors appear for a docs hit; anomaly tool flags a planted spike; README + config reference published |
+
+Ship M0–M2 before anything else. That slice is the whole value proposition;
+M3–M6 are multipliers.
+
+## 16. Verification backlog
+
+Confirm against a real binary before relying on these.
+
+- [x] **1. Release assets.** Verified 2026-11-03 against `v1.0.0-rc.100`.
+  Assets are `xerj-<ver>-<target>.tar.gz` (+ `.deb`), each with a `.sha256`
+  sidecar in `<hex>  <filename>` form, 64 lowercase hex. Targets:
+  `x86_64|aarch64-unknown-linux-{gnu,musl}`, `x86_64|aarch64-apple-darwin`,
+  `x86_64|aarch64-pc-windows-msvc`. Linux installs default to musl. The archive
+  holds `xerj-<ver>-<target>/xerj`. Latest is resolved by redirect, not the API.
+- [x] **2. `autoindex --no-graph`.** Verified: the flag exists, `--json` emits
+  one run document with `generation`, `files_*`, `records_*`, `junk_*`, and the
+  recovery fields. A delete, a rename and an addition all reconciled on the
+  next run with the same state dir: the old docs disappeared, the renamed file
+  appeared under its new path, and counts stayed correct. Exit 0/3/4/1 as
+  documented; `4` prints a JSON decision request and needs `--approve`.
+  `autoindex status` has no `--json` and does not list custom-prefix indices.
+- [x] **3. `autoindex` on a single file** is refused with
+  `... is not a directory`; external files go through `_bulk`.
+- [x] **4. `xerj brain`** hardcodes the `ax` prefix and has no `--prefix`, so
+  two brains collide. Use `autoindex --brain <name> --prefix <p>` instead;
+  verified it writes documents under `<p>-*` and edges to
+  `.xerj-memory-<name>-edges`.
+- [x] **5. `_cat/indices?format=json`** carries `docs.count` and `store.size`
+  (human units). `_stats` is not a route.
+- [ ] **6. `/_memory`** filter syntax and `recency_weight` behaviour.
+- [x] **7. `/_graph/<brain>/overview`** shape verified. `ego` still unverified.
+- [x] **8. `xerj gain --json`** shape verified (searches, hit_rate, took_ms,
+  top_indices, excluded_machine_searches).
+- [x] **9. Node identity** is `cluster_name: "xerj"` in `GET /`. The banner's
+  `version.number` is the ES wire version (8.13.0), not the XERJ release.
+  `--port P` claims P, P+1 and P+2; no auto-port unless `--auto-port`.
+- [x] **10. `<project>/.xerj` writability**: created from `setup` with `mkdir`;
+  a read-only workspace fails there and is reported, not thrown.
+
+## 17. Risks
+
+| Risk | Mitigation |
+|---|---|
+| XERJ is pre-1.0; CLI/HTTP shifts | pin a version, isolate every call behind `node/client.ts` and `index/corpus.ts`, integration tests against the pin, upgrade behind a config flag. Prerelease ordering is numeric (`rc.99 < rc.100`), so a string compare is a bug. |
+| Indexing large repos is slow/CPU heavy | budget pre-check, worker cap, `nice`, ignore defaults, background-only |
+| Injected context hurts model quality | hard token caps, score threshold, dedupe, kill switch, measure on fixture tasks before widening budgets |
+| Loopback `--insecure` is a superuser endpoint | loopback-only bind, 0700 data dir, documented, auth-on option |
+| Savings numbers look like marketing | measured baseline, subtract files the model read anyway, show `~`, publish the formula |
+| Plugin slows prompt admission | retrieval deadline, cache, background index, nothing blocking in `setup` |
+
+## 18. Settled decisions
+
+Resolved 2026-11-03:
+
+1. **Node auth**: `--insecure` on loopback (D1). No auth mode in v1, and no
+   `node.auth` key until a shared-host case exists.
+2. **Fetched documents**: indexed automatically and persisted (D11).
+3. **Package**: `@mrdrmccoy/xerj-opencode-plugin` on npm (D12).
+4. **Dogfood**: this repo is indexed whole; `.agents/` is the example brain.
+
+Nothing here blocks M0. The next thing to resolve is the verification backlog
+(§16), not more design.

@@ -1,0 +1,271 @@
+// Binary lifecycle: find, download, verify, extract, upgrade. Verified against
+// XERJ v1.0.0-rc.100 release assets. Everything here is best-effort except the
+// first install: a failed upgrade keeps the working binary.
+
+import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
+import { createWriteStream } from "node:fs";
+import {
+  chmod,
+  mkdir,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import type { Logger } from "../log.ts";
+import { binaryPath, releaseCachePath } from "../paths.ts";
+import { highestVersion, normalizeVersion, parseVersion, shouldUpgrade } from "../semver.ts";
+import type { PlatformInfo } from "../platform.ts";
+import {
+  archiveRoot,
+  assetName,
+  assetUrl,
+  cacheIsFresh,
+  checksumFrom,
+  latestReleaseUrl,
+  parseReleaseCache,
+  versionFromLatestUrl,
+  type ReleaseCache,
+} from "./release.ts";
+
+export class BinaryError extends Error {
+  constructor(message: string, override readonly cause?: unknown) {
+    super(message);
+    this.name = "BinaryError";
+  }
+}
+
+export interface InstalledBinary {
+  readonly version: string;
+  readonly path: string;
+  readonly upgraded: boolean;
+}
+
+export interface EnsureBinaryOptions {
+  readonly root: string;
+  readonly requested: string;
+  readonly platform: NodeJS.Platform;
+  readonly info: PlatformInfo;
+  readonly logger: Logger;
+  readonly now?: () => number;
+}
+
+const COMMAND_TIMEOUT_MS = 60_000;
+
+export async function ensureBinary(options: EnsureBinaryOptions): Promise<InstalledBinary> {
+  const { root, requested, platform, info, logger } = options;
+  const now = options.now ?? Date.now;
+
+  const installed = await findInstalled(root, platform);
+
+  if (requested !== "auto") {
+    const version = normalizeVersion(requested);
+    if (installed && installed.version === version) {
+      return { ...installed, upgraded: false };
+    }
+    const path = await install(root, version, info, logger);
+    return { version, path, upgraded: false };
+  }
+
+  const latest = await resolveLatest(root, logger, now);
+  if (!latest) {
+    if (installed) return { ...installed, upgraded: false };
+    throw new BinaryError("no installed xerj binary and the release channel is unreachable");
+  }
+
+  if (installed && !shouldUpgrade(installed.version, latest)) {
+    return { ...installed, upgraded: false };
+  }
+
+  try {
+    const path = await install(root, latest, info, logger);
+    logger.info(`installed xerj ${latest}`, { path });
+    return { version: latest, path, upgraded: installed !== null };
+  } catch (error) {
+    if (installed) {
+      logger.warn(`xerj ${latest} install failed; keeping ${installed.version}`, String(error));
+      return { ...installed, upgraded: false };
+    }
+    throw new BinaryError(`could not install xerj ${latest}`, error);
+  }
+}
+
+/** Runs `xerj --version` and returns the parsed version. */
+export async function probeBinaryVersion(path: string): Promise<string | null> {
+  const output = await run(path, ["--version"]);
+  const match = /v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/.exec(output);
+  return match?.[1] ?? null;
+}
+
+async function findInstalled(
+  root: string,
+  platform: NodeJS.Platform,
+): Promise<InstalledBinary | null> {
+  const binDir = join(root, "bin");
+  const entries = await readdir(binDir, { withFileTypes: true }).catch(() => []);
+  const versions = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+  const best = highestVersion(versions);
+  if (!best) return null;
+
+  const path = binaryPath(root, best, platform);
+  const version = await probeBinaryVersion(path);
+  if (!version) return null;
+  return { version, path, upgraded: false };
+}
+
+async function resolveLatest(
+  root: string,
+  logger: Logger,
+  now: () => number,
+): Promise<string | null> {
+  const cachePath = releaseCachePath(root);
+  const cached = parseReleaseCache(await readFileJson(cachePath));
+
+  if (cached && cacheIsFresh(cached, now())) return cached.version;
+
+  try {
+    const response = await fetch(latestReleaseUrl(), {
+      redirect: "follow",
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+    const version = versionFromLatestUrl(response.url);
+    if (!version) throw new Error("release redirect did not carry a version");
+
+    const next: ReleaseCache = { checkedAt: now(), version };
+    await mkdir(root, { recursive: true, mode: 0o700 });
+    await writeFile(cachePath, JSON.stringify(next), { mode: 0o600 });
+    return version;
+  } catch (error) {
+    logger.warn("could not check the latest xerj release", String(error));
+    return cached?.version ?? null;
+  }
+}
+
+async function install(
+  root: string,
+  version: string,
+  info: PlatformInfo,
+  logger: Logger,
+): Promise<string> {
+  if (!parseVersion(version)) throw new BinaryError(`invalid version: ${version}`);
+
+  const asset = assetName(version, info.target, info.archive);
+  const url = assetUrl(version, asset);
+  const downloadPath = join(root, "bin", asset);
+  const partialDir = join(root, "bin", `.${version}.partial`);
+  const targetDir = join(root, "bin", version);
+
+  await mkdir(dirname(downloadPath), { recursive: true, mode: 0o700 });
+  await rm(partialDir, { recursive: true, force: true });
+  await mkdir(partialDir, { recursive: true, mode: 0o700 });
+
+  try {
+    logger.info(`downloading ${asset}`);
+    await download(url, downloadPath);
+    await verifyChecksum(`${url}.sha256`, downloadPath);
+
+    await run("tar", ["-xf", downloadPath, "-C", partialDir]);
+
+    const expected = join(partialDir, archiveRoot(version, info.target), info.binary);
+    const binary = (await isFile(expected)) ? expected : await findFile(partialDir, info.binary);
+    if (!binary) throw new BinaryError(`archive ${asset} did not contain ${info.binary}`);
+
+    await chmod(binary, 0o755);
+    await rm(targetDir, { recursive: true, force: true });
+    await rename(dirname(binary), targetDir);
+
+    return join(targetDir, info.binary);
+  } finally {
+    await rm(partialDir, { recursive: true, force: true });
+    await rm(downloadPath, { force: true });
+  }
+}
+
+async function download(url: string, destination: string): Promise<void> {
+  const response = await fetch(url, {
+    redirect: "follow",
+    signal: AbortSignal.timeout(COMMAND_TIMEOUT_MS),
+  });
+  if (!response.ok || !response.body) {
+    throw new BinaryError(`download failed: HTTP ${response.status}`);
+  }
+
+  await pipeline(Readable.fromWeb(response.body), createWriteStream(destination, { mode: 0o600 }));
+}
+
+async function verifyChecksum(checksumUrl: string, filePath: string): Promise<void> {
+  const response = await fetch(checksumUrl, { signal: AbortSignal.timeout(10_000) });
+  if (!response.ok) throw new BinaryError(`checksum download failed: HTTP ${response.status}`);
+
+  const expected = checksumFrom(await response.text());
+  if (!expected) throw new BinaryError("malformed .sha256 sidecar");
+
+  const actual = createHash("sha256")
+    .update(await readFile(filePath))
+    .digest("hex");
+
+  if (actual !== expected) {
+    throw new BinaryError(`checksum mismatch (want ${expected}, got ${actual})`);
+  }
+}
+
+async function findFile(directory: string, name: string, depth = 4): Promise<string | null> {
+  if (depth < 0) return null;
+
+  const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    const path = join(directory, entry.name);
+    if (entry.isFile() && entry.name === name) return path;
+    if (entry.isDirectory()) {
+      const found = await findFile(path, name, depth - 1);
+      if (found) return found;
+    }
+  }
+
+  return null;
+}
+
+async function isFile(path: string): Promise<boolean> {
+  const info = await stat(path).catch(() => null);
+  return info?.isFile() ?? false;
+}
+
+async function readFileJson(path: string): Promise<unknown> {
+  const text = await readFile(path, "utf8").catch(() => null);
+  if (text === null) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function run(command: string, args: ReadonlyArray<string>): Promise<string> {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(command, [...args], { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+
+    const timer = setTimeout(() => child.kill("SIGKILL"), COMMAND_TIMEOUT_MS);
+    child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
+    child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      reject(new BinaryError(`${command} failed to start`, error));
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (code === 0) resolvePromise(stdout.trim());
+      else reject(new BinaryError(`${command} exited ${code}: ${stderr.trim().slice(0, 500)}`));
+    });
+  });
+}
+
