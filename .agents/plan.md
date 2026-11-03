@@ -646,7 +646,19 @@ visible in the panel. Nothing throws out of `setup`.
   duplicate passages across turns, deadline respected.
 - TUI: render the slot and panel against a stub RPC; assert the strings and the
   command registration.
-- CI: Linux x86_64 first; macOS arm64 once the binary manager is proven.
+- Ranking: generated-file demotion is covered by `test/unit/rank.test.ts`.
+  The integration fixture has no lockfile, so the two layers do not overlap:
+  ordering is a unit concern, corpus membership is an integration concern.
+- Integration harness (`test/integration/harness.ts`): one node on a scratch data
+  root, the pinned binary cached under `XERJ_CACHE` (default
+  `~/.cache/opencode/xerj-int`), `XERJ_BIN` to reuse an existing build. The
+  fixture has a deletion, a rename, an addition, a `.env`, a binary blob, and a
+  large text file. Documents are found by `ax_path`, the field XERJ actually
+  stores; `path` is only the basename.
+- CI (`.github/workflows/ci.yml`): unit job on Ubuntu, integration job that
+  runs the suite inside a container, preferring podman and falling back to
+  docker, then to the bare runner. The container needs `--pids-limit=-1`:
+  XERJ's scan pool fails with `EAGAIN` under the default cap.
 
 ## 15. Milestones
 

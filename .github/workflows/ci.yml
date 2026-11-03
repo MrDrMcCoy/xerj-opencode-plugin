@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Typecheck and unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
+      - run: bun install --frozen-lockfile
+      - run: bunx tsc --noEmit
+      - run: bun test test/unit
+
+  integration:
+    name: Integration tests against a pinned binary
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
+      - run: bun install --frozen-lockfile
+      - name: Restore the cached XERJ binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/opencode/xerj-int
+          key: xerj-${{ runner.os }}-${{ hashFiles('src/binary/release.ts') }}
+      - name: Pick a container engine
+        id: engine
+        run: |
+          # Podman is preferred; hosted runners may not allow it, so fall back
+          # to Docker, and to the bare runner when neither works.
+          if command -v podman >/dev/null 2>&1 && podman info >/dev/null 2>&1; then
+            echo "name=podman" >> "$GITHUB_OUTPUT"
+          elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+            echo "name=docker" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Run in a container
+        if: steps.engine.outputs.name != ''
+        run: |
+          ENGINE="${{ steps.engine.outputs.name }}"
+          mkdir -p "$HOME/.cache/opencode/xerj-int"
+          # The standard pid cap is too low for XERJ's scan pool, which
+          # then fails with EAGAIN before it indexes anything.
+          "$ENGINE" run --rm --pids-limit=-1 \
+            --volume "$PWD":/w \
+            --volume "$HOME/.cache/opencode/xerj-int":/xerj-cache \
+            --workdir /w \
+            --env XERJ_CACHE=/xerj-cache \
+            --env HOME=/root \
+            docker.io/oven/bun:1.4.4 \
+            bun test test/integration
+      - name: Run on the runner
+        if: steps.engine.outputs.name == ''
+        run: |
+          # No container engine: the same tests still run, just less isolated.
+          bun test test/integration

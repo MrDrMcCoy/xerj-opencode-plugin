@@ -101,7 +101,15 @@ Updated: 2026-11-03
 - The index root is `ctx.location.project.canonical`, not the session directory:
   a session opened in `.agents/` was deriving
   `xop-agents-<hash>` before the fix.
-- `bun test test/unit` passes (169 tests); `tsc --noEmit` is clean.
+- `bun test test/unit` passes (176 tests); `tsc --noEmit` is clean.
+- `bun test test/integration` passes (9 tests) against a real node: corpus
+  membership, `.env` and binary exclusion, deletion and rename reconciliation,
+  passage lookup, memory round-trip, namespace isolation, node identity and
+  re-attach. It also passes inside podman with `--pids-limit=-1`; the default
+  pid cap makes XERJ's scan pool fail with `EAGAIN`.
+- CI exists at `.github/workflows/ci.yml`: typecheck plus unit on Ubuntu, and an
+  integration job that prefers podman, falls back to docker, then to the bare
+  runner.
 
 ## Layout
 
@@ -143,8 +151,9 @@ test/unit/*.test.ts    pure-function tests
    explicit consent. The scoped npm name is not live yet.
 2. Verify the details panel and the four commands in a real terminal session;
    the stub host stops where the renderer starts.
-3. Retrieval quality: a rare-term query still puts `package-lock.json` above the
-   exact match. Consider skipping lockfiles at index time or in the baseline.
+3. Retrieval quality is now demoted, not skipped: lockfiles, minified and build
+   output score at 0.35 unless the query names the file. Verify against the live
+   corpus after a restart.
 4. The shell parser does not follow `xargs`, command substitution, pipelines
    that transform paths, or `cd` through a pipeline; those reads stay
    unindexed. An argument that merely mentions a file (`echo a.md`) is
