@@ -573,6 +573,24 @@ server-side command cannot open a panel or a dialog, so it could only toast or
 emit a synthetic message. The TUI owns the commands; the server part owns the
 RPC methods they call.
 
+### RPC access from the TUI
+
+The lookup is per location and the client is replaceable, so both facts have to
+be honoured on every call:
+
+- Pass `context.location` as the call options. Without it the server answers
+  `rpc.unavailable` even though this project's copy is registered, because a
+  registered RPC belongs to the location that loaded the plugin.
+- Read `context.client` inside the call, never capture the sub-client at setup.
+  The host swaps the client when the server restarts, and a captured
+  sub-client rejects without sending anything, which the UI cannot tell apart
+  from an unloaded plugin.
+- Subscribe to `updated` after the first successful poll, not at setup, and
+  drop the subscription on failure so the next success re-arms it. Events do
+  not survive a restart either.
+- Surface the failure text in the sidebar and in the empty panel. A fixed
+  "not loaded" line hid the real reason for both faults above.
+
 ## 12. Telemetry and anomaly detection
 
 The on-demand detector is a tool, not a background job. `xerj_anomaly` takes

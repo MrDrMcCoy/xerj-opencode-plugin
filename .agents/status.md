@@ -60,6 +60,16 @@ Updated: 2026-11-03
 - The TUI was exercised with a stub host: 4 commands registered, 2 slot claims,
   event refresh, panel open, search alert, and remember toast all fired. Actual
   rendering needs a real terminal, which this session cannot observe.
+- The TUI reported "offline" in the sidebar and "waiting for the XERJ server
+  part" in the panel while every server-side tool worked. Two faults, both
+  failing client-side, so the server logged no request: the sub-client was
+  captured once at setup and died with the server restart, and calls omitted
+  `context.location`, which the per-location RPC lookup requires. Both fixed in
+  0.3.1: the client is read per call, the location is passed per call, the
+  event subscription is armed after the first success and re-armed after a
+  failure, and the real error text replaces the fixed "not loaded" line.
+  Confirmed server-side that the same call returns 400 without a location and
+  200 with one; the TUI half needs a reload to pick up the new module.
 - M6 brain and anomaly are implemented. `index.brain` builds one graph per
   folder with a one-shot `autoindex --brain` run; status and the panel report
   docs, live edges, and age; brain hits expand one hop through
@@ -86,7 +96,7 @@ Updated: 2026-11-03
 - The index root is `ctx.location.project.canonical`, not the session directory:
   a session opened in `.agents/` was deriving
   `xop-agents-<hash>` before the fix.
-- `bun test test/unit` passes (162 tests); `tsc --noEmit` is clean.
+- `bun test test/unit` passes (167 tests); `tsc --noEmit` is clean.
 
 ## Layout
 
