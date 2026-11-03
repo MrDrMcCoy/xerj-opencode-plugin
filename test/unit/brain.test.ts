@@ -28,22 +28,27 @@ describe("brainSpecs", () => {
   test("derives a graph name and prefix from the folder", () => {
     const [agents] = brainSpecs("/repo", [".agents"]);
 
-    expect(agents?.name).toBe("agents");
+    expect(agents?.name).toMatch(/^agents-[0-9a-f]{4}$/);
     expect(agents?.directory).toBe("/repo/.agents");
     expect(agents?.prefix).toMatch(/^xop-agents-[0-9a-f]{6}$/);
   });
 
-  test("suffixes duplicate basenames instead of sharing edges", () => {
-    const [first, second] = brainSpecs("/repo", ["docs", "docs"]);
+  test("ignores the same folder configured twice", () => {
+    expect(brainSpecs("/repo", ["docs", "docs"])).toHaveLength(1);
+  });
 
-    expect(first?.name).toBe("docs");
-    expect(second?.name).toBe("docs-2");
+  test("keeps two folders with the same basename apart", () => {
+    const [first, second] = brainSpecs("/repo", ["a/docs", "b/docs"]);
+
+    expect(first?.name).toMatch(/^docs-[0-9a-f]{4}$/);
+    expect(second?.name).toMatch(/^docs-[0-9a-f]{4}$/);
+    expect(first?.name).not.toBe(second?.name);
     expect(first?.prefix).not.toBe(second?.prefix);
   });
 
   test("accepts an absolute folder", () => {
     const [notes] = brainSpecs("/repo", ["/elsewhere/notes"]);
     expect(notes?.directory).toBe("/elsewhere/notes");
-    expect(notes?.name).toBe("notes");
+    expect(notes?.name).toMatch(/^notes-[0-9a-f]{4}$/);
   });
 });

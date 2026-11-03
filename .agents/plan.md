@@ -315,7 +315,8 @@ That writes documents under the given prefix and edges to
 `.xerj-memory-<name>-edges`, which is exactly what the graph tools read.
 
 `src/index/brain.ts` derives one spec per folder: graph name
-`slug(basename(folder))`, prefix `xop-<name>-<hash6>`. It runs once after the
+`slug(basename)-<hash4>`, prefix `xop-<name>-<hash6>`. The hash keeps two
+projects' `agents` brains from sharing one global edge index. It runs once after the
 project watcher starts, but only when `index.auto` is true, and again on
 `/xerj-reindex`. Graph mode cannot watch: `--watch` requires `--no-graph`.
 

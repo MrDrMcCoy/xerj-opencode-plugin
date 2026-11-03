@@ -142,24 +142,34 @@ export function brainSpecs(
   labels: ReadonlyArray<string>,
 ): BrainSpec[] {
   const used = new Map<string, number>();
+  const seenDirs = new Set<string>();
 
-  return labels.map((label) => {
+  return labels.flatMap((label) => {
     const trimmed = label.trim();
     const directory = isAbsolute(trimmed)
       ? resolve(trimmed)
       : resolve(join(projectRoot, trimmed));
 
-    const base = slug(basename(directory), 16);
+    // The same folder configured twice is one brain, not two graphs.
+    if (seenDirs.has(directory)) return [];
+    seenDirs.add(directory);
+
+    // The graph name is global to the node, while projects share one node.
+    // A folder hash keeps two projects' `agents` brains from sharing edges.
+    const folder = slug(basename(directory), 12);
+    const base = `${folder}-${pathHash(directory, 4)}`;
     const seen = (used.get(base) ?? 0) + 1;
     used.set(base, seen);
     const name = seen === 1 ? base : `${base}-${seen}`;
 
-    return {
-      name,
-      label: trimmed,
-      directory,
-      prefix: brainPrefix(directory, name),
-    };
+    return [
+      {
+        name,
+        label: trimmed,
+        directory,
+        prefix: brainPrefix(directory, folder),
+      },
+    ];
   });
 }
 
