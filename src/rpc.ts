@@ -26,6 +26,15 @@ export interface DatasetStatus {
   readonly bytes: number;
 }
 
+export interface BrainStatus {
+  readonly name: string;
+  readonly prefix: string;
+  readonly docs: number;
+  readonly edges: number;
+  readonly lastRunAt: number | null;
+  readonly error: string | null;
+}
+
 export interface MemoryStatus {
   readonly namespace: string;
   readonly count: number;
@@ -79,6 +88,7 @@ export interface StatusSnapshot {
   readonly config: ConfigStatus;
   readonly usage: UsageStatus;
   readonly memory: MemoryStatus;
+  readonly brains: ReadonlyArray<BrainStatus>;
   readonly recent: ReadonlyArray<string>;
   readonly warnings: ReadonlyArray<string>;
   readonly errors: ReadonlyArray<string>;
@@ -176,6 +186,17 @@ const definition = {
           namespace: { type: "string" },
           count: { type: "number" },
         }),
+        brains: {
+          type: "array",
+          items: object({
+            name: { type: "string" },
+            prefix: { type: "string" },
+            docs: { type: "number" },
+            edges: { type: "number" },
+            lastRunAt: { type: ["number", "null"] },
+            error: { type: ["string", "null"] },
+          }),
+        },
         recent: { type: "array", items: { type: "string" } },
         warnings: { type: "array", items: { type: "string" } },
         errors: { type: "array", items: { type: "string" } },
@@ -210,4 +231,4 @@ const definition = {
 
 export const XerjRpc = Rpc.define(definition);
 
-export const PLUGIN_VERSION = "0.2.0";
+export const PLUGIN_VERSION = "0.3.0";

@@ -9,6 +9,7 @@ import { detectRuntime } from "./binary/detect.ts";
 import { ensureBinary, externalBinary, type InstalledBinary } from "./binary/manager.ts";
 import { loadConfig } from "./config.ts";
 import { registerSessionHooks } from "./hooks/session.ts";
+import { BrainIndexer, type BrainRun } from "./index/brain.ts";
 import { CorpusService, type CorpusSnapshot } from "./index/watcher.ts";
 import { createLogger, type KeyValueStorage, type Logger } from "./log.ts";
 import { XerjClient, type IndexSummary } from "./node/client.ts";
@@ -19,6 +20,7 @@ import {
   type NodeHandle,
 } from "./node/supervisor.ts";
 import {
+  brainSpecs,
   dataRoot,
   environmentFrom,
   externalPrefix,
@@ -26,17 +28,21 @@ import {
   memoryNamespace,
   projectStateDir,
   webPrefix,
+  type BrainSpec,
 } from "./paths.ts";
 import {
   PLUGIN_VERSION,
   XerjRpc,
+  type BrainStatus,
   type DatasetStatus,
   type StatusSnapshot,
 } from "./rpc.ts";
 import { MemoryStore } from "./memory/store.ts";
 import { RemoteSpool } from "./remote/spool.ts";
+import { BrainGraph } from "./search/brains.ts";
 import { SearchService } from "./search/service.ts";
 import { Ledger } from "./stats/ledger.ts";
+import { AnomalyService } from "./telemetry/anomaly.ts";
 import { buildTools } from "./tools/search.ts";
 
 interface Runtime {
@@ -48,6 +54,9 @@ interface Runtime {
   memory: MemoryStore | null;
   spool: RemoteSpool | null;
   web: CorpusService | null;
+  brain: BrainIndexer | null;
+  brains: ReadonlyArray<BrainSpec>;
+  anomaly: AnomalyService | null;
   error: string | null;
   warnings: string[];
 }
@@ -65,6 +74,7 @@ export default Plugin.define({
     // so a session opened in `docs/` does not create a second corpus.
     const projectRoot = ctx.location.project.canonical;
     const prefix = indexPrefix(projectRoot);
+    const brains = brainSpecs(projectRoot, config.index.brain);
     const runtime: Runtime = {
       phase: "starting",
       binary: null,
@@ -74,6 +84,9 @@ export default Plugin.define({
       memory: null,
       spool: null,
       web: null,
+      brain: null,
+      brains,
+      anomaly: null,
       error: null,
       warnings: [...warnings],
     };
@@ -146,6 +159,7 @@ export default Plugin.define({
           topFiles: usage.topFiles,
         },
         memory: { namespace: memoryNs, count: 0 },
+        brains: brainStatus(runtime.brain, runtime.brains),
         recent: await recentMessages(logger),
         warnings: runtime.warnings,
         errors: runtime.error ? [runtime.error] : [],
@@ -165,6 +179,7 @@ export default Plugin.define({
           webPrefix(projectRoot),
           externalPrefix(projectRoot),
           memoryNs,
+          runtime.brains,
         );
         const corpus = datasets.filter((dataset) => dataset.name !== "memory");
 
@@ -195,7 +210,13 @@ export default Plugin.define({
       status: async () => snapshot(),
       reindex: async () => {
         await Promise.all([runtime.corpus?.reindex(), runtime.web?.reindex()]);
-        return { queued: runtime.corpus !== null || runtime.web !== null };
+        void runtime.brain?.runAll();
+        return {
+          queued:
+            runtime.corpus !== null ||
+            runtime.web !== null ||
+            runtime.brain !== null,
+        };
       },
       remember: async (input) => {
         if (!runtime.memory) throw new Error("XERJ memory is not available yet");
@@ -229,6 +250,7 @@ export default Plugin.define({
       getSearch: () => runtime.search,
       getMemory: () => runtime.memory,
       getSpool: () => runtime.spool,
+      getAnomaly: () => runtime.anomaly,
       snapshot,
     });
 
@@ -319,11 +341,18 @@ export default Plugin.define({
         const client = new XerjClient(runtime.node.baseUrl);
         runtime.search = new SearchService(
           client,
-          [prefix, webPrefix(projectRoot), externalPrefix(projectRoot)],
+          [
+            prefix,
+            webPrefix(projectRoot),
+            externalPrefix(projectRoot),
+            ...runtime.brains.map((brain) => brain.prefix),
+          ],
           logger,
           projectRoot,
+          new BrainGraph({ client, brains: runtime.brains, logger }),
         );
         runtime.memory = new MemoryStore(client, memoryNamespace(projectRoot), logger);
+        runtime.anomaly = new AnomalyService(client, logger);
 
         if (config.remote.enabled) {
           const spool = new RemoteSpool({
@@ -380,6 +409,27 @@ export default Plugin.define({
           },
         });
         await runtime.corpus.start();
+
+        if (runtime.brains.length > 0) {
+          runtime.brain = new BrainIndexer({
+            binaryPath: binary.path,
+            nodeUrl: runtime.node.baseUrl,
+            dataRoot: root,
+            config,
+            specs: runtime.brains,
+            logger,
+            onChange: () => {
+              runtime.search?.invalidate();
+              void registration.events
+                .emit("updated", { updatedAt: Date.now() })
+                .catch(() => {});
+            },
+          });
+
+          // One-shot: graph indexing cannot run in watch mode. `index.auto`
+          // gates startup runs only; an explicit reindex still works.
+          if (config.index.auto) void runtime.brain.runAll();
+        }
 
         await registration.events.emit("updated", { updatedAt: Date.now() });
       } catch (error) {
@@ -441,12 +491,26 @@ function datasetRows(
   web: string,
   external: string,
   memoryNs: string,
+  brains: ReadonlyArray<BrainSpec>,
 ): DatasetStatus[] {
   const groups = [
-    { name: "project", matches: (index: string) => index.startsWith(`${project}-`) },
+    {
+      name: "project",
+      matches: (index: string) => index.startsWith(`${project}-`),
+    },
     { name: "web", matches: (index: string) => index.startsWith(`${web}-`) },
-    { name: "external", matches: (index: string) => index.startsWith(`${external}-`) },
-    { name: "memory", matches: (index: string) => index === `.xerj-memory-${memoryNs}` },
+    {
+      name: "external",
+      matches: (index: string) => index.startsWith(`${external}-`),
+    },
+    ...brains.map((brain) => ({
+      name: `brain:${brain.name}`,
+      matches: (index: string) => index.startsWith(`${brain.prefix}-`),
+    })),
+    {
+      name: "memory",
+      matches: (index: string) => index === `.xerj-memory-${memoryNs}`,
+    },
   ];
 
   return groups
@@ -459,6 +523,31 @@ function datasetRows(
       };
     })
     .filter((dataset) => dataset.docs > 0 || dataset.bytes > 0);
+}
+
+function brainStatus(
+  indexer: BrainIndexer | null,
+  specs: ReadonlyArray<BrainSpec>,
+): BrainStatus[] {
+  const runs: ReadonlyArray<BrainRun> =
+    indexer?.snapshot() ??
+    specs.map((spec) => ({
+      name: spec.name,
+      prefix: spec.prefix,
+      at: 0,
+      docs: 0,
+      edges: 0,
+      error: null,
+    }));
+
+  return runs.map((run) => ({
+    name: run.name,
+    prefix: run.prefix,
+    docs: run.docs,
+    edges: run.edges,
+    lastRunAt: run.at === 0 ? null : run.at,
+    error: run.error,
+  }));
 }
 
 async function recentMessages(logger: Logger): Promise<string[]> {

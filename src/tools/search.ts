@@ -6,6 +6,7 @@ import type { Config } from "../config.ts";
 import type { MemoryStore } from "../memory/store.ts";
 import { formatMemories } from "../memory/store.ts";
 import type { RemoteSpool } from "../remote/spool.ts";
+import { formatAnomalies, type AnomalyService } from "../telemetry/anomaly.ts";
 import type { Ledger } from "../stats/ledger.ts";
 import type { SearchService } from "../search/service.ts";
 import type { StatusSnapshot } from "../rpc.ts";
@@ -16,6 +17,7 @@ export interface ToolOptions {
   readonly getSearch: () => SearchService | null;
   readonly getMemory: () => MemoryStore | null;
   readonly getSpool: () => RemoteSpool | null;
+  readonly getAnomaly: () => AnomalyService | null;
   readonly snapshot: () => Promise<StatusSnapshot>;
 }
 
@@ -68,6 +70,39 @@ const RECALL_INPUT = {
     k: { type: "number", description: "How many memories to return (1-20, default 5)." },
   },
   required: ["query"],
+  additionalProperties: false,
+} as const;
+
+const ANOMALY_INPUT = {
+  type: "object",
+  properties: {
+    index: {
+      type: "string",
+      description: "Index or pattern with a date field and a numeric metric.",
+    },
+    time_field: {
+      type: "string",
+      description: "Date field to bucket by (default @timestamp).",
+    },
+    function: {
+      type: "string",
+      enum: ["count", "mean", "min", "max", "sum"],
+      description: "Aggregation per bucket (default count).",
+    },
+    field: {
+      type: "string",
+      description: "Numeric field; required unless function is count.",
+    },
+    bucket_span: {
+      type: "string",
+      description: "Bucket size such as 1m or 1h (default 1h).",
+    },
+    threshold: {
+      type: "number",
+      description: "Z-score gate for a flag (default 3).",
+    },
+  },
+  required: ["index"],
   additionalProperties: false,
 } as const;
 
@@ -247,6 +282,45 @@ export function buildTools(options: ToolOptions): ReadonlyArray<{
         }
 
         return { content: "Pass either a url or a path.", metadata: { xerj: { indexed: false } } };
+      },
+    },
+    {
+      name: "anomaly",
+      description:
+        "Find spikes in a numeric metric series indexed in XERJ. On-demand batch scoring, not continuous monitoring; returns only the flagged buckets.",
+      input: ANOMALY_INPUT,
+      options: { namespace: "xerj" },
+      execute: async (input) => {
+        const args = input as {
+          index: string;
+          time_field?: string;
+          function?: string;
+          field?: string;
+          bucket_span?: string;
+          threshold?: number;
+        };
+        const anomaly = options.getAnomaly();
+        if (!anomaly) return unavailable();
+
+        const result = await anomaly.score({
+          index: args.index,
+          timeField: args.time_field,
+          function: args.function,
+          field: args.field,
+          bucketSpan: args.bucket_span,
+          threshold: args.threshold,
+        });
+
+        return {
+          content: formatAnomalies(result),
+          metadata: {
+            xerj: {
+              anomalyCount: result.anomalyCount,
+              detector: result.detector,
+              buckets: result.buckets,
+            },
+          },
+        };
       },
     },
     {

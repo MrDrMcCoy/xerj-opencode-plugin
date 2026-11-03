@@ -42,6 +42,16 @@ Updated: 2026-11-03
 - The TUI was exercised with a stub host: 4 commands registered, 2 slot claims,
   event refresh, panel open, search alert, and remember toast all fired. Actual
   rendering needs a real terminal, which this session cannot observe.
+- M6 brain and anomaly are implemented. `index.brain` builds one graph per
+  folder with a one-shot `autoindex --brain` run; status and the panel report
+  docs, live edges, and age; brain hits expand one hop through
+  `pathcite`/`sequence` edges (two neighbors, 600 chars). `xerj_anomaly`
+  creates a stable detector and scores it on demand, returning only flagged
+  buckets.
+- Verified live: `.agents` produced 28 docs and 33 edges; a search for
+  "savings numbers look like marketing" cited `plan.md` and added one
+  `[via sequence]` neighbor. A planted 16-bucket CPU series flagged exactly
+  minute 12 (actual 96, expected 20.25, z 65.1, score 100).
 - Binary management is multi-platform: target triples for Linux (musl or gnu),
   macOS, and Windows; Rosetta shells and x64 Node on Windows ARM64 resolve to
   the native arm64 build; installs live under `bin/<ver>-<target>/`; a
@@ -58,7 +68,7 @@ Updated: 2026-11-03
 - The index root is `ctx.location.project.canonical`, not the session directory:
   a session opened in `.agents/` was deriving
   `xop-agents-<hash>` before the fix.
-- `bun test test/unit` passes (117 tests); `tsc --noEmit` is clean.
+- `bun test test/unit` passes (135 tests); `tsc --noEmit` is clean.
 
 ## Layout
 
@@ -75,12 +85,15 @@ src/node/client.ts     HTTP client, size parsing
 src/node/supervisor.ts probe, spawn, attach, port selection, stop
 src/index/corpus.ts    layout, command line, run-document parsing
 src/index/watcher.ts   supervised watch process + periodic fallback
+src/index/brain.ts     one-shot brain runs, run-document parsing
+src/search/brains.ts   one-hop neighbor expansion for brain hits
 src/search/service.ts  two-leg retrieval, RRF, line resolution, formatting
 src/stats/ledger.ts    measured savings with partial-read subtraction
 src/memory/store.ts    project memory, ids, formatting
 src/remote/spool.ts    fetched-page spool, external _bulk ingest, redaction
 src/hooks/session.ts   prompt retrieval + memory recall + injection
-src/tools/search.ts    search, def, remember, recall, forget, index, status
+src/tools/search.ts    search, def, memory, index, anomaly, status
+src/telemetry/anomaly.ts  stable detectors, scoring, formatting
 src/ui/format.ts       sidebar lines and panel sections (pure)
 src/rpc.ts             typed RPC contract + status types
 src/index.ts           server part
@@ -91,8 +104,8 @@ test/unit/*.test.ts    pure-function tests
 
 ## Next actions
 
-1. M6: consume brain edges (`/_graph/<brain>/ego`, one hop, 200-token cap) and
-   expose the anomaly tool. Both need the graph and detector shapes verified.
+1. Review the README against shipped behaviour, then publish only with
+   explicit consent. The scoped npm name is not live yet.
 2. Verify the details panel and the four commands in a real terminal session;
    the stub host stops where the renderer starts.
 3. Retrieval quality: a rare-term query still puts `package-lock.json` above the
@@ -100,11 +113,13 @@ test/unit/*.test.ts    pure-function tests
 
 ## Work in progress
 
-Nothing. M0–M5 are committed; the next slice is M6 (brain and anomaly).
+Nothing. M0–M6 are implemented and committed; only the publish step and live
+TUI verification remain.
 
 ## Blocked / unknown
 
-- `/_graph/<brain>/ego` response shape (M6).
+- Whether the model benefits from neighbor expansion in practice; the
+  mechanism works, but no task has been measured with and without it.
 
 ## Verified
 
@@ -131,8 +146,14 @@ Nothing. M0–M5 are committed; the next slice is M6 (brain and anomaly).
 - `xerj gain --json` shape (searches, hit_rate, took_ms, top_indices).
 - `GET /_memory/<namespace>?size=1` returns `count` with a one-entry page, so
   the panel counts memories without paging through them.
-- `_cat/indices` groups cleanly into project (`<prefix>-*`), web, external, and
-  memory; the memory index is exactly `.xerj-memory-<namespace>`.
+- `_cat/indices` groups cleanly into project (`<prefix>-*`), web, external,
+  brain (`xop-<brain>-*`), and memory; the memory index is exactly
+  `.xerj-memory-<namespace>`.
+- `/_graph/<brain>/ego` needs `?node=<id[,id]>`; POST is 405. It returns edges
+  and neighbor ids, not text; anchor by id from the brain docs index.
+- `PUT /_ml/anomaly_detectors/<id>` + `POST .../_score` returns
+  `anomaly_count`, `bucket_count`, and `anomalies[]` with timestamp, actual,
+  expected, z-score, and score. Warm-up buckets are not flagged.
 
 ## Log
 
@@ -179,3 +200,8 @@ Nothing. M0–M5 are committed; the next slice is M6 (brain and anomaly).
   commands, RPC `remember`/`search`, and status fields for datasets, memory,
   top cited files, and recent warnings. Stub-host run passed; live rendering
   is the remaining check.
+- 2026-11-03: M6 implemented. Brain indexing runs one-shot and on reindex,
+  reports live edge totals from the graph overview, and expands one hop for
+  retrieval. Anomaly scoring uses stable detector ids. Both verified against
+  the running node; the README and config reference are written, and only the
+  publish step remains.

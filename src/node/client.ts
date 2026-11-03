@@ -159,8 +159,12 @@ export class XerjClient {
     }
   }
 
-  async get(path: string, label = `request failed: ${path}`): Promise<unknown> {
-    const response = await this.request(path);
+  async get(
+    path: string,
+    label = `request failed: ${path}`,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
+    const response = await this.request(path, signal ? { signal } : undefined);
     if (!response.ok) {
       const text = await response.text().catch(() => "");
       throw new NodeRequestError(label, response.status, text.slice(0, 500));

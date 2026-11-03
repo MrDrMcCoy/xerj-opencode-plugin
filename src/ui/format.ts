@@ -130,9 +130,27 @@ export function panelSections(snapshot: StatusSnapshot, now: number): PanelSecti
           ? ["none yet"]
           : index.datasets.map(
               (dataset) =>
-                `${dataset.name}  ${formatCount(dataset.docs)} docs · ${formatBytes(dataset.bytes)}`,
+                `${dataset.name}  ${formatCount(dataset.docs)} docs · ` +
+                `${formatBytes(dataset.bytes)}`,
             ),
     },
+    ...(snapshot.brains.length === 0
+      ? []
+      : [
+          {
+            title: "Brains",
+            lines: snapshot.brains.map((brain) =>
+              [
+                `${brain.name}  ${formatCount(brain.docs)} docs`,
+                `${brain.edges} ${plural(brain.edges, "edge", "edges")}`,
+                formatAge(now, brain.lastRunAt),
+                brain.error ?? "",
+              ]
+                .filter((part) => part.length > 0)
+                .join(" · "),
+            ),
+          },
+        ]),
     {
       title: "Memory",
       lines: [
@@ -152,7 +170,8 @@ export function panelSections(snapshot: StatusSnapshot, now: number): PanelSecti
         ].join(" · "),
         [
           `${formatTokens(usage.tokensSaved)} tokens saved`,
-          `${formatBytes(usage.savedBytes)} of ${formatBytes(usage.baselineBytes)} baseline`,
+          `${formatBytes(usage.savedBytes)} of ` +
+            `${formatBytes(usage.baselineBytes)} baseline`,
         ].join(" · "),
         `${formatBytes(usage.bytesReturned)} returned · ${formatBytes(usage.bytesRead)} read`,
       ],

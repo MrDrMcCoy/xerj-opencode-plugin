@@ -314,9 +314,26 @@ xerj autoindex <dir> --prefix xop-<brain>-<hash> --brain <name> --state-dir ...
 That writes documents under the given prefix and edges to
 `.xerj-memory-<name>-edges`, which is exactly what the graph tools read.
 
-Verified edge types on this repo's `.agents`: `sequence`, `same_dir`,
-`pathcite` (not the `wikilink`/`mdlink` names the prose recipe uses). Filter on
-the types the overview reports, not on a hardcoded list.
+`src/index/brain.ts` derives one spec per folder: graph name
+`slug(basename(folder))`, prefix `xop-<name>-<hash6>`. It runs once after the
+project watcher starts, but only when `index.auto` is true, and again on
+`/xerj-reindex`. Graph mode cannot watch: `--watch` requires `--no-graph`.
+
+After a run, take live totals from `/_graph/<name>/overview`. `edges.total` is
+the graph's real size; the run document's `edges_written` counts only that
+pass. Keep `docs` from the run's `records_total`, because `nodes.total` counts
+section records, not files. Status carries `brains[]`; the panel lists docs,
+edges, age, and errors; datasets gain `brain:<name>`.
+
+Verified edge types on this repo's `.agents`: `pathcite`, `sequence`,
+`same_dir`. Neighbor expansion uses only `pathcite` and `sequence`;
+`same_dir` says two files share a folder, which is not evidence. One hop, at
+most two neighbors, 600 characters each.
+
+`GET /_graph/<brain>/ego?node=<id[,id]>&hops=1&direction=both` requires `node`
+(POST is 405). It returns `edges` and `neighbors[{id, hop, via_edge}]` but no
+text, so resolve ids through the brain's docs index with an `ids` query and
+`_source: body`.
 
 `GET /_graph/<brain>/overview` returns `nodes_index`, node and edge counts,
 `types`, `detectors`, and `hubs`; `nodes.total` counts section records, not
@@ -341,6 +358,10 @@ files, so do not label it as a file count in the UI.
    `_passage`; they belong to `xerj_def`, not the search leg.
 6. Cache by `(sessionID, messageID)`; the context hook splices the block in
    once and marks the turn as injected.
+7. When a hit belongs to a configured brain, expand one hop. Related passages
+   get their own budget slice (min 800 chars, a quarter of the total), because
+   direct hits already fill the budget; appending without reserving hid them.
+   Neighbors cite as `path:line [via pathcite|sequence]`.
 
 ### Context hook
 
@@ -502,17 +523,23 @@ RPC methods they call.
 
 ## 12. Telemetry and anomaly detection
 
-Off by default. When `telemetry.anomaly=true`:
+The on-demand detector is a tool, not a background job. `xerj_anomaly` takes
+`index`, and optional `time_field` (`@timestamp`), `function`
+(`count|mean|min|max|sum`, default `count`), `field` (required unless `count`),
+`bucket_span` (`1h`), and `threshold` (`3`).
 
-- Write one doc per index run and per retrieval batch to `xop-telemetry`.
-- Create two detectors on first use: `count` per 15 m over index failures, and
-  `mean(index_seconds)` per 1 h.
-- Surface `anomaly_count` in the panel; never auto-act.
+Each call derives a stable detector id from that configuration, `PUT`s the
+config (create or replace), then `POST`s `_score` with the threshold override.
+The response carries `anomaly_count`, `bucket_count`, `anomaly_threshold`, and
+an `anomalies[]` of flagged buckets with `timestamp_iso`, `actual`, `expected`,
+`z_score`, and `anomaly_score`. Only those buckets are formatted (max 10).
 
-User-facing anomaly tool: `xerj_anomaly {index, time_field, function, field,
-bucket_span}` → `POST /_ml/anomaly_detectors/{id}/_score` with a stable
-detector id, returns flagged buckets only. This is the recipe as a feature, not
-a background job (XERJ has no datafeed).
+This is the recipe as a feature: no datafeed, no timer, no alerting. A caller
+that wants monitoring scores a window on a schedule.
+
+Background telemetry detectors are still deferred. `telemetry.anomaly` is not
+consumed; with no datafeed the plugin would have to write its own series and
+summon its own timer, which is more machinery than the feature earns today.
 
 ## 13. Failure and degraded modes
 
@@ -590,7 +617,11 @@ Confirm against a real binary before relying on these.
   match**: `term`, `match`, `metadata.kind.keyword`, and `bool.must` all
   returned zero hits on v1.0.0-rc.100, so kind filtering happens in the plugin.
   `recency_weight` is accepted (a recall with `0.2` returned normally).
-- [x] **7. `/_graph/<brain>/overview`** shape verified. `ego` still unverified.
+- [x] **7. `/_graph/<brain>/overview` and `ego`.** Overview carries
+  `nodes.total`, `edges.total`, `types`, `detectors`, `hubs`. Ego requires
+  `?node=<id[,id]>` (POST is 405) and returns `edges` plus
+  `neighbors[{id, hop, via_edge}]`; neighbors have no text, so fetch them by
+  id from the brain docs index.
 - [x] **11. `_passage` cannot be combined with `hybrid`.** The engine refuses
   it (`search_phase_execution_exception`: fusion has no single winning
   passage). Run the legs separately and fuse in the plugin. `_passage` is also

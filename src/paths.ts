@@ -4,7 +4,7 @@
 
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
-import { basename, join, resolve, sep } from "node:path";
+import { basename, isAbsolute, join, resolve, sep } from "node:path";
 
 export interface Environment {
   readonly XDG_DATA_HOME?: string;
@@ -121,6 +121,46 @@ export function brainPrefix(directory: string, brain: string, hashLength = 6): s
     `${PREFIX_ROOT}-${slug(brain, 16)}-` +
     `${pathHash(directory, hashLength)}`
   );
+}
+
+export interface BrainSpec {
+  /** Graph name, also the `--brain` argument. */
+  readonly name: string;
+  /** The configured value, e.g. `.agents` or `docs/notes`. */
+  readonly label: string;
+  readonly directory: string;
+  readonly prefix: string;
+}
+
+/**
+ * One brain per configured folder. The graph name is the folder's basename, so
+ * `index.brain: [".agents"]` produces brain `agents`; duplicate basenames get a
+ * numeric suffix rather than silently sharing an edge index.
+ */
+export function brainSpecs(
+  projectRoot: string,
+  labels: ReadonlyArray<string>,
+): BrainSpec[] {
+  const used = new Map<string, number>();
+
+  return labels.map((label) => {
+    const trimmed = label.trim();
+    const directory = isAbsolute(trimmed)
+      ? resolve(trimmed)
+      : resolve(join(projectRoot, trimmed));
+
+    const base = slug(basename(directory), 16);
+    const seen = (used.get(base) ?? 0) + 1;
+    used.set(base, seen);
+    const name = seen === 1 ? base : `${base}-${seen}`;
+
+    return {
+      name,
+      label: trimmed,
+      directory,
+      prefix: brainPrefix(directory, name),
+    };
+  });
 }
 
 /** Memory namespaces are their own index; the project hash keeps them apart. */

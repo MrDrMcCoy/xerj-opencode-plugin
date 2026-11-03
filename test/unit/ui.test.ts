@@ -58,6 +58,7 @@ function snapshot(overrides: Partial<StatusSnapshot> = {}): StatusSnapshot {
       topFiles: [{ path: "src/a.ts", citations: 3, bytes: 4_000 }],
     },
     memory: { namespace: "proj-demo-1a2b3c4d", count: 2 },
+    brains: [],
     recent: ["warn: retry"],
     warnings: [],
     errors: [],
@@ -151,6 +152,29 @@ describe("panelSections", () => {
     expect(body).toContain("2 entries");
     expect(body).toContain("src/a.ts ×3");
     expect(body).toContain("warn: retry");
+  });
+
+  test("lists configured brains with edges and freshness", () => {
+    const sections = panelSections(
+      snapshot({
+        brains: [
+          {
+            name: "agents",
+            prefix: "xop-agents-abcdef",
+            docs: 12,
+            edges: 20,
+            lastRunAt: NOW - 60_000,
+            error: null,
+          },
+        ],
+      }),
+      NOW,
+    );
+    const brains = sections.find((section) => section.title === "Brains");
+
+    expect(brains?.lines[0]).toContain("agents  12 docs");
+    expect(brains?.lines[0]).toContain("20 edges");
+    expect(brains?.lines[0]).toContain("1m ago");
   });
 
   test("says when there is nothing to show", () => {

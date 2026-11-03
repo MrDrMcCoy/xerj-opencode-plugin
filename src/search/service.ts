@@ -12,6 +12,7 @@ import { readFile } from "node:fs/promises";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import type { Logger } from "../log.ts";
 import { XerjClient } from "../node/client.ts";
+import type { BrainGraph } from "./brains.ts";
 
 export interface SearchHit {
   readonly index: string;
@@ -83,6 +84,7 @@ export class SearchService {
     private readonly prefixes: ReadonlyArray<string>,
     private readonly logger: Logger,
     private readonly projectRoot: string,
+    private readonly brains: BrainGraph | null = null,
   ) {}
 
   async search(query: string, options: SearchOptions = {}): Promise<SearchResult> {
@@ -127,9 +129,26 @@ export class SearchService {
     const strategy = semantic ? "hybrid" : "lexical";
     const fused = semantic ? fuse([lexical.hits, semantic.hits], k) : lexical.hits.slice(0, k);
     const hits = await this.resolveLines(fused, trimmed);
+    const related = this.brains ? await this.brains.related(hits, options.signal) : [];
     const narrowing = lexical.narrowing + (semantic?.narrowing ?? 0);
 
-    return formatResult(hits, strategy, budget, narrowing);
+    if (related.length === 0) {
+      return formatResult(hits, strategy, budget, narrowing);
+    }
+
+    // Related passages get their own slice: the direct hits already fill the
+    // budget on their own, so appending without reserving would hide them.
+    const reserve = Math.min(800, Math.floor(budget / 4));
+    const direct = formatResult(hits, strategy, budget - reserve, narrowing);
+    const extra = formatResult(related, strategy, reserve, 0, hits.length);
+    const text = [direct.text, extra.text].filter((part) => part.length > 0).join("\n\n");
+
+    return {
+      ...direct,
+      hits: dedupeHits([...hits, ...related]),
+      text,
+      bytes: Buffer.byteLength(text, "utf8"),
+    };
   }
 
   /** Drops the mapping cache; call when a corpus run may have created indices. */
@@ -314,6 +333,20 @@ export function fuse(legs: ReadonlyArray<ReadonlyArray<ParsedHit>>, k: number): 
     .slice(0, k);
 }
 
+function dedupeHits(hits: ReadonlyArray<SearchHit>): SearchHit[] {
+  const seen = new Set<string>();
+  const unique: SearchHit[] = [];
+
+  for (const hit of hits) {
+    const key = `${hit.index}:${hit.id}:${hit.passage}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(hit);
+  }
+
+  return unique;
+}
+
 function pickTextFields(indices: Record<string, Record<string, string>>): string[] {
   const available = new Set<string>();
   for (const fields of Object.values(indices)) {
@@ -418,6 +451,7 @@ function formatResult(
   strategy: SearchResult["strategy"],
   budget: number,
   narrowing: number,
+  startIndex = 0,
 ): SearchResult {
   const blocks: string[] = [];
   let used = 0;
@@ -429,7 +463,7 @@ function formatResult(
     const location = hit.path ?? hit.index;
     const line = hit.line === null ? "" : `:${hit.line}`;
     const kind = hit.kind === null ? "" : ` [${hit.kind}]`;
-    const header = `[${index + 1}] ${location}${line}${kind}`;
+    const header = `[${startIndex + index + 1}] ${location}${line}${kind}`;
     const remaining = budget - used - header.length - 2;
     if (remaining < 80) break;
 
