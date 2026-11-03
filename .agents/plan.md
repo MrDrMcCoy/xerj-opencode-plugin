@@ -326,11 +326,16 @@ delayed, and an mtime+size stamp prevents re-bulking an unchanged file.
 path, so an edited file replaces its document instead of leaving a stale
 version.
 
-The same applies to shell reads. `bash` and `shell` results are parsed
-conservatively: `cat`, `head`, `tail`, `less`, `more`, `nl`, `tac`, and `sed`
-count, a literal path argument is resolved against the command's cwd (or the
-project root), and only paths outside the project are ingested. Variables,
-globs, redirection targets, and `sed -i` are skipped rather than guessed.
+The same applies to any shell command. `bash` and `shell` results are parsed
+conservatively: every literal argument of every simple command is a candidate
+file reference, and only arguments that resolve to an existing regular file
+are ingested. `grep todo src/a.ts`, `wc -l notes.md`, and `./scripts/gen.sh`
+count the same as `cat file.md`. A short option's value is skipped
+(`head -n 20`, `grep -e pattern`), variables, globs, tilde paths, and
+redirection targets are not resolved, and a simple `cd dir && ...` moves the
+working directory for later commands. Only paths outside the project are
+ingested, in the background, with the same mtime+size skip and stable id as
+explicit `xerj_index` calls.
 
 A prefix with no indices answers 404 on `_mapping`; that is not a failure for
 the other corpora. The mapping cache is invalidated when any watcher reports a
@@ -624,7 +629,7 @@ visible in the panel. Nothing throws out of `setup`.
 | M0 | package skeleton (server + RPC + TUI), config, paths, storage, binary manager, node supervisor | `opencode` loads the plugin on a clean machine, downloads and starts a node, `xerj_status` answers |
 | M1 | project corpus: prefix, `.xerj` state, first index, debounced refresh, status | a fresh repo indexes without intervention; editing a file changes search results within 10 s; deleting a file removes its docs |
 | M1b | hidden corpus: `index.hidden` folders through `_bulk`, deletion reconciliation | editing `.agents/plan.md` changes its hidden document; a deleted file disappears |
-| M4b | external reads: a `read` or cat-like `bash` command outside the project indexes the file automatically | reading or `cat`-ing a file under `/tmp` makes it searchable without `xerj_index` |
+| M4b | external reads: a `read` or any `bash` command referencing a file outside the project indexes it automatically | reading or `grep`-ing a file under `/tmp` makes it searchable without `xerj_index` |
 | M2 | retrieval: `xerj_search`/`xerj_def`, formatting, context injection, budgets, accounting | the model answers a repo question from a citation without reading the file; counters match the transcript |
 | M3 | memory: namespace, remember/recall/forget, compaction capture, prompt-time recall | a fact stored in one session is recalled in the next; forget removes it; namespaces don't leak |
 | M4 | remote: spool + web index, external single files, `xerj_index` | fetching a URL makes its content searchable in the same session |
@@ -676,12 +681,12 @@ Confirm against a real binary before relying on these.
 - [x] **12. `_passage.start_offset`** is a byte offset into the record field.
   When the record starts at line 1 it maps onto the file, so the exact line is
   readable; a section record that starts later falls back to its start line.
-- [x] **14. Hidden corpus, shell reads, and automatic external reads.**
+- [x] **14. Hidden corpus, shell references, and automatic external reads.**
   Verified: `.agents` produced 4 hidden docs and a query cited
-  `.agents/plan.md`; a `read` and a `cat` of probe files made their phrases
-  searchable without `xerj_index`; editing then deleting a hidden probe changed
-  and removed its document. An existing index answers `PUT` with 409, not 400,
-  and both ingesters tolerate it.
+  `.agents/plan.md`; a `read`, a `cat`, and a `grep` over probe files made
+  their phrases searchable without `xerj_index`; editing then deleting a
+  hidden probe changed and removed its document. An existing index answers
+  `PUT` with 409, not 400, and both ingesters tolerate it.
 - [x] **15. Hidden/brain duplicates.** Brain paths are rewritten to
   project-relative before line resolution, and a hidden whole-file hit is
   dropped when a brain section covers the same path. Verified: a `.agents`

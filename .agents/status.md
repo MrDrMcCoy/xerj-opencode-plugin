@@ -38,11 +38,15 @@ Updated: 2026-11-03
   skips secrets and binaries, and bulks text into `<prefix>-hidden-docs` with
   project-relative paths. Deletions reconcile by id, and a recursive watcher
   with a 30 s poll fallback keeps it current. `.agents` produced 4 documents.
-- Files outside the project are indexed when `read` touches them or when a
-  `bash` command reads them with `cat`, `head`, `tail`, `less`, `more`, `nl`,
-  `tac`, or `sed`. The ingest runs in the background, skips an unchanged
-  mtime+size, and reuses one id per path. A `read` and a `cat` of probe files
-  both became searchable without `xerj_index`.
+- Files outside the project are indexed when `read` touches them or when any
+  `bash` command references them by literal path. The parser takes every
+  literal argument of every simple command and keeps those that stat to an
+  existing file, so `grep todo a.md` and `./scripts/gen.sh` count like
+  `cat a.md`. Short option values, variables, globs, tilde paths, and
+  redirection targets are skipped; a simple `cd dir && ...` moves the cwd.
+  The ingest runs in the background, skips an unchanged mtime+size, and
+  reuses one id per path. A `read`, a `cat`, and a `grep` over probe files
+  all became searchable without `xerj_index`.
 - Duplicate hidden/brain hits are gone. Brain paths are rewritten to the
   project (`plan.md` becomes `.agents/plan.md`) before line resolution, and a
   hidden whole-file hit is dropped when a brain section covers the same path.
@@ -104,7 +108,7 @@ src/search/service.ts  two-leg retrieval, RRF, line resolution, formatting
 src/stats/ledger.ts    measured savings with partial-read subtraction
 src/memory/store.ts    project memory, ids, formatting
 src/remote/spool.ts    fetched-page spool, external _bulk ingest, redaction
-src/remote/shell.ts    conservative shell-read path parser
+src/remote/shell.ts    conservative shell-reference path parser
 src/hooks/session.ts   prompt retrieval + memory recall + injection
 src/tools/search.ts    search, def, memory, index, anomaly, status
 src/telemetry/anomaly.ts  stable detectors, scoring, formatting
@@ -124,8 +128,10 @@ test/unit/*.test.ts    pure-function tests
    the stub host stops where the renderer starts.
 3. Retrieval quality: a rare-term query still puts `package-lock.json` above the
    exact match. Consider skipping lockfiles at index time or in the baseline.
-4. The shell parser does not follow `xargs`, `grep`/`rg`, command
-   substitution, or `cd` through a pipeline; those reads stay unindexed.
+4. The shell parser does not follow `xargs`, command substitution, pipelines
+   that transform paths, or `cd` through a pipeline; those reads stay
+   unindexed. An argument that merely mentions a file (`echo a.md`) is
+   indexed too, by design: reference, not access, is the signal.
 
 ## Work in progress
 
@@ -172,8 +178,9 @@ TUI verification remain.
   are gone.
 - A `read` outside the project root ingests in the background; the mtime+size
   stamp prevents re-bulking an unchanged file.
-- `bash`/`shell` reads are parsed for `cat`-like commands with literal paths;
-  redirection targets and `sed -i` are skipped.
+- `bash`/`shell` reads are parsed as literal file references confirmed by
+  `stat`, not by command whitelist; redirection targets and short-option
+  values are skipped.
 - Brain hits are rewritten to project-relative paths before line resolution;
   a hidden whole-file hit is dropped when a brain section covers that path.
 - `/_graph/<brain>/ego` needs `?node=<id[,id]>`; POST is 405. It returns edges

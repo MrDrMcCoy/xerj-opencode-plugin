@@ -17,8 +17,8 @@ cited passages instead of whole files. Nothing leaves the machine.
 - **Memory.** `xerj_remember`, `xerj_recall`, and `xerj_forget` keep durable
   project facts across sessions.
 - **Remote ingest.** Pages fetched during a session are spooled and indexed, so
-  a URL read today is searchable tomorrow. Reading or `cat`-ing a file outside
-  the project also indexes it.
+  a URL read today is searchable tomorrow. Any shell command that references
+  a file outside the project also indexes it.
 - **Hidden trees.** `index.hidden` indexes folders that `autoindex` skips, such
   as `.agents` or `.github`, as plain searchable documents.
 - **Second brain.** Opt in with `index.brain` to build a graph over a docs
@@ -170,9 +170,11 @@ restarts. The plugin never kills it on unload.
   build output, virtualenvs, and secret-shaped files are always skipped.
 - External files are indexed as plain text through `_bulk`; no AST or symbol
   extraction.
-- Shell reads are detected heuristically: `cat`, `head`, `tail`, `less`,
-  `more`, `nl`, `tac`, and `sed` with literal paths. Variables, globs, and
-  `cd` chains beyond a simple `cd dir && ...` are not resolved.
+- Shell references are detected heuristically: every literal argument of a
+  shell command that resolves to an existing regular file is indexed. Short
+  option values, variables, globs, tilde paths, and redirection targets are
+  not resolved, and `cd` is followed only within a simple
+  `cd dir && ...` chain.
 - `autoindex` cannot watch a graph, so brains reindex on startup and on
   `/xerj-reindex`, not on every edit.
 - Anomaly scoring has no datafeed, timer, or alerting.

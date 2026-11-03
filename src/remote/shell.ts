@@ -1,22 +1,11 @@
 // Shell reads are not tool calls the plugin can hook per file, so a bash
-// command is parsed conservatively: only commands that print file contents
-// count, and only literal paths are used. Anything with a variable, glob, or
-// redirection target is ignored rather than guessed at.
+// command is parsed conservatively: every simple command's literal arguments
+// are treated as file references, and only arguments that resolve to an
+// existing regular file are returned. Variables, globs, and redirection
+// targets are skipped rather than guessed at.
 
+import { stat } from "node:fs/promises";
 import { basename, isAbsolute, resolve } from "node:path";
-
-const READ_COMMANDS = new Set([
-  "cat",
-  "bat",
-  "batcat",
-  "head",
-  "tail",
-  "less",
-  "more",
-  "nl",
-  "tac",
-  "sed",
-]);
 
 const WRAPPERS = new Set([
   "sudo",
@@ -27,9 +16,12 @@ const WRAPPERS = new Set([
   "nohup",
   "timeout",
 ]);
-const MAX_PATHS = 8;
+
+const MAX_CANDIDATES = 24;
+const MAX_FILES = 8;
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
-const NUMERIC = /^\d+$/;
+/** A single-letter short option; its value, if any, is the next token. */
+const SHORT_FLAG = /^-[A-Za-z]$/;
 
 /** Splits a shell command into simple commands, one token list each. */
 export function shellCommands(command: string): string[][] {
@@ -123,20 +115,59 @@ export function shellCommands(command: string): string[][] {
   return commands;
 }
 
-/** Literal file paths a command chain reads, resolved against its cwd. */
-export function shellReadPaths(command: string, cwd: string): string[] {
-  const paths: string[] = [];
+/**
+ * Existing files a command chain references, resolved against its cwd. Every
+ * literal argument is a candidate, so `grep pattern file.md` and
+ * `./scripts/gen.sh` count the same as `cat file.md`; the stat call, not a
+ * command whitelist, decides what is real.
+ */
+export async function shellReadPaths(
+  command: string,
+  cwd: string,
+): Promise<string[]> {
+  const base = resolve(cwd);
+  const found = candidatesFrom(command, base);
+
+  const files: string[] = [];
   const seen = new Set<string>();
-  let currentCwd = resolve(cwd);
+
+  for (const candidate of found) {
+    const info = await stat(candidate).catch(() => null);
+    if (!info?.isFile()) continue;
+    if (seen.has(candidate)) continue;
+
+    seen.add(candidate);
+    files.push(candidate);
+    if (files.length >= MAX_FILES) break;
+  }
+
+  return files;
+}
+
+/** Literal path-shaped arguments, in command order, deduped and capped. */
+function candidatesFrom(command: string, base: string): string[] {
+  const found: string[] = [];
+  const seen = new Set<string>();
+  let currentCwd = base;
+
+  const add = (value: string): void => {
+    if (!isLiteral(value)) return;
+
+    const absolute = isAbsolute(value)
+      ? resolve(value)
+      : resolve(currentCwd, value);
+    if (seen.has(absolute)) return;
+
+    seen.add(absolute);
+    found.push(absolute);
+  };
 
   for (const tokens of shellCommands(command)) {
     let index = 0;
     while (index < tokens.length) {
       const token = tokens[index] ?? "";
-      const name = basename(token);
       if (
-        WRAPPERS.has(name) ||
-        NUMERIC.test(token) ||
+        WRAPPERS.has(basename(token)) ||
         token.startsWith("-") ||
         ASSIGNMENT.test(token)
       ) {
@@ -146,10 +177,13 @@ export function shellReadPaths(command: string, cwd: string): string[] {
       break;
     }
 
-    const name = basename(tokens[index] ?? "");
+    const word = tokens[index] ?? "";
     index += 1;
 
-    if (name === "cd") {
+    // An executable referenced by path (`./scripts/gen.sh`) is a file too.
+    if (word.includes("/")) add(word);
+
+    if (word === "cd") {
       const target = tokens[index];
       if (target !== undefined && isLiteral(target)) {
         currentCwd = isAbsolute(target)
@@ -159,45 +193,25 @@ export function shellReadPaths(command: string, cwd: string): string[] {
       continue;
     }
 
-    if (!READ_COMMANDS.has(name)) continue;
-    if (name === "sed" && hasInPlace(tokens)) continue;
-
-    let sedScriptSkipped = false;
+    let afterShortFlag = false;
     for (const argument of tokens.slice(index)) {
-      if (
-        argument === "" ||
-        argument.startsWith("-") ||
-        argument.startsWith("+")
-      ) {
+      if (afterShortFlag) {
+        afterShortFlag = false;
         continue;
       }
-      if (name === "sed" && !sedScriptSkipped) {
-        sedScriptSkipped = true;
-        continue;
-      }
-      if ((name === "head" || name === "tail") && NUMERIC.test(argument)) continue;
-      if (!isLiteral(argument)) continue;
 
-      const absolute = isAbsolute(argument)
-        ? resolve(argument)
-        : resolve(currentCwd, argument);
-      if (seen.has(absolute)) continue;
-      seen.add(absolute);
-      paths.push(absolute);
-      if (paths.length >= MAX_PATHS) return paths;
+      if (argument.startsWith("-")) {
+        afterShortFlag = SHORT_FLAG.test(argument);
+        continue;
+      }
+      if (argument.startsWith("+")) continue;
+
+      add(argument);
+      if (found.length >= MAX_CANDIDATES) return found;
     }
   }
 
-  return paths;
-}
-
-function hasInPlace(tokens: ReadonlyArray<string>): boolean {
-  return tokens.some(
-    (token) =>
-      token === "--in-place" ||
-      token.startsWith("-i") ||
-      token.startsWith("--in-place="),
-  );
+  return found;
 }
 
 /** Variables, globs, and tilde expansion need a shell to resolve. */

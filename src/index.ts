@@ -290,8 +290,8 @@ export default Plugin.define({
         });
       }
 
-      // Bash reads are invisible per file, so parse the command for cat-like
-      // commands and index only literal paths outside the project.
+      // Bash reads are invisible per file, so parse the command for literal
+      // file references and index only existing files outside the project.
       if (event.tool === "bash" || event.tool === "shell") {
         const bashInput = event.input as {
           command?: unknown;
@@ -303,9 +303,8 @@ export default Plugin.define({
         const spool = runtime.spool;
         if (command === null || !spool) return;
 
-        const paths = shellReadPaths(command, toolCwd(bashInput, projectRoot)).filter(
-          (path) => isOutside(projectRoot, path),
-        );
+        const read = await shellReadPaths(command, toolCwd(bashInput, projectRoot));
+        const paths = read.filter((path) => isOutside(projectRoot, path));
         if (paths.length === 0) return;
 
         void Promise.all(
