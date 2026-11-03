@@ -300,7 +300,9 @@ lists folders to index as plain documents:
 ### Remote documents
 
 `webfetch` and any tool whose input has a `url` and whose result is text
-(>= 200 chars) spool their content when `remote.enabled`:
+(>= 200 chars) spool their content when `remote.enabled`. The spool is
+fire-and-forget, like the shell and external ingests: the hook writes in the
+background and invalidates the mapping cache when a document lands.
 
 ```
 <data dir>/spool/<web prefix>/<sha256(url)[0..20]>.md

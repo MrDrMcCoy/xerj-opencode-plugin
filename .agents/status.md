@@ -46,7 +46,9 @@ Updated: 2026-11-03
   redirection targets are skipped; a simple `cd dir && ...` moves the cwd.
   The ingest runs in the background, skips an unchanged mtime+size, and
   reuses one id per path. A `read`, a `cat`, and a `grep` over probe files
-  all became searchable without `xerj_index`.
+  became searchable without `xerj_index`, and a fetched URL spools the same
+  way: the hook returned in 0 ms and the page was searchable after the web
+  watcher's next pass.
 - Duplicate hidden/brain hits are gone. Brain paths are rewritten to the
   project (`plan.md` becomes `.agents/plan.md`) before line resolution, and a
   hidden whole-file hit is dropped when a brain section covers the same path.

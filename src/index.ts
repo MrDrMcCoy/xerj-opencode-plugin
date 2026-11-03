@@ -280,14 +280,21 @@ export default Plugin.define({
       if (event.status !== "completed") return;
 
       // Any tool that fetched a URL (webfetch, MCP extract, search) can spool
-      // its text. A short result is an error or a list, not a document.
+      // its text. A short result is an error or a list, not a document. The
+      // spool is fire-and-forget, like the other ingests: the write is local,
+      // and a failure must not delay or fail the tool result.
       const urlInput = event.input as { url?: unknown } | null;
       const url = typeof urlInput?.url === "string" ? urlInput.url : null;
       const content = typeof event.result.content === "string" ? event.result.content : null;
       if (url !== null && content !== null && content.length >= 200 && runtime.spool) {
-        await runtime.spool.ingestUrl(url, content).catch((error: unknown) => {
-          logger.debug("could not spool a fetched document", String(error));
-        });
+        void runtime.spool
+          .ingestUrl(url, content)
+          .then((stored) => {
+            if (stored) runtime.search?.invalidate();
+          })
+          .catch((error: unknown) => {
+            logger.debug("could not spool a fetched document", String(error));
+          });
       }
 
       // Bash reads are invisible per file, so parse the command for literal
