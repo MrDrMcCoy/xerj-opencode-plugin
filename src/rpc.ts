@@ -34,12 +34,20 @@ export interface UsageStatus {
   readonly tokensSaved: number;
 }
 
+export interface ConfigStatus {
+  readonly indexRoot: string;
+  readonly brain: ReadonlyArray<string>;
+  readonly watch: boolean;
+  readonly contextEnabled: boolean;
+}
+
 export interface StatusSnapshot {
   readonly pluginVersion: string;
   readonly updatedAt: number;
   readonly node: NodeStatus;
   readonly binary: BinaryStatus;
   readonly index: IndexStatus;
+  readonly config: ConfigStatus;
   readonly usage: UsageStatus;
   readonly warnings: ReadonlyArray<string>;
   readonly errors: ReadonlyArray<string>;
@@ -90,6 +98,12 @@ const definition = {
           docs: { type: "number" },
           bytes: { type: "number" },
           indices: { type: "number" },
+        }),
+        config: object({
+          indexRoot: { type: "string" },
+          brain: { type: "array", items: { type: "string" } },
+          watch: { type: "boolean" },
+          contextEnabled: { type: "boolean" },
         }),
         usage: object({
           queries: { type: "number" },

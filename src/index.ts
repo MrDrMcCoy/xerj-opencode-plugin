@@ -47,7 +47,10 @@ export default Plugin.define({
     for (const warning of warnings) logger.warn(warning);
 
     const root = dataRoot(environmentFrom(process.env));
-    const prefix = indexPrefix(ctx.location.directory);
+    // The location may be a subdirectory of the project; index the project root
+    // so a session opened in `docs/` does not create a second corpus.
+    const projectRoot = ctx.location.project.canonical;
+    const prefix = indexPrefix(projectRoot);
     const runtime: Runtime = {
       phase: "starting",
       binary: null,
@@ -80,6 +83,12 @@ export default Plugin.define({
           upgraded: runtime.binary?.upgraded ?? false,
         },
         index: { prefix, docs: 0, bytes: 0, indices: 0 },
+        config: {
+          indexRoot: projectRoot,
+          brain: config.index.brain,
+          watch: config.index.watch,
+          contextEnabled: config.context.enabled,
+        },
         usage: { queries: 0, hits: 0, hitRate: 0, bytesReturned: 0, tokensSaved: 0 },
         warnings: runtime.warnings,
         errors: runtime.error ? [runtime.error] : [],
@@ -132,7 +141,7 @@ export default Plugin.define({
 
         // Project state is created before the first tool call so the journal
         // and the read-only-workspace error both surface here, not mid-session.
-        await ensureProjectState(ctx.location.directory);
+        await ensureProjectState(projectRoot);
 
         runtime.binary = await ensureBinary({
           root,

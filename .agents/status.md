@@ -5,14 +5,14 @@ Updated: 2026-11-03
 ## Where things stand
 
 - M0 is implemented and verified against a real XERJ `v1.0.0-rc.100` binary.
+- The plugin is live in this OpenCode server: `xerj_status` answers, the node
+  auto-starts on 9200, and plugin options arrive intact (nested objects are not
+  flattened). Reloading the config re-attached to the running node instead of
+  spawning a second one.
+- The index root is `ctx.location.project.canonical`, not the session directory:
+  a session opened in `.agents/` was deriving
+  `xop-agents-<hash>` before the fix.
 - `bun test test/unit` passes (57 tests); `tsc --noEmit` is clean.
-- `bun scripts/smoke.ts` downloads, verifies, extracts, spawns a node on 9500,
-  attaches to it, reads health and index metadata, and re-attaches without
-  spawning a second node.
-- Not yet loaded inside a running OpenCode server. The parts typecheck against
-  `@opencode/plugin` 2.2.5; a live load is the M1 entry check.
-- `xerj` is still not on `PATH`; the plugin manages its own copy under the data
-  root, which is the intended behaviour.
 
 ## Layout
 
@@ -51,7 +51,7 @@ Nothing. Working tree has M0 changes not yet committed.
 - `/_memory` filter syntax and `recency_weight` behaviour (M3).
 - `/_graph/<brain>/ego` response shape (M6).
 - Whether nested plugin option objects survive OpenCode's option validation
-  unchanged; if they are flattened, read them defensively.
+  unchanged: verified, they do.
 
 ## Verified
 
@@ -87,3 +87,6 @@ Nothing. Working tree has M0 changes not yet committed.
 - 2026-11-03: M0 implemented: config, paths, semver, platform, logger, binary
   manager, node supervisor, RPC contract, status tool, TUI sidebar. Smoke test
   passes end to end.
+- 2026-11-03: M0 verified inside the running OpenCode server: the plugin loads
+  from `opencode.json`, `xerj_status` answers, options are intact, the node is
+  shared across reloads. Index root corrected to the project canonical path.
