@@ -14,7 +14,7 @@ import { basename, join, relative, resolve, sep } from "node:path";
 import type { Logger } from "../log.ts";
 import { NodeRequestError, type XerjClient } from "../node/client.ts";
 import type { DocumentRoot } from "../paths.ts";
-import { isTextPath } from "../remote/spool.ts";
+import { isSecretPath, isTextPath } from "../remote/spool.ts";
 
 export interface HiddenIndexOptions {
   readonly client: XerjClient;
@@ -58,8 +58,6 @@ const SKIP_DIRS = new Set([
   "secrets",
 ]);
 
-const SECRET_FILES = new Set([".env", ".netrc", ".npmrc", ".pypirc"]);
-const SECRET_EXTENSIONS = /\.(pem|key|p12|pfx|crt)$/i;
 const MAX_FILES = 2_000;
 const MAX_INDEXED_DOCS = 5_000;
 const BATCH_SIZE = 50;
@@ -212,7 +210,8 @@ export class HiddenIndex {
       await this.walk(documentRoot.directory, root, files);
       if (files.length >= MAX_FILES) {
         this.options.logger.warn(
-          `hidden indexing stopped at ${MAX_FILES} files; raise index.hiddenMaxBytes only if the tree is small`,
+          `hidden indexing stopped at ${MAX_FILES} files; ` +
+            "raise the limit only if the tree is small",
         );
         break;
       }
@@ -241,7 +240,7 @@ export class HiddenIndex {
         continue;
       }
 
-      if (!entry.isFile() || !isTextPath(entry.name) || isSecret(entry.name)) {
+      if (!entry.isFile() || !isTextPath(entry.name) || isSecretPath(entry.name)) {
         continue;
       }
 
@@ -310,13 +309,6 @@ export class HiddenIndex {
       throw error;
     }
   }
-}
-
-/** Secrets are never indexed, even inside a folder the user opted into. */
-function isSecret(name: string): boolean {
-  const lower = name.toLowerCase();
-  if (SECRET_FILES.has(lower) || lower.startsWith(".env.")) return true;
-  return SECRET_EXTENSIONS.test(lower);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

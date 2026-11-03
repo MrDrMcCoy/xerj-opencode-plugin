@@ -9,9 +9,10 @@
 //   section record that starts elsewhere falls back to its start line.
 
 import { readFile } from "node:fs/promises";
-import { isAbsolute, join, resolve, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Logger } from "../log.ts";
 import { XerjClient } from "../node/client.ts";
+import type { BrainSpec } from "../paths.ts";
 import type { BrainGraph } from "./brains.ts";
 
 export interface SearchHit {
@@ -85,6 +86,8 @@ export class SearchService {
     private readonly logger: Logger,
     private readonly projectRoot: string,
     private readonly brains: BrainGraph | null = null,
+    private readonly brainSpecs: ReadonlyArray<BrainSpec> = [],
+    private readonly hiddenIndex: string | null = null,
   ) {}
 
   async search(query: string, options: SearchOptions = {}): Promise<SearchResult> {
@@ -128,7 +131,13 @@ export class SearchService {
 
     const strategy = semantic ? "hybrid" : "lexical";
     const fused = semantic ? fuse([lexical.hits, semantic.hits], k) : lexical.hits.slice(0, k);
-    const hits = await this.resolveLines(fused, trimmed);
+    const located = this.locateBrainPaths(fused);
+    const resolved = await this.resolveLines(located, trimmed);
+    const hits = dropShadowedWholeFiles(
+      resolved,
+      this.hiddenIndex,
+      this.brainSpecs,
+    );
     const related = this.brains ? await this.brains.related(hits, options.signal) : [];
     const narrowing = lexical.narrowing + (semantic?.narrowing ?? 0);
 
@@ -149,6 +158,22 @@ export class SearchService {
       text,
       bytes: Buffer.byteLength(text, "utf8"),
     };
+  }
+
+  /** Brain documents are relative to the brain folder; cite from the project. */
+  private locateBrainPaths(hits: ReadonlyArray<ParsedHit>): ParsedHit[] {
+    return hits.map((hit) => {
+      if (hit.path === null) return hit;
+      const spec = this.brainSpecs.find((candidate) =>
+        hit.index.startsWith(`${candidate.prefix}-`),
+      );
+      if (!spec) return hit;
+
+      return {
+        ...hit,
+        path: projectDocumentPath(this.projectRoot, spec.directory, hit.path),
+      };
+    });
   }
 
   /** Drops the mapping cache; call when a corpus run may have created indices. */
@@ -331,6 +356,46 @@ export function fuse(legs: ReadonlyArray<ReadonlyArray<ParsedHit>>, k: number): 
     .map(([key, hit]) => ({ ...hit, score: scores.get(key) ?? 0 }))
     .sort((left, right) => right.score - left.score)
     .slice(0, k);
+}
+
+/** Prefixes a brain-relative path with the folder's project-relative path. */
+export function projectDocumentPath(
+  projectRoot: string,
+  directory: string,
+  path: string,
+): string {
+  const root = relative(projectRoot, directory).split(sep).join("/");
+  if (root.length === 0 || path.startsWith(`${root}/`)) return path;
+  return `${root}/${path}`;
+}
+
+/**
+ * A hidden document is the whole file, so it shadows every section hit from a
+ * brain over the same folder. Prefer the section hits: they are more precise
+ * and carry graph expansion.
+ */
+export function dropShadowedWholeFiles(
+  hits: ReadonlyArray<SearchHit>,
+  hiddenIndex: string | null,
+  brainSpecs: ReadonlyArray<BrainSpec>,
+): SearchHit[] {
+  if (hiddenIndex === null || brainSpecs.length === 0) return [...hits];
+
+  const brainPrefixes = brainSpecs.map((spec) => `${spec.prefix}-`);
+  const brainPaths = new Set(
+    hits
+      .filter(
+        (hit) =>
+          hit.path !== null &&
+          brainPrefixes.some((prefix) => hit.index.startsWith(prefix)),
+      )
+      .map((hit) => hit.path),
+  );
+
+  return hits.filter(
+    (hit) =>
+      !(hit.index === hiddenIndex && hit.path !== null && brainPaths.has(hit.path)),
+  );
 }
 
 function dedupeHits(hits: ReadonlyArray<SearchHit>): SearchHit[] {

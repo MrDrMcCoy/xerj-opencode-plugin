@@ -38,10 +38,14 @@ Updated: 2026-11-03
   skips secrets and binaries, and bulks text into `<prefix>-hidden-docs` with
   project-relative paths. Deletions reconcile by id, and a recursive watcher
   with a 30 s poll fallback keeps it current. `.agents` produced 4 documents.
-- Files outside the project are indexed when `read` touches them. The ingest
-  runs in the background, skips an unchanged mtime+size, and reuses one id per
-  path. A read of `/tmp/opencode/auto-read-probe.md` became searchable without
-  `xerj_index`.
+- Files outside the project are indexed when `read` touches them or when a
+  `bash` command reads them with `cat`, `head`, `tail`, `less`, `more`, `nl`,
+  `tac`, or `sed`. The ingest runs in the background, skips an unchanged
+  mtime+size, and reuses one id per path. A `read` and a `cat` of probe files
+  both became searchable without `xerj_index`.
+- Duplicate hidden/brain hits are gone. Brain paths are rewritten to the
+  project (`plan.md` becomes `.agents/plan.md`) before line resolution, and a
+  hidden whole-file hit is dropped when a brain section covers the same path.
 - M5 is implemented: the sidebar follows the RPC `updated` event with a 30 s
   fallback, a `session.panel` claim renders the details view, and `/xerj` plus
   `/xerj-reindex`, `/xerj-remember`, `/xerj-search` cover the commands. The
@@ -76,7 +80,7 @@ Updated: 2026-11-03
 - The index root is `ctx.location.project.canonical`, not the session directory:
   a session opened in `.agents/` was deriving
   `xop-agents-<hash>` before the fix.
-- `bun test test/unit` passes (146 tests); `tsc --noEmit` is clean.
+- `bun test test/unit` passes (162 tests); `tsc --noEmit` is clean.
 
 ## Layout
 
@@ -100,6 +104,7 @@ src/search/service.ts  two-leg retrieval, RRF, line resolution, formatting
 src/stats/ledger.ts    measured savings with partial-read subtraction
 src/memory/store.ts    project memory, ids, formatting
 src/remote/spool.ts    fetched-page spool, external _bulk ingest, redaction
+src/remote/shell.ts    conservative shell-read path parser
 src/hooks/session.ts   prompt retrieval + memory recall + injection
 src/tools/search.ts    search, def, memory, index, anomaly, status
 src/telemetry/anomaly.ts  stable detectors, scoring, formatting
@@ -119,8 +124,8 @@ test/unit/*.test.ts    pure-function tests
    the stub host stops where the renderer starts.
 3. Retrieval quality: a rare-term query still puts `package-lock.json` above the
    exact match. Consider skipping lockfiles at index time or in the baseline.
-4. A file in both a hidden corpus and a brain now appears twice, once per
-   index. Dedupe by `path:line` when the text is identical.
+4. The shell parser does not follow `xargs`, `grep`/`rg`, command
+   substitution, or `cd` through a pipeline; those reads stay unindexed.
 
 ## Work in progress
 
@@ -167,6 +172,10 @@ TUI verification remain.
   are gone.
 - A `read` outside the project root ingests in the background; the mtime+size
   stamp prevents re-bulking an unchanged file.
+- `bash`/`shell` reads are parsed for `cat`-like commands with literal paths;
+  redirection targets and `sed -i` are skipped.
+- Brain hits are rewritten to project-relative paths before line resolution;
+  a hidden whole-file hit is dropped when a brain section covers that path.
 - `/_graph/<brain>/ego` needs `?node=<id[,id]>`; POST is 405. It returns edges
   and neighbor ids, not text; anchor by id from the brain docs index.
 - `PUT /_ml/anomaly_detectors/<id>` + `POST .../_score` returns
@@ -227,3 +236,6 @@ TUI verification remain.
   indexes as 4 plain documents alongside the brain copy; reading a file under
   `/tmp` indexes it without an explicit tool. Existing indices answer 409,
   which both ingesters now tolerate.
+- 2026-11-03: Shell reads and duplicate collapse added. `bash` parsing covers
+  cat-like commands with literal paths; brain sections replace hidden
+  whole-file duplicates and now cite `.agents/...` paths.

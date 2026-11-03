@@ -111,6 +111,12 @@ describe("RemoteSpool.ingestUrl", () => {
     expect(await spool().ingestExternalFile(file)).toBeNull();
   });
 
+  test("refuses secret-shaped files", async () => {
+    const file = join(root, ".env");
+    await writeFile(file, "TOKEN=abc");
+    expect(await spool().ingestExternalFile(file)).toBeNull();
+  });
+
   test("skips re-bulking an unchanged external file", async () => {
     const file = join(root, "cached.md");
     await writeFile(file, "first version");

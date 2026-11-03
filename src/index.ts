@@ -3,7 +3,7 @@
 // download or a missing node must not delay OpenCode startup.
 
 import { mkdir, writeFile } from "node:fs/promises";
-import { join, resolve, sep } from "node:path";
+import { isAbsolute, join, resolve, sep } from "node:path";
 import { Plugin } from "@opencode/plugin";
 import { detectRuntime } from "./binary/detect.ts";
 import { ensureBinary, externalBinary, type InstalledBinary } from "./binary/manager.ts";
@@ -42,6 +42,7 @@ import {
 } from "./rpc.ts";
 import { MemoryStore } from "./memory/store.ts";
 import { RemoteSpool } from "./remote/spool.ts";
+import { shellReadPaths } from "./remote/shell.ts";
 import { BrainGraph } from "./search/brains.ts";
 import { SearchService } from "./search/service.ts";
 import { Ledger } from "./stats/ledger.ts";
@@ -289,6 +290,38 @@ export default Plugin.define({
         });
       }
 
+      // Bash reads are invisible per file, so parse the command for cat-like
+      // commands and index only literal paths outside the project.
+      if (event.tool === "bash" || event.tool === "shell") {
+        const bashInput = event.input as {
+          command?: unknown;
+          cwd?: unknown;
+          workdir?: unknown;
+          directory?: unknown;
+        } | null;
+        const command = typeof bashInput?.command === "string" ? bashInput.command : null;
+        const spool = runtime.spool;
+        if (command === null || !spool) return;
+
+        const paths = shellReadPaths(command, toolCwd(bashInput, projectRoot)).filter(
+          (path) => isOutside(projectRoot, path),
+        );
+        if (paths.length === 0) return;
+
+        void Promise.all(
+          paths.map((path) =>
+            spool.ingestExternalFile(path, { skipUnchanged: true }).catch(() => null),
+          ),
+        )
+          .then((stored) => {
+            if (stored.some((entry) => entry !== null)) runtime.search?.invalidate();
+          })
+          .catch((error: unknown) => {
+            logger.debug("could not index a shell-read file", String(error));
+          });
+        return;
+      }
+
       if (event.tool !== "read") return;
 
       // OpenCode's built-in read uses `filePath`; other tool packs use `path`.
@@ -376,6 +409,8 @@ export default Plugin.define({
           logger,
           projectRoot,
           new BrainGraph({ client, brains: runtime.brains, logger }),
+          runtime.brains,
+          runtime.hiddenRoots.length > 0 ? `${prefix}-hidden-docs` : null,
         );
         runtime.memory = new MemoryStore(client, memoryNamespace(projectRoot), logger);
         runtime.anomaly = new AnomalyService(client, logger);
@@ -576,6 +611,19 @@ function datasetRows(
       };
     })
     .filter((dataset) => dataset.docs > 0 || dataset.bytes > 0);
+}
+
+function toolCwd(input: unknown, fallback: string): string {
+  if (typeof input !== "object" || input === null) return fallback;
+
+  const record = input as Record<string, unknown>;
+  for (const key of ["cwd", "workdir", "directory"]) {
+    const value = record[key];
+    if (typeof value === "string" && value.length > 0) {
+      return isAbsolute(value) ? resolve(value) : resolve(fallback, value);
+    }
+  }
+  return fallback;
 }
 
 function isOutside(root: string, filePath: string): boolean {

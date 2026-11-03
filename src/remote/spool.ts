@@ -100,7 +100,7 @@ export class RemoteSpool {
     options: { skipUnchanged?: boolean } = {},
   ): Promise<StoredDocument | null> {
     const absolute = resolve(filePath);
-    if (!isTextPath(absolute)) return null;
+    if (!isTextPath(absolute) || isSecretPath(absolute)) return null;
 
     const info = await stat(absolute).catch(() => null);
     if (!info?.isFile() || info.size === 0) return null;
@@ -182,6 +182,16 @@ export class RemoteSpool {
 
 export function isTextPath(filePath: string): boolean {
   return TEXT_EXTENSIONS.has(extname(filePath).toLowerCase());
+}
+
+const SECRET_FILES = new Set([".env", ".netrc", ".npmrc", ".pypirc"]);
+const SECRET_EXTENSIONS = /\.(pem|key|p12|pfx|crt)$/i;
+
+/** Secrets are not indexed even when a tool reads them. */
+export function isSecretPath(filePath: string): boolean {
+  const name = basename(filePath).toLowerCase();
+  if (SECRET_FILES.has(name) || name.startsWith(".env.")) return true;
+  return SECRET_EXTENSIONS.test(name);
 }
 
 export function digest(value: string): string {

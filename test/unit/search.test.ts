@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { fuse, newlinesBeforeMatch, type ParsedHit } from "../../src/search/service.ts";
+import {
+  dropShadowedWholeFiles,
+  fuse,
+  newlinesBeforeMatch,
+  projectDocumentPath,
+  type ParsedHit,
+  type SearchHit,
+} from "../../src/search/service.ts";
+import type { BrainSpec } from "../../src/paths.ts";
 
 function hit(id: string, score = 1, passage = 0): ParsedHit {
   return {
@@ -16,6 +24,70 @@ function hit(id: string, score = 1, passage = 0): ParsedHit {
     startOffset: 0,
   };
 }
+
+function plain(index: string, path: string): SearchHit {
+  return {
+    index,
+    id: path,
+    passage: 0,
+    path,
+    line: 1,
+    title: null,
+    kind: null,
+    score: 1,
+    text: "text",
+  };
+}
+
+describe("projectDocumentPath", () => {
+  test("prefixes a brain-relative path", () => {
+    expect(projectDocumentPath("/repo", "/repo/.agents", "plan.md")).toBe(
+      ".agents/plan.md",
+    );
+  });
+
+  test("leaves an already-relative or root path alone", () => {
+    expect(projectDocumentPath("/repo", "/repo", "src/a.ts")).toBe("src/a.ts");
+    expect(projectDocumentPath("/repo", "/repo/.agents", ".agents/plan.md")).toBe(
+      ".agents/plan.md",
+    );
+  });
+});
+
+describe("dropShadowedWholeFiles", () => {
+  const spec: BrainSpec = {
+    name: "agents-abcd",
+    label: ".agents",
+    directory: "/repo/.agents",
+    prefix: "xop-agents-abcd",
+  };
+
+  test("drops a hidden whole-file hit in favour of brain sections", () => {
+    const hidden = plain("xop-demo-hidden-docs", ".agents/plan.md");
+    const section = plain("xop-agents-abcd-docs", ".agents/plan.md");
+    const other = plain("xop-demo-docs", "src/a.ts");
+
+    const kept = dropShadowedWholeFiles(
+      [hidden, section, other],
+      "xop-demo-hidden-docs",
+      [spec],
+    );
+
+    expect(kept).toEqual([section, other]);
+  });
+
+  test("keeps hidden documents no brain covers", () => {
+    const hidden = plain("xop-demo-hidden-docs", ".agents/goals.md");
+    expect(dropShadowedWholeFiles([hidden], "xop-demo-hidden-docs", [spec])).toEqual([
+      hidden,
+    ]);
+  });
+
+  test("does nothing without a hidden index", () => {
+    const hidden = plain("xop-demo-hidden-docs", ".agents/plan.md");
+    expect(dropShadowedWholeFiles([hidden], null, [spec])).toEqual([hidden]);
+  });
+});
 
 describe("fuse", () => {
   test("rewards agreement between legs", () => {
