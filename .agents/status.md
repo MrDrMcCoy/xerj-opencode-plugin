@@ -16,6 +16,13 @@ Updated: 2026-11-03
   is the line the comment is on. The ledger counted the query, the
   hit, the returned bytes, and the savings; reading a cited file reduced the
   savings by exactly the bytes read.
+- M3 is implemented and verified live: `xerj_remember` stored a decision,
+  `xerj_recall` returned it with its kind, a repeated remember reused the same
+  id, and `xerj_forget` retracted it. Kind filtering happens in the plugin
+  because `/_memory` metadata filters returned zero on every variant tried.
+- Prompt-time memory recall is wired next to passage retrieval and deduped per
+  session. Like the retrieval injection, it has not been observed in a live
+  turn yet.
 - The context hooks (prompt retrieval + system injection) are registered and
   typechecked, but the prompt-to-context path has not been observed in a live
   turn yet. That happens on the next user message.
@@ -47,7 +54,8 @@ src/index/corpus.ts    layout, command line, run-document parsing
 src/index/watcher.ts   supervised watch process + periodic fallback
 src/search/service.ts  two-leg retrieval, RRF, line resolution, formatting
 src/stats/ledger.ts    measured savings with partial-read subtraction
-src/hooks/session.ts   prompt retrieval + system injection
+src/memory/store.ts    project memory, ids, formatting
+src/hooks/session.ts   prompt retrieval + memory recall + injection
 src/tools/search.ts    search, def, status tools
 src/rpc.ts             typed RPC contract + status types
 src/index.ts           server part
@@ -58,16 +66,17 @@ test/unit/*.test.ts    pure-function tests
 
 ## Next actions
 
-1. M3: memory namespace, `xerj_remember`/`xerj_recall`/`xerj_forget`, capture
-   from the compaction hook, and prompt-time recall.
+1. M4: remote ingest. Spool `webfetch`/MCP extract results to the data root,
+   index them under `xop-web-<hash>`, and index explicit external files through
+   `_bulk` (autoindex refuses a single file).
 2. Confirm the prompt-to-context path on the next real user turn: `queries` in
    `xerj_status` should increment without a tool call, and the model should see
-   the `<xerj-corpus>` block.
+   the `<xerj-corpus>` and `<xerj-memory>` blocks.
 3. Verify the TUI sidebar and `/xerj` commands in a real terminal session.
 
 ## Work in progress
 
-Nothing. Working tree has M0 changes not yet committed.
+Nothing. M0–M3 are committed; the next slice is M4.
 
 ## Blocked / unknown
 
@@ -122,3 +131,7 @@ Nothing. Working tree has M0 changes not yet committed.
   `hybrid` query. Line citations resolve exactly for whole-file records and
   fall back to the section start otherwise. Savings subtract partial reads and
   cap each file's baseline at 128 KB.
+- 2026-11-03: M3 implemented and verified live: remember/recall/forget with
+  stable ids, memory recall wired into prompt-time injection, kind filtering
+  moved client-side after `/_memory` metadata filters returned nothing.
+  Automatic compaction capture deferred: the hook runs before the summary.

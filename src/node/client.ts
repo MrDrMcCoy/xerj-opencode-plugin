@@ -12,6 +12,13 @@ export class NodeRequestError extends Error {
   }
 }
 
+export interface MemoryHit {
+  readonly id: string;
+  readonly text: string;
+  readonly metadata: Record<string, unknown>;
+  readonly score: number | null;
+}
+
 export interface IndexSummary {
   readonly index: string;
   readonly docs: number;
@@ -116,6 +123,55 @@ export class XerjClient {
       throw new NodeRequestError(label, response.status, text.slice(0, 500));
     }
     return response.json();
+  }
+
+  async memoryStore(
+    namespace: string,
+    body: { text: string; metadata: Record<string, unknown>; id?: string },
+  ): Promise<{ id: string; created: boolean }> {
+    const result = await this.post(
+      `/_memory/${encodeURIComponent(namespace)}`,
+      body,
+      "memory store failed",
+    );
+    if (!isRecord(result) || typeof result.id !== "string") {
+      throw new NodeRequestError("memory store returned no id");
+    }
+    return { id: result.id, created: result.created === true };
+  }
+
+  async memoryRecall(
+    namespace: string,
+    body: { query: string; k: number; recency_weight?: number },
+  ): Promise<ReadonlyArray<MemoryHit>> {
+    const result = await this.post(
+      `/_memory/${encodeURIComponent(namespace)}/_recall`,
+      body,
+      "memory recall failed",
+    );
+    if (!isRecord(result) || !Array.isArray(result.hits)) return [];
+
+    return result.hits.flatMap((hit): MemoryHit[] => {
+      if (!isRecord(hit) || typeof hit.id !== "string" || typeof hit.text !== "string") return [];
+      return [
+        {
+          id: hit.id,
+          text: hit.text,
+          metadata: isRecord(hit.metadata) ? hit.metadata : {},
+          score: typeof hit.score === "number" ? hit.score : null,
+        },
+      ];
+    });
+  }
+
+  async memoryForget(namespace: string, id: string): Promise<boolean> {
+    const response = await this.request(
+      `/_memory/${encodeURIComponent(namespace)}/${encodeURIComponent(id)}`,
+      { method: "DELETE" },
+    );
+    if (!response.ok) return false;
+    const result = await response.json().catch(() => null);
+    return isRecord(result) && result.forgotten === true;
   }
 
   async post(

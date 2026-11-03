@@ -3,6 +3,8 @@
 
 import type { Plugin } from "@opencode/plugin";
 import type { Config } from "../config.ts";
+import type { MemoryStore } from "../memory/store.ts";
+import { formatMemories } from "../memory/store.ts";
 import type { Ledger } from "../stats/ledger.ts";
 import type { SearchService } from "../search/service.ts";
 import type { StatusSnapshot } from "../rpc.ts";
@@ -11,6 +13,7 @@ export interface ToolOptions {
   readonly config: Config;
   readonly ledger: Ledger;
   readonly getSearch: () => SearchService | null;
+  readonly getMemory: () => MemoryStore | null;
   readonly snapshot: () => Promise<StatusSnapshot>;
 }
 
@@ -38,6 +41,40 @@ const DEF_INPUT = {
 const STATUS_INPUT = {
   type: "object",
   properties: {},
+  additionalProperties: false,
+} as const;
+
+const REMEMBER_INPUT = {
+  type: "object",
+  properties: {
+    text: { type: "string", description: "The durable fact, decision, or preference to keep." },
+    kind: {
+      type: "string",
+      enum: ["fact", "decision", "preference", "fix", "note"],
+      description: "What kind of memory this is (default fact).",
+    },
+    topic: { type: "string", description: "Optional short topic label." },
+  },
+  required: ["text"],
+  additionalProperties: false,
+} as const;
+
+const RECALL_INPUT = {
+  type: "object",
+  properties: {
+    query: { type: "string", description: "What to remember, in plain words." },
+    k: { type: "number", description: "How many memories to return (1-20, default 5)." },
+  },
+  required: ["query"],
+  additionalProperties: false,
+} as const;
+
+const FORGET_INPUT = {
+  type: "object",
+  properties: {
+    id: { type: "string", description: "Memory id returned by xerj_remember or xerj_recall." },
+  },
+  required: ["id"],
   additionalProperties: false,
 } as const;
 
@@ -121,6 +158,60 @@ export function buildTools(options: ToolOptions): ReadonlyArray<{
         metadata: { xerj: { kind: "status" } },
       }),
     },
+    {
+      name: "remember",
+      description:
+        "Store a durable project fact, decision, or preference in XERJ memory so a later session recalls it. Use it when you learn something that is not obvious from the code.",
+      input: REMEMBER_INPUT,
+      options: { namespace: "xerj" },
+      execute: async (input, context) => {
+        const args = input as { text: string; kind?: string; topic?: string };
+        const tool = context as { sessionID: string };
+        const memory = options.getMemory();
+        if (!memory) return unavailable();
+
+        const saved = await memory.remember({ ...args, sessionID: tool.sessionID });
+        return {
+          content: saved.created ? `Remembered as ${saved.id}.` : `Already remembered as ${saved.id}.`,
+          metadata: { xerj: { memory: saved.id, created: saved.created } },
+        };
+      },
+    },
+    {
+      name: "recall",
+      description:
+        "Recall project memories by meaning. Use it before asking the user something they may have already decided, or when a task depends on an earlier decision.",
+      input: RECALL_INPUT,
+      options: { namespace: "xerj" },
+      execute: async (input) => {
+        const args = input as { query: string; k?: number };
+        const memory = options.getMemory();
+        if (!memory) return unavailable();
+
+        const hits = await memory.recall(args.query, clampK(args.k ?? 5));
+        const block = formatMemories(hits, options.config.context.memoryTokens * 4);
+        return block.length === 0
+          ? { content: "No memories matched.", metadata: { xerj: { memories: 0 } } }
+          : { content: block, metadata: { xerj: { memories: hits.length } } };
+      },
+    },
+    {
+      name: "forget",
+      description: "Retract a memory that is no longer true. Takes the id returned by xerj_remember or xerj_recall.",
+      input: FORGET_INPUT,
+      options: { namespace: "xerj" },
+      execute: async (input) => {
+        const args = input as { id: string };
+        const memory = options.getMemory();
+        if (!memory) return unavailable();
+
+        const forgotten = await memory.forget(args.id);
+        return {
+          content: forgotten ? `Forgot ${args.id}.` : `No memory with id ${args.id}.`,
+          metadata: { xerj: { memory: args.id, forgotten } },
+        };
+      },
+    },
   ];
 }
 
@@ -131,6 +222,10 @@ async function record(
 ): Promise<void> {
   const paths = result.hits.flatMap((hit) => (hit.path ? [hit.path] : []));
   await options.ledger.recordQuery(sessionID, paths, result.bytes, result.hits.length);
+}
+
+function clampK(value: number): number {
+  return Math.min(20, Math.max(1, Math.round(value)));
 }
 
 function unavailable(): { content: string; metadata: Record<string, unknown> } {

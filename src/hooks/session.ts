@@ -8,12 +8,15 @@
 import type { Plugin } from "@opencode/plugin";
 import type { Config } from "../config.ts";
 import type { Logger } from "../log.ts";
+import type { MemoryStore } from "../memory/store.ts";
+import { formatMemories } from "../memory/store.ts";
 import type { SearchService } from "../search/service.ts";
 
 export interface SessionHookOptions {
   readonly config: Config;
   readonly logger: Logger;
   readonly getSearch: () => SearchService | null;
+  readonly getMemory: () => MemoryStore | null;
   readonly summarize: () => Promise<string>;
   readonly recordQuery: (
     sessionID: string,
@@ -26,6 +29,7 @@ export interface SessionHookOptions {
 interface Prepared {
   readonly messageID: string;
   readonly block: string;
+  readonly memory: string;
   readonly hits: number;
 }
 
@@ -60,6 +64,7 @@ export async function registerSessionHooks(
 
   const prepared = new Map<string, Prepared>();
   const injected = new Set<string>();
+  const injectedMemories = new Set<string>();
   const summarized = new Set<string>();
 
   await ctx.session.hook("prompt", async (event) => {
@@ -74,10 +79,13 @@ export async function registerSessionHooks(
       const paths = result.hits.flatMap((hit) => (hit.path ? [hit.path] : []));
       await options.recordQuery(event.sessionID, paths, result.bytes, result.hits.length);
 
-      if (result.hits.length === 0 || result.text.trim().length === 0) return;
+      const memory = await recallMemories(text, options, injectedMemories);
+
+      if (result.hits.length === 0 && memory.length === 0) return;
       prepared.set(event.sessionID, {
         messageID: event.messageID,
-        block: formatContextBlock(result.text),
+        block: result.text.trim().length === 0 ? "" : formatContextBlock(result.text),
+        memory,
         hits: result.hits.length,
       });
     } catch (error) {
@@ -106,8 +114,31 @@ export async function registerSessionHooks(
     injected.add(key);
     prepared.delete(event.sessionID);
 
-    event.system.push({ type: "text", text: entry.block });
+    if (entry.memory.length > 0) {
+      event.system.push({ type: "text", text: entry.memory });
+    }
+    if (entry.block.length > 0) {
+      event.system.push({ type: "text", text: entry.block });
+    }
   });
+}
+
+async function recallMemories(
+  text: string,
+  options: SessionHookOptions,
+  injected: Set<string>,
+): Promise<string> {
+  const memory = options.getMemory();
+  if (!memory) return "";
+
+  const hits = (await memory.recall(text, 3)).filter((hit) => !injected.has(hit.id));
+  if (hits.length === 0) return "";
+
+  const block = formatMemories(hits, options.config.context.memoryTokens * 4);
+  if (block.length === 0) return "";
+
+  for (const hit of hits) injected.add(hit.id);
+  return block;
 }
 
 async function retrieve(

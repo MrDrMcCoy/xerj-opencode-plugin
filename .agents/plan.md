@@ -357,10 +357,14 @@ Namespace: `proj-<slug>-<hash8>`; global `user` for cross-project preferences.
 
 Writes:
 
-- `xerj_remember` (explicit, model-driven).
-- Compaction hook: store `{kind: "session-summary", sessionID, text}` from the
-  summary OpenCode produces, deduped by content hash.
+- `xerj_remember` (explicit, model-driven), with a kind and optional topic.
 - Retraction on `xerj_forget`.
+
+Automatic capture from compaction is deferred. The `compaction` hook runs
+**before** the summary is generated, so it cannot read the summary; capturing it
+would mean a second model call or a deterministic digest of the transcript.
+Neither earns its cost yet. The corpus block instead tells the model when to
+call `xerj_remember`.
 
 IDs are `sha256(namespace + text)[0..16]`, so re-remembering the same fact is
 idempotent. Metadata: `kind`, `topic`, `source`, `sessionID`, `created`.
@@ -535,7 +539,11 @@ Confirm against a real binary before relying on these.
   `.xerj-memory-<name>-edges`.
 - [x] **5. `_cat/indices?format=json`** carries `docs.count` and `store.size`
   (human units). `_stats` is not a route.
-- [ ] **6. `/_memory`** filter syntax and `recency_weight` behaviour.
+- [x] **6. `/_memory`.** Store, recall (text), list, and forget work. `id` is
+  caller-supplied and re-storing is idempotent by id. **Metadata filters do not
+  match**: `term`, `match`, `metadata.kind.keyword`, and `bool.must` all
+  returned zero hits on v1.0.0-rc.100, so kind filtering happens in the plugin.
+  `recency_weight` is accepted (a recall with `0.2` returned normally).
 - [x] **7. `/_graph/<brain>/overview`** shape verified. `ego` still unverified.
 - [x] **11. `_passage` cannot be combined with `hybrid`.** The engine refuses
   it (`search_phase_execution_exception`: fusion has no single winning

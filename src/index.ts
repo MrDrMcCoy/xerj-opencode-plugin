@@ -17,9 +17,10 @@ import {
   readPersistedPort,
   type NodeHandle,
 } from "./node/supervisor.ts";
-import { dataRoot, environmentFrom, indexPrefix, projectStateDir } from "./paths.ts";
+import { dataRoot, environmentFrom, indexPrefix, memoryNamespace, projectStateDir } from "./paths.ts";
 import { releaseTarget } from "./platform.ts";
 import { PLUGIN_VERSION, XerjRpc, type StatusSnapshot } from "./rpc.ts";
+import { MemoryStore } from "./memory/store.ts";
 import { SearchService } from "./search/service.ts";
 import { Ledger } from "./stats/ledger.ts";
 import { buildTools } from "./tools/search.ts";
@@ -30,6 +31,7 @@ interface Runtime {
   node: NodeHandle | null;
   corpus: CorpusService | null;
   search: SearchService | null;
+  memory: MemoryStore | null;
   error: string | null;
   warnings: string[];
 }
@@ -53,6 +55,7 @@ export default Plugin.define({
       node: null,
       corpus: null,
       search: null,
+      memory: null,
       error: null,
       warnings: [...warnings],
     };
@@ -160,6 +163,7 @@ export default Plugin.define({
       config,
       ledger,
       getSearch: () => runtime.search,
+      getMemory: () => runtime.memory,
       snapshot,
     });
 
@@ -190,6 +194,7 @@ export default Plugin.define({
       config,
       logger,
       getSearch: () => runtime.search,
+      getMemory: () => runtime.memory,
       summarize,
       recordQuery: (sessionID, paths, bytes, hits) =>
         ledger.recordQuery(sessionID, paths, bytes, hits),
@@ -225,12 +230,9 @@ export default Plugin.define({
           logger,
         });
 
-        runtime.search = new SearchService(
-          new XerjClient(runtime.node.baseUrl),
-          prefix,
-          logger,
-          projectRoot,
-        );
+        const client = new XerjClient(runtime.node.baseUrl);
+        runtime.search = new SearchService(client, prefix, logger, projectRoot);
+        runtime.memory = new MemoryStore(client, memoryNamespace(projectRoot), logger);
 
         runtime.phase = "ready";
         logger.info("xerj is ready", {
