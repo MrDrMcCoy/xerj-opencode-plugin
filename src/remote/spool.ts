@@ -1,0 +1,181 @@
+// Remote documents: fetched pages spool to disk for the web corpus watcher,
+// and explicit external files are ingested through `_bulk` because autoindex
+// refuses a single-file path.
+//
+// The spool lives under the data root, never in the project: its files are
+// events for the watcher, and the watched tree must not contain the journal.
+
+import { createHash } from "node:crypto";
+import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { basename, extname, join, relative, resolve, sep } from "node:path";
+import type { Logger } from "../log.ts";
+import type { XerjClient } from "../node/client.ts";
+
+export interface SpoolOptions {
+  readonly root: string;
+  readonly projectRoot: string;
+  readonly prefix: string;
+  readonly externalPrefix: string;
+  readonly maxBytes: number;
+  readonly client: XerjClient;
+  readonly logger: Logger;
+}
+
+export interface StoredDocument {
+  readonly path: string;
+  readonly bytes: number;
+  readonly title: string;
+}
+
+const TEXT_EXTENSIONS = new Set([
+  ".md",
+  ".markdown",
+  ".txt",
+  ".rst",
+  ".json",
+  ".yaml",
+  ".yml",
+  ".toml",
+  ".csv",
+  ".tsv",
+  ".html",
+  ".htm",
+  ".xml",
+  ".log",
+  ".ts",
+  ".tsx",
+  ".js",
+  ".py",
+  ".rs",
+  ".go",
+  ".java",
+  ".rb",
+  ".sh",
+]);
+
+export class RemoteSpool {
+  readonly directory: string;
+
+  private mapped = false;
+
+  constructor(private readonly options: SpoolOptions) {
+    this.directory = join(options.root, "spool", options.prefix);
+  }
+
+  async init(): Promise<void> {
+    await mkdir(this.directory, { recursive: true, mode: 0o700 });
+  }
+
+  /** Stores a fetched page as markdown and drops any earlier version of it. */
+  async ingestUrl(url: string, content: string, title?: string): Promise<StoredDocument | null> {
+    const body = redact(truncate(content, this.options.maxBytes)).trim();
+    if (body.length === 0) return null;
+
+    const id = digest(url).slice(0, 20);
+    const document = [
+      `# ${title?.trim() || url}`,
+      "",
+      `Source: ${url}`,
+      `Fetched: ${new Date().toISOString()}`,
+      "",
+      body,
+      "",
+    ].join("\n");
+
+    await this.init();
+    await this.removeVersions(id);
+
+    const path = join(this.directory, `${id}.md`);
+    await writeFile(path, document, { mode: 0o600 });
+
+    return { path, bytes: Buffer.byteLength(document, "utf8"), title: title ?? url };
+  }
+
+  /** Ingests one file outside the project index through `_bulk`. */
+  async ingestExternalFile(filePath: string): Promise<StoredDocument | null> {
+    const absolute = resolve(filePath);
+    const extension = extname(absolute).toLowerCase();
+    if (!TEXT_EXTENSIONS.has(extension)) return null;
+
+    const info = await stat(absolute).catch(() => null);
+    if (!info?.isFile()) return null;
+
+    const raw = await readFile(absolute, "utf8").catch(() => null);
+    if (raw === null || raw.includes("\u0000")) return null;
+
+    const body = redact(truncate(raw, this.options.maxBytes));
+    if (body.trim().length === 0) return null;
+
+    const root = resolve(this.options.projectRoot);
+    const inside = absolute === root || absolute.startsWith(root + sep);
+    const relativePath = inside ? relative(root, absolute) : absolute;
+
+    await this.ensureMapping();
+
+    const source = {
+      body,
+      title: basename(absolute),
+      path: relativePath,
+      abs_path: absolute,
+      mtime: new Date(info.mtimeMs).toISOString(),
+    };
+
+    await this.options.client.bulk(`${this.options.externalPrefix}-docs`, [
+      { id: digest(`${absolute}:${info.mtimeMs}`).slice(0, 24), source },
+    ]);
+
+    return {
+      path: relativePath,
+      bytes: Buffer.byteLength(body, "utf8"),
+      title: basename(absolute),
+    };
+  }
+
+  private async ensureMapping(): Promise<void> {
+    if (this.mapped) return;
+
+    await this.options.client.put(
+      `/${this.options.externalPrefix}-docs`,
+      {
+        mappings: {
+          properties: {
+            body: { type: "semantic_text" },
+            title: { type: "keyword" },
+            path: { type: "keyword" },
+            abs_path: { type: "keyword" },
+            mtime: { type: "date" },
+          },
+        },
+      },
+      "could not create the external index",
+    );
+
+    this.mapped = true;
+  }
+
+  private async removeVersions(id: string): Promise<void> {
+    await rm(join(this.directory, `${id}.md`), { force: true });
+  }
+}
+
+export function digest(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+export function truncate(text: string, maxBytes: number): string {
+  if (maxBytes <= 0 || Buffer.byteLength(text, "utf8") <= maxBytes) return text;
+
+  // Cut on a character boundary: encoding the slice first keeps multi-byte
+  // characters intact when the byte cap lands inside one.
+  const buffer = Buffer.from(text, "utf8").subarray(0, maxBytes);
+  return buffer.toString("utf8").replace(/\uFFFD$/, "");
+}
+
+/** Best effort: fetched pages can carry keys in prose or URLs. */
+export function redact(text: string): string {
+  return text
+    .replace(/(Bearer\s+)[A-Za-z0-9._-]{8,}/g, "$1[redacted]")
+    .replace(/\bsk-[A-Za-z0-9_-]{16,}/g, "sk-[redacted]")
+    .replace(/\bghp_[A-Za-z0-9]{20,}/g, "ghp_[redacted]")
+    .replace(/\bxox[baprs]-[A-Za-z0-9-]{10,}/g, "xox[redacted]");
+}

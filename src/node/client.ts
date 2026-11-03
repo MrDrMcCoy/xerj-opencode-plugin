@@ -116,6 +116,44 @@ export class XerjClient {
     return result;
   }
 
+  async put(path: string, body: unknown, label: string): Promise<void> {
+    const response = await this.request(path, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new NodeRequestError(label, response.status, text.slice(0, 500));
+    }
+  }
+
+  async bulk(
+    index: string,
+    actions: ReadonlyArray<{ id: string; source: Record<string, unknown> }>,
+  ): Promise<void> {
+    if (actions.length === 0) return;
+
+    const lines = actions
+      .flatMap((action) => [
+        JSON.stringify({ index: { _index: index, _id: action.id } }),
+        JSON.stringify(action.source),
+      ])
+      .join("\n");
+
+    const response = await this.request(`/_bulk?refresh=true`, {
+      method: "POST",
+      headers: { "content-type": "application/x-ndjson" },
+      body: `${lines}\n`,
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new NodeRequestError("bulk failed", response.status, text.slice(0, 500));
+    }
+  }
+
   async get(path: string, label = `request failed: ${path}`): Promise<unknown> {
     const response = await this.request(path);
     if (!response.ok) {

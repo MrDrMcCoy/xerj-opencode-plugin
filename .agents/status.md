@@ -26,6 +26,11 @@ Updated: 2026-11-03
 - The context hooks (prompt retrieval + system injection) are registered and
   typechecked, but the prompt-to-context path has not been observed in a live
   turn yet. That happens on the next user message.
+- M4 is implemented and verified live: `xerj_index` fetched `example.com`
+  (663 bytes) into the web spool, the web watcher indexed it, and a later
+  search returned it at rank 2 with its source line. An external file at
+  `/tmp/opencode/external-note.md` was ingested through `_bulk` and became
+  searchable under the external index.
 - The journal lives at `<data root>/state/<prefix>/`, not in `.xerj`:
   `--watch` refuses a state dir inside the watched tree, because journal writes
   are filesystem events that would restart the pass forever.
@@ -55,6 +60,7 @@ src/index/watcher.ts   supervised watch process + periodic fallback
 src/search/service.ts  two-leg retrieval, RRF, line resolution, formatting
 src/stats/ledger.ts    measured savings with partial-read subtraction
 src/memory/store.ts    project memory, ids, formatting
+src/remote/spool.ts    fetched-page spool, external _bulk ingest, redaction
 src/hooks/session.ts   prompt retrieval + memory recall + injection
 src/tools/search.ts    search, def, status tools
 src/rpc.ts             typed RPC contract + status types
@@ -66,13 +72,13 @@ test/unit/*.test.ts    pure-function tests
 
 ## Next actions
 
-1. M4: remote ingest. Spool `webfetch`/MCP extract results to the data root,
-   index them under `xop-web-<hash>`, and index explicit external files through
-   `_bulk` (autoindex refuses a single file).
+1. M5: TUI. Sidebar already exists; add the details panel, the memory count, and
+   a live `stats.updated` subscription instead of the 5 s poll.
 2. Confirm the prompt-to-context path on the next real user turn: `queries` in
    `xerj_status` should increment without a tool call, and the model should see
    the `<xerj-corpus>` and `<xerj-memory>` blocks.
-3. Verify the TUI sidebar and `/xerj` commands in a real terminal session.
+3. Retrieval quality: a rare-term query still puts `package-lock.json` above the
+   exact match. Consider skipping lockfiles at index time or in the baseline.
 
 ## Work in progress
 
@@ -90,6 +96,9 @@ Nothing. M0–M3 are committed; the next slice is M4.
 - Release assets for `v1.0.0-rc.100`: `xerj-<ver>-<target>.tar.gz` + `.sha256`
   (`<hex>  <filename>`), Linux musl default, archive root
   `xerj-<ver>-<target>/`, latest resolved by redirect.
+- Target selection covers Linux x86_64/aarch64 (musl), macOS x86_64/arm64, and
+  Windows x86_64/arm64 (zip, `xerj.exe`, `LOCALAPPDATA`). Rosetta shells get
+  the native arm64 build. Only Linux x86_64 has been exercised.
 - Node identity: `GET /` → `cluster_name: "xerj"`; `version.number` is the ES
   wire version `8.13.0`, not the release.
 - `--port P` claims P, P+1 and P+2; `--auto-port` is opt-in.
@@ -131,6 +140,9 @@ Nothing. M0–M3 are committed; the next slice is M4.
   `hybrid` query. Line citations resolve exactly for whole-file records and
   fall back to the section start otherwise. Savings subtract partial reads and
   cap each file's baseline at 128 KB.
+- 2026-11-03: M4 implemented and verified live: URL spool plus a second
+  watcher, external files through `_bulk`, mapping-cache invalidation on corpus
+  changes, per-prefix journal keys. `xerj_index` covers both.
 - 2026-11-03: M3 implemented and verified live: remember/recall/forget with
   stable ids, memory recall wired into prompt-time injection, kind filtering
   moved client-side after `/_memory` metadata filters returned nothing.

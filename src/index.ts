@@ -17,10 +17,19 @@ import {
   readPersistedPort,
   type NodeHandle,
 } from "./node/supervisor.ts";
-import { dataRoot, environmentFrom, indexPrefix, memoryNamespace, projectStateDir } from "./paths.ts";
+import {
+  dataRoot,
+  environmentFrom,
+  externalPrefix,
+  indexPrefix,
+  memoryNamespace,
+  projectStateDir,
+  webPrefix,
+} from "./paths.ts";
 import { releaseTarget } from "./platform.ts";
 import { PLUGIN_VERSION, XerjRpc, type StatusSnapshot } from "./rpc.ts";
 import { MemoryStore } from "./memory/store.ts";
+import { RemoteSpool } from "./remote/spool.ts";
 import { SearchService } from "./search/service.ts";
 import { Ledger } from "./stats/ledger.ts";
 import { buildTools } from "./tools/search.ts";
@@ -32,6 +41,8 @@ interface Runtime {
   corpus: CorpusService | null;
   search: SearchService | null;
   memory: MemoryStore | null;
+  spool: RemoteSpool | null;
+  web: CorpusService | null;
   error: string | null;
   warnings: string[];
 }
@@ -56,6 +67,8 @@ export default Plugin.define({
       corpus: null,
       search: null,
       memory: null,
+      spool: null,
+      web: null,
       error: null,
       warnings: [...warnings],
     };
@@ -164,6 +177,7 @@ export default Plugin.define({
       ledger,
       getSearch: () => runtime.search,
       getMemory: () => runtime.memory,
+      getSpool: () => runtime.spool,
       snapshot,
     });
 
@@ -176,7 +190,20 @@ export default Plugin.define({
     });
 
     await ctx.tool.hook("execute.after", async (event) => {
-      if (event.tool !== "read" || event.status !== "completed") return;
+      if (event.status !== "completed") return;
+
+      // Any tool that fetched a URL (webfetch, MCP extract, search) can spool
+      // its text. A short result is an error or a list, not a document.
+      const urlInput = event.input as { url?: unknown } | null;
+      const url = typeof urlInput?.url === "string" ? urlInput.url : null;
+      const content = typeof event.result.content === "string" ? event.result.content : null;
+      if (url !== null && content !== null && content.length >= 200 && runtime.spool) {
+        await runtime.spool.ingestUrl(url, content).catch((error: unknown) => {
+          logger.debug("could not spool a fetched document", String(error));
+        });
+      }
+
+      if (event.tool !== "read") return;
 
       // OpenCode's built-in read uses `filePath`; other tool packs use `path`.
       const input = event.input as { filePath?: unknown; path?: unknown } | null;
@@ -231,8 +258,45 @@ export default Plugin.define({
         });
 
         const client = new XerjClient(runtime.node.baseUrl);
-        runtime.search = new SearchService(client, prefix, logger, projectRoot);
+        runtime.search = new SearchService(
+          client,
+          [prefix, webPrefix(projectRoot), externalPrefix(projectRoot)],
+          logger,
+          projectRoot,
+        );
         runtime.memory = new MemoryStore(client, memoryNamespace(projectRoot), logger);
+
+        if (config.remote.enabled) {
+          const spool = new RemoteSpool({
+            root,
+            projectRoot,
+            prefix: webPrefix(projectRoot),
+            externalPrefix: externalPrefix(projectRoot),
+            maxBytes: config.remote.maxBytes,
+            client,
+            logger,
+          });
+          await spool.init();
+          runtime.spool = spool;
+
+          runtime.web = new CorpusService({
+            binaryPath: runtime.binary.path,
+            nodeUrl: runtime.node.baseUrl,
+            projectRoot: spool.directory,
+            prefix: webPrefix(projectRoot),
+            dataRoot: root,
+            config,
+            storage,
+            logger,
+            onChange: () => {
+              runtime.search?.invalidate();
+              void registration.events
+                .emit("updated", { updatedAt: Date.now() })
+                .catch(() => {});
+            },
+          });
+          await runtime.web.start();
+        }
 
         runtime.phase = "ready";
         logger.info("xerj is ready", {
@@ -250,6 +314,7 @@ export default Plugin.define({
           storage,
           logger,
           onChange: () => {
+            runtime.search?.invalidate();
             void registration.events
               .emit("updated", { updatedAt: Date.now() })
               .catch(() => {});
@@ -275,9 +340,11 @@ export default Plugin.define({
     return () => {
       shutdown.abort();
       const corpus = runtime.corpus;
+      const web = runtime.web;
       runtime.corpus = null;
+      runtime.web = null;
 
-      void (corpus?.stop() ?? Promise.resolve())
+      void Promise.all([corpus?.stop(), web?.stop()])
         .then(() => ledger.flush())
         .then(() => logger.flush())
         .then(() => registration.dispose())

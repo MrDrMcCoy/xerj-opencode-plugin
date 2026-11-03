@@ -13,7 +13,7 @@ This project is an OpenCode V2 plugin that exists to combine several of its use 
 
 The plugin should do the following in use:
 
-- Maintain a local copy of the Xerj binary if it is not already present. Detect newer minor versions and automatically upgrade.
+- Maintain a local copy of the Xerj binary if it is not already present. Detect newer minor versions and automatically upgrade. Ensure multiple architectures and platforms are supported.
 - For a given project, create a `.xerj` directory for the index.
 - Index all documents in the project.
 - When accessed, index all documents fetched from remote sources, such as the internet, other local http endpoints, files outside the project.

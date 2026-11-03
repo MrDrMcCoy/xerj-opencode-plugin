@@ -5,6 +5,7 @@ import type { Plugin } from "@opencode/plugin";
 import type { Config } from "../config.ts";
 import type { MemoryStore } from "../memory/store.ts";
 import { formatMemories } from "../memory/store.ts";
+import type { RemoteSpool } from "../remote/spool.ts";
 import type { Ledger } from "../stats/ledger.ts";
 import type { SearchService } from "../search/service.ts";
 import type { StatusSnapshot } from "../rpc.ts";
@@ -14,6 +15,7 @@ export interface ToolOptions {
   readonly ledger: Ledger;
   readonly getSearch: () => SearchService | null;
   readonly getMemory: () => MemoryStore | null;
+  readonly getSpool: () => RemoteSpool | null;
   readonly snapshot: () => Promise<StatusSnapshot>;
 }
 
@@ -66,6 +68,15 @@ const RECALL_INPUT = {
     k: { type: "number", description: "How many memories to return (1-20, default 5)." },
   },
   required: ["query"],
+  additionalProperties: false,
+} as const;
+
+const INDEX_INPUT = {
+  type: "object",
+  properties: {
+    url: { type: "string", description: "Fetch this URL and index its text." },
+    path: { type: "string", description: "Index this file from outside the project." },
+  },
   additionalProperties: false,
 } as const;
 
@@ -196,6 +207,49 @@ export function buildTools(options: ToolOptions): ReadonlyArray<{
       },
     },
     {
+      name: "index",
+      description:
+        "Index a URL or an external file so later searches can find it. Use it after fetching a page you expect to need again.",
+      input: INDEX_INPUT,
+      options: { namespace: "xerj" },
+      execute: async (input, context) => {
+        const args = input as { url?: string; path?: string };
+        const tool = context as { signal: AbortSignal };
+        const spool = options.getSpool();
+        if (!spool) return unavailable();
+
+        if (args.url) {
+          const response = await fetch(args.url, { signal: withTimeout(tool.signal, 10_000) });
+          if (!response.ok) {
+            return { content: `Fetch failed: HTTP ${response.status}.`, metadata: { xerj: { indexed: false } } };
+          }
+
+          const text = await response.text();
+          const stored = await spool.ingestUrl(args.url, text);
+          options.getSearch()?.invalidate();
+          return stored
+            ? {
+                content: `Indexed ${stored.bytes} bytes from ${args.url}.`,
+                metadata: { xerj: { indexed: true, bytes: stored.bytes } },
+              }
+            : { content: "Nothing indexable at that URL.", metadata: { xerj: { indexed: false } } };
+        }
+
+        if (args.path) {
+          const stored = await spool.ingestExternalFile(args.path);
+          if (stored) options.getSearch()?.invalidate();
+          return stored
+            ? {
+                content: `Indexed ${stored.path} (${stored.bytes} bytes).`,
+                metadata: { xerj: { indexed: true, bytes: stored.bytes } },
+              }
+            : { content: `Could not index ${args.path}: unsupported, binary, or unreadable.`, metadata: { xerj: { indexed: false } } };
+        }
+
+        return { content: "Pass either a url or a path.", metadata: { xerj: { indexed: false } } };
+      },
+    },
+    {
       name: "forget",
       description: "Retract a memory that is no longer true. Takes the id returned by xerj_remember or xerj_recall.",
       input: FORGET_INPUT,
@@ -222,6 +276,26 @@ async function record(
 ): Promise<void> {
   const paths = result.hits.flatMap((hit) => (hit.path ? [hit.path] : []));
   await options.ledger.recordQuery(sessionID, paths, result.bytes, result.hits.length);
+}
+
+function withTimeout(signal: AbortSignal, ms: number): AbortSignal {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  const forward = (): void => controller.abort();
+
+  if (signal.aborted) controller.abort();
+  else signal.addEventListener("abort", forward, { once: true });
+
+  controller.signal.addEventListener(
+    "abort",
+    () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", forward);
+    },
+    { once: true },
+  );
+
+  return controller.signal;
 }
 
 function clampK(value: number): number {

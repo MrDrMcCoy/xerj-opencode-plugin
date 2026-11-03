@@ -166,6 +166,12 @@ The official installer remains a fallback (`XERJ_VERSION` + `XERJ_INSTALL_DIR`
 pinned into a temp dir), under the same verify-then-rename contract. The `.deb`
 assets are ignored: no root, no dpkg.
 
+Platform coverage: Linux x86_64/aarch64 (musl), macOS x86_64/arm64, Windows
+x86_64/arm64. Extraction uses `tar -xf`, which handles both `.tar.gz` and `.zip`
+(bsdtar on Windows 10+). The binary name switches to `xerj.exe` on Windows, and
+the data root uses `LOCALAPPDATA`. Only Linux x86_64 has actually been run; the
+other targets are selected correctly but untested.
+
 ## 6. Node lifecycle
 
 `ensureNode()`:
@@ -260,21 +266,30 @@ queued rerun. Runs are `nice -n 10`; the node's 429 back-pressure is handled by
 
 ### Remote documents
 
-`webfetch` and MCP extract/fetch results are spooled when `remote.enabled`:
+`webfetch` and any tool whose input has a `url` and whose result is text
+(>= 200 chars) spool their content when `remote.enabled`:
 
 ```
-<data dir>/spool/<prefix>/<sha256(url)>.<ext>
-<data dir>/spool/<prefix>/<sha256(url)>.meta.json
+<data dir>/spool/<web prefix>/<sha256(url)[0..20]>.md
 ```
 
-Then `autoindex <spool dir> --prefix xop-web-<hash> --no-graph`. Same
-debounce. Bounded by `remote.maxBytes`; only `text/*`, `application/json`,
-`application/xml`; error results are skipped. Redact obvious bearer tokens and
-`sk-…` keys before writing.
+The file carries its own provenance (`# title`, `Source:`, `Fetched:`) so it
+needs no sidecar, which would otherwise be indexed as a second dataset. The
+same URL replaces its earlier file. A second watcher runs
+`autoindex <spool dir> --prefix xop-web-<hash> --no-graph`; both watchers keep
+separate journal records because the storage key includes the prefix.
 
-External single files (`read` outside the project root) are indexed by content
-into `xop-ext-<hash>` via `_bulk`, with `path`, `abs_path`, `mtime` fields.
-Plain text only; no AST. Document that limitation.
+Bounded by `remote.maxBytes`; truncated on a character boundary; bearer tokens
+and `sk-`/`ghp_`/`xox` keys are redacted before writing.
+
+External files go through `_bulk` into `xop-ext-<hash>-docs` (autoindex refuses
+a single file). The mapping declares `body` as `semantic_text` so passages work;
+fields are `path`, `abs_path`, `mtime`, `title`. Plain text only; no AST.
+
+A prefix with no indices answers 404 on `_mapping`; that is not a failure for
+the other corpora. The mapping cache is invalidated when any watcher reports a
+run and after an explicit ingest, because a new index is invisible until the
+cache expires.
 
 ### Second brain (opt-in)
 

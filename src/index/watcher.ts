@@ -48,6 +48,7 @@ const STDERR_TAIL_LINES = 20;
 export class CorpusService {
   readonly layout: CorpusLayout;
 
+  private readonly storageKey: string;
   private state: CorpusState;
   private lastRun: CorpusRun | null = null;
   private restarts = 0;
@@ -59,6 +60,7 @@ export class CorpusService {
 
   constructor(private readonly options: CorpusServiceOptions) {
     this.layout = corpusLayout(options.projectRoot, options.prefix, options.dataRoot);
+    this.storageKey = `${STORAGE_KEY}:${options.prefix}`;
     this.state = options.config.index.auto ? "starting" : "disabled";
   }
 
@@ -290,7 +292,7 @@ export class CorpusService {
   }
 
   private async restore(): Promise<void> {
-    const stored = await this.options.storage.get(STORAGE_KEY).catch(() => undefined);
+    const stored = await this.options.storage.get(this.storageKey).catch(() => undefined);
     if (typeof stored !== "object" || stored === null) return;
 
     const record = stored as Record<string, unknown>;
@@ -307,7 +309,7 @@ export class CorpusService {
   }
 
   private async persist(run: CorpusRun): Promise<void> {
-    await this.options.storage.set(STORAGE_KEY, run as never).catch(() => {});
+    await this.options.storage.set(this.storageKey, run as never).catch(() => {});
   }
 
   private fail(error: unknown): void {

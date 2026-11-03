@@ -64,7 +64,6 @@ const SOURCE_FIELDS = [
 // in `body`. Only `body` produces a `_passage`, so the search leg stays on it
 // and symbol precision comes from the definition tool.
 const TEXT_FIELD_PRIORITY = ["body", "defs", "impl", "summary", "text", "content"];
-const BOOSTED_FIELDS = new Set(["title", "body"]);
 const DEFINITION_SOURCE = [...SOURCE_FIELDS, "code"];
 
 interface LegResult {
@@ -81,7 +80,7 @@ export class SearchService {
 
   constructor(
     private readonly client: XerjClient,
-    private readonly prefix: string,
+    private readonly prefixes: ReadonlyArray<string>,
     private readonly logger: Logger,
     private readonly projectRoot: string,
   ) {}
@@ -94,15 +93,21 @@ export class SearchService {
     const budget = budgetChars(options.maxTokens);
     const indices = await this.indices();
     const names = Object.keys(indices);
-    const pattern = names.length > 0 ? names.join(",") : `${this.prefix}-*`;
+    const pattern =
+      names.length > 0
+        ? names.join(",")
+        : this.prefixes.map((prefix) => `${prefix}-*`).join(",");
     const fields = pickTextFields(indices);
     const semanticCapable = names.some((name) => indices[name]?.body === "semantic_text");
 
     const base = { size: k, _source: SOURCE_FIELDS, fields: ["_passage"] };
 
+    // A single-field `match` is what makes the engine attach `_passage`;
+    // `multi_match` returns hits without it, which silently drops the text.
+    const lexicalField = fields.includes("body") ? "body" : (fields[0] ?? "body");
     const lexical = await this.leg(
       pattern,
-      { ...base, query: { multi_match: { query: trimmed, fields, type: "best_fields" } } },
+      { ...base, query: { match: { [lexicalField]: trimmed } } },
       options.signal,
     );
 
@@ -125,6 +130,11 @@ export class SearchService {
     const narrowing = lexical.narrowing + (semantic?.narrowing ?? 0);
 
     return formatResult(hits, strategy, budget, narrowing);
+  }
+
+  /** Drops the mapping cache; call when a corpus run may have created indices. */
+  invalidate(): void {
+    this.mappingCache = null;
   }
 
   async definition(symbol: string, options: SearchOptions = {}): Promise<SearchResult> {
@@ -266,14 +276,22 @@ export class SearchService {
       return this.mappingCache.indices;
     }
 
-    try {
-      const indices = await this.client.mappings(`${this.prefix}-*`);
-      this.mappingCache = { at: Date.now(), indices };
-      return indices;
-    } catch (error) {
-      this.logger.debug("could not read index mappings", String(error));
-      return this.mappingCache?.indices ?? {};
+    const merged: Record<string, Record<string, string>> = {};
+    for (const prefix of this.prefixes) {
+      try {
+        Object.assign(merged, await this.client.mappings(`${prefix}-*`));
+      } catch (error) {
+        // A prefix with no indices answers 404; that is not a failure for the
+        // other corpora, so keep going.
+        this.logger.debug(`no mappings for ${prefix}`, String(error));
+      }
     }
+
+    if (Object.keys(merged).length > 0) {
+      this.mappingCache = { at: Date.now(), indices: merged };
+      return merged;
+    }
+    return this.mappingCache?.indices ?? {};
   }
 }
 
@@ -310,8 +328,8 @@ function pickTextFields(indices: Record<string, Record<string, string>>): string
     if (!ordered.includes(name)) ordered.push(name);
   }
 
-  if (ordered.length === 0) return ["body", "title"];
-  return ordered.map((name) => (BOOSTED_FIELDS.has(name) ? `${name}^2` : name));
+  if (ordered.length === 0) return ["body"];
+  return ordered;
 }
 
 interface RawHit {
