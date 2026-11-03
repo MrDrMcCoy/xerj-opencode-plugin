@@ -64,7 +64,8 @@ Plugin options in `opencode.json(c)`; every value has a default.
   "plugins": [{
     "package": "@mrdrmccoy/xerj-opencode-plugin",
     "options": {
-      "binary":  { "version": "auto", "path": null },
+      "binary":  { "version": "auto", "path": null, "target": null,
+                   "libc": "musl" },
       "node":    { "url": null, "port": 9200, "dataDir": null },
       "index":   { "auto": true, "watch": true, "debounceMs": 800, "periodicMs": 900000,
                    "workers": null, "brain": [], "semantic": true,
@@ -82,7 +83,9 @@ Plugin options in `opencode.json(c)`; every value has a default.
 ```
 
 `binary.version: "auto"` means "latest minor, pin the resolved patch".
-`node.url` set means "attach, never spawn".
+`binary.target` pins a release triple (for example `aarch64-apple-darwin`);
+`binary.libc` chooses the Linux build. `binary.path` bypasses download and
+detection entirely. `node.url` set means "attach, never spawn".
 
 This repo dogfoods its own plugin. `opencode.json` at the repo root loads it
 from the working tree; a published install uses the scoped package name:
@@ -104,7 +107,7 @@ grows.
 
 ```
 data dir      ~/.local/share/opencode/xerj/data        (engine storage, 0700)
-binary        ~/.local/share/opencode/xerj/bin/<ver>/xerj
+binary        ~/.local/share/opencode/xerj/bin/<ver>-<target>/xerj
 port          <data dir>/port                          (resolved, persisted)
 pid           <data dir>/node.pid
 spool         <data dir>/spool/<prefix>/               (remote documents)
@@ -138,28 +141,35 @@ forever. Verified by the binary's own error message.
 
 ## 5. Binary management
 
-1. Resolve the installed version by running `<bin>/<ver>/xerj --version`; cache
-   the result in `ctx.storage`.
-2. If `version` is pinned, use it and stop.
-3. Else resolve the latest release at most once per 24 h through the
+1. If `binary.path` is set, probe it with `--version` and use it as-is. No
+   download, no upgrade, no platform gate: a self-built binary for an
+   unpublished platform has to work.
+2. Otherwise pick the target triple. `binary.target` wins when set; else derive
+   it from the host: `binary.libc` selects `unknown-linux-{musl,gnu}`, macOS
+   checks Rosetta, and Windows trusts `PROCESSOR_ARCHITECTURE` so an x64 Node on
+   ARM64 installs the native build.
+3. Look for an installed binary under `<bin>/<ver>-<target>/xerj`. The target is
+   part of the directory name so one data root can hold several platforms
+   without one overwriting another. Probe it with `--version` to confirm it
+   runs.
+4. If `version` is pinned, install that version for the target and stop.
+5. Else resolve the latest release at most once per 24 h through the
    `https://github.com/xerj-org/xerj/releases/latest` redirect (read the tag
    from the final URL). This avoids the api.github.com rate limit.
-4. Compare full semver, **including prerelease identifiers numerically**:
+6. Compare full semver, **including prerelease identifiers numerically**:
    `1.0.0-rc.99 < 1.0.0-rc.100`. Upgrade when remote > installed and the major
    matches; never downgrade. A minor-only rule would never fire here, because
    every rc release keeps minor at 0.
-5. Pick the target triple: `linux → <cpu>-unknown-linux-musl` (static, jemalloc,
-   no glibc floor), `darwin → <cpu>-apple-darwin`, `windows → zip`. On darwin,
-   if `sysctl -n sysctl.proc_translated` is `1`, use `aarch64` regardless of
-   `uname -m`.
-6. Download `xerj-<ver>-<target>.tar.gz` and its `.sha256` sidecar. Require 64
+7. Download `xerj-<ver>-<target>.<ext>` and its `.sha256` sidecar. Require 64
    lowercase hex; a missing or malformed checksum aborts the install (fail
    closed, same as the official installer).
-7. Extract into `<bin>/<ver>.partial/`, expect `xerj-<ver>-<target>/xerj`,
-   fall back to a recursive search for a regular file named `xerj`,
-   `chmod 0755`, then `rename()` the directory into `<bin>/<ver>`. Remove the
-   partial on failure.
-8. On any failure: keep the current binary, log once, surface in TUI as
+8. Extract into `<bin>/<ver>-<target>.partial/`, expect
+   `xerj-<ver>-<target>/xerj` (or a recursive search for `xerj`), `chmod 0755`,
+   then `rename()` the directory into `<bin>/<ver>-<target>`. Probe the result
+   with `--version`: a binary for the wrong architecture installs and then
+   fails to exec, so the probe is the real check. Remove the partial on
+   failure.
+9. On any failure: keep the current binary, log once, surface in TUI as
    `xerj: binary upgrade failed` with the reason. Never block startup.
 
 The official installer remains a fallback (`XERJ_VERSION` + `XERJ_INSTALL_DIR`
@@ -567,6 +577,13 @@ Confirm against a real binary before relying on these.
 - [x] **12. `_passage.start_offset`** is a byte offset into the record field.
   When the record starts at line 1 it maps onto the file, so the exact line is
   readable; a section record that starts later falls back to its start line.
+- [x] **13. Multi-platform binary selection.** Six release triples are computed
+  (Linux x86_64/aarch64 musl or gnu, macOS x86_64/arm64, Windows
+  x86_64/arm64 zip). Rosetta shells and x64 Node on Windows ARM64 resolve to
+  the native build. Installs are target-scoped (`<ver>-<target>`), the
+  post-install `--version` probe rejects a binary that cannot exec, and
+  `binary.path` bypasses download entirely. Verified on Linux x86_64:
+  `x86_64-unknown-linux-musl` was selected, installed, and probed.
 - [x] **8. `xerj gain --json`** shape verified (searches, hit_rate, took_ms,
   top_indices, excluded_machine_searches).
 - [x] **9. Node identity** is `cluster_name: "xerj"` in `GET /`. The banner's

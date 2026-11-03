@@ -52,6 +52,27 @@ describe("loadConfig", () => {
     expect(config.node.url).toBe("http://127.0.0.1:9200");
   });
 
+  test("reads a pinned target and libc", () => {
+    const { config, warnings } = loadConfig({
+      binary: { target: "aarch64-apple-darwin", libc: "gnu" },
+    });
+    expect(config.binary.target).toBe("aarch64-apple-darwin");
+    expect(config.binary.libc).toBe("gnu");
+    expect(warnings).toHaveLength(0);
+  });
+
+  test("falls back to host detection for a malformed target", () => {
+    const { config, warnings } = loadConfig({ binary: { target: "linux" } });
+    expect(config.binary.target).toBeNull();
+    expect(warnings.some((entry) => entry.includes("binary.target"))).toBe(true);
+  });
+
+  test("falls back to musl for an unknown libc", () => {
+    const { config, warnings } = loadConfig({ binary: { libc: "glibc" } });
+    expect(config.binary.libc).toBe("musl");
+    expect(warnings.some((entry) => entry.includes("binary.libc"))).toBe(true);
+  });
+
   test("rejects a malformed pinned version", () => {
     const { config, warnings } = loadConfig({ binary: { version: "latest" } });
     expect(config.binary.version).toBe("auto");

@@ -1,3 +1,5 @@
+import type { Libc } from "./platform.ts";
+
 // Plugin options. Every field has a default, unknown keys are ignored, and a
 // malformed value falls back to the default with a warning instead of failing
 // plugin load. A search plugin that refuses to start because one option is a
@@ -8,6 +10,10 @@ export interface BinaryOptions {
   readonly version: string;
   /** Explicit binary path; skips download and upgrade entirely. */
   readonly path: string | null;
+  /** Explicit release triple; overrides host detection. Mostly for CI. */
+  readonly target: string | null;
+  /** Linux C library flavour of the downloaded build. */
+  readonly libc: Libc;
 }
 
 export interface NodeOptions {
@@ -77,7 +83,7 @@ export interface LoadedConfig {
 }
 
 export const DEFAULT_CONFIG: Config = {
-  binary: { version: "auto", path: null },
+  binary: { version: "auto", path: null, target: null, libc: "musl" },
   node: { url: null, port: 9200, dataDir: null },
   index: {
     auto: true,
@@ -127,6 +133,8 @@ export function loadConfig(
     binary: {
       version: readVersion(binary.version, warnings),
       path: readString(binary.path, null),
+      target: readTarget(binary.target, warnings),
+      libc: readLibc(binary.libc, warnings),
     },
     node: {
       url: readString(node.url, null) ?? (envUrl ? envUrl : null),
@@ -278,6 +286,25 @@ function readVersion(value: unknown, warnings: string[]): string {
   }
 
   return trimmed.replace(/^v/, "");
+}
+
+/** A release triple, e.g. `aarch64-apple-darwin`. Invalid values fall back to
+ * host detection rather than failing plugin load. */
+function readTarget(value: unknown, warnings: string[]): string | null {
+  const target = readString(value, null);
+  if (target === null) return null;
+  if (!/^(x86_64|aarch64)-[a-z0-9-]+$/.test(target)) {
+    warnings.push(`binary.target "${target}" is not a release triple; using host detection`);
+    return null;
+  }
+  return target;
+}
+
+function readLibc(value: unknown, warnings: string[]): Libc {
+  if (value === undefined) return DEFAULT_CONFIG.binary.libc;
+  if (value === "musl" || value === "gnu") return value;
+  warnings.push(`binary.libc must be "musl" or "gnu"; using ${DEFAULT_CONFIG.binary.libc}`);
+  return DEFAULT_CONFIG.binary.libc;
 }
 
 function readBoolean(value: unknown, fallback: boolean, key: string, warnings: string[]): boolean {

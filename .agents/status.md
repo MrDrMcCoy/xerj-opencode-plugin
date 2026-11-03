@@ -34,6 +34,15 @@ Updated: 2026-11-03
 - The journal lives at `<data root>/state/<prefix>/`, not in `.xerj`:
   `--watch` refuses a state dir inside the watched tree, because journal writes
   are filesystem events that would restart the pass forever.
+- Binary management is multi-platform: target triples for Linux (musl or gnu),
+  macOS, and Windows; Rosetta shells and x64 Node on Windows ARM64 resolve to
+  the native arm64 build; installs live under `bin/<ver>-<target>/`; a
+  post-install `--version` probe rejects a binary that cannot exec; and
+  `binary.path` bypasses download entirely. Verified on Linux x86_64 with the
+  smoke run (install into a temp root) and a fresh-import status check
+  (`target: x86_64-unknown-linux-musl`). The server hosting this session still
+  holds the previous module (0.1.0), so `xerj_status` here will only show
+  `target` after a restart.
 - The plugin is live in this OpenCode server: `xerj_status` answers, the node
   auto-starts on 9200, and plugin options arrive intact (nested objects are not
   flattened). Reloading the config re-attached to the running node instead of
@@ -41,7 +50,7 @@ Updated: 2026-11-03
 - The index root is `ctx.location.project.canonical`, not the session directory:
   a session opened in `.agents/` was deriving
   `xop-agents-<hash>` before the fix.
-- `bun test test/unit` passes (83 tests); `tsc --noEmit` is clean.
+- `bun test test/unit` passes (108 tests); `tsc --noEmit` is clean.
 
 ## Layout
 
@@ -52,6 +61,7 @@ src/semver.ts          prerelease-aware comparison (rc.99 < rc.100)
 src/platform.ts        release target selection
 src/log.ts             durable ring-buffer logger
 src/binary/release.ts  asset naming, checksums, release cache
+src/binary/detect.ts   host target detection (Rosetta, Windows ARM64)
 src/binary/manager.ts  download, verify, extract, upgrade
 src/node/client.ts     HTTP client, size parsing
 src/node/supervisor.ts probe, spawn, attach, port selection, stop
@@ -82,23 +92,24 @@ test/unit/*.test.ts    pure-function tests
 
 ## Work in progress
 
-Nothing. M0–M3 are committed; the next slice is M4.
+Nothing. M0–M4 are committed; the next slice is M5 (TUI polish), then M6
+(brain and anomaly).
 
 ## Blocked / unknown
 
-- `/_memory` filter syntax and `recency_weight` behaviour (M3).
 - `/_graph/<brain>/ego` response shape (M6).
-- Whether nested plugin option objects survive OpenCode's option validation
-  unchanged: verified, they do.
 
 ## Verified
 
 - Release assets for `v1.0.0-rc.100`: `xerj-<ver>-<target>.tar.gz` + `.sha256`
   (`<hex>  <filename>`), Linux musl default, archive root
   `xerj-<ver>-<target>/`, latest resolved by redirect.
-- Target selection covers Linux x86_64/aarch64 (musl), macOS x86_64/arm64, and
-  Windows x86_64/arm64 (zip, `xerj.exe`, `LOCALAPPDATA`). Rosetta shells get
-  the native arm64 build. Only Linux x86_64 has been exercised.
+- Target selection covers Linux x86_64/aarch64 (musl or gnu), macOS
+  x86_64/arm64, and Windows x86_64/arm64 (zip, `xerj.exe`, `LOCALAPPDATA`).
+  Rosetta shells and x64 Node on Windows ARM64 get the native arm64 build.
+  Installs are target-scoped and probed before use; `binary.target`,
+  `binary.libc`, and `binary.path` are covered by unit tests. Only Linux x86_64
+  has been exercised end to end.
 - Node identity: `GET /` → `cluster_name: "xerj"`; `version.number` is the ES
   wire version `8.13.0`, not the release.
 - `--port P` claims P, P+1 and P+2; `--auto-port` is opt-in.
@@ -147,3 +158,9 @@ Nothing. M0–M3 are committed; the next slice is M4.
   stable ids, memory recall wired into prompt-time injection, kind filtering
   moved client-side after `/_memory` metadata filters returned nothing.
   Automatic compaction capture deferred: the hook runs before the summary.
+- 2026-11-03: Binary management made platform-aware. `binary.target` and
+  `binary.libc` are configurable, host detection handles Rosetta and Windows
+  ARM64, installs are target-scoped and probed, `binary.path` bypasses
+  download, and the status snapshot reports the target. Smoke installs into a
+  temp root and a fresh-import status check both pass; the live server keeps
+  the old module until restart.

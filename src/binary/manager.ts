@@ -62,7 +62,7 @@ export async function ensureBinary(options: EnsureBinaryOptions): Promise<Instal
   const { root, requested, platform, info, logger } = options;
   const now = options.now ?? Date.now;
 
-  const installed = await findInstalled(root, platform);
+  const installed = await findInstalled(root, platform, info.target);
 
   if (requested !== "auto") {
     const version = normalizeVersion(requested);
@@ -96,24 +96,48 @@ export async function ensureBinary(options: EnsureBinaryOptions): Promise<Instal
   }
 }
 
-/** Runs `xerj --version` and returns the parsed version. */
+/** Runs `xerj --version` and returns the parsed version. A binary that does
+ * not run yields null rather than throwing; callers decide what that means. */
 export async function probeBinaryVersion(path: string): Promise<string | null> {
-  const output = await run(path, ["--version"]);
-  const match = /v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/.exec(output);
-  return match?.[1] ?? null;
+  try {
+    const output = await run(path, ["--version"]);
+    const match = /v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/.exec(output);
+    return match?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Uses a user-supplied binary, skipping download, upgrade, and detection. */
+export async function externalBinary(path: string, logger: Logger): Promise<InstalledBinary> {
+  const version = await probeBinaryVersion(path);
+  if (!version) {
+    throw new BinaryError(`binary.path did not run or report a version: ${path}`);
+  }
+
+  logger.info("using the configured xerj binary", { path, version });
+  return { version, path, upgraded: false };
 }
 
 async function findInstalled(
   root: string,
   platform: NodeJS.Platform,
+  target: string,
 ): Promise<InstalledBinary | null> {
   const binDir = join(root, "bin");
   const entries = await readdir(binDir, { withFileTypes: true }).catch(() => []);
-  const versions = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+
+  // Directory names are `<version>-<target>`; only this target's binaries run
+  // here, so a shared data root may hold others without confusing the choice.
+  const suffix = `-${target}`;
+  const versions = entries
+    .filter((entry) => entry.isDirectory() && entry.name.endsWith(suffix))
+    .map((entry) => entry.name.slice(0, -suffix.length));
+
   const best = highestVersion(versions);
   if (!best) return null;
 
-  const path = binaryPath(root, best, platform);
+  const path = binaryPath(root, best, platform, target);
   const version = await probeBinaryVersion(path);
   if (!version) return null;
   return { version, path, upgraded: false };
@@ -160,8 +184,8 @@ async function install(
   const asset = assetName(version, info.target, info.archive);
   const url = assetUrl(version, asset);
   const downloadPath = join(root, "bin", asset);
-  const partialDir = join(root, "bin", `.${version}.partial`);
-  const targetDir = join(root, "bin", version);
+  const partialDir = join(root, "bin", `.${version}-${info.target}.partial`);
+  const targetDir = join(root, "bin", `${version}-${info.target}`);
 
   await mkdir(dirname(downloadPath), { recursive: true, mode: 0o700 });
   await rm(partialDir, { recursive: true, force: true });
@@ -172,7 +196,7 @@ async function install(
     await download(url, downloadPath);
     await verifyChecksum(`${url}.sha256`, downloadPath);
 
-    await run("tar", ["-xf", downloadPath, "-C", partialDir]);
+    await extractArchive(downloadPath, partialDir, info, logger);
 
     const expected = join(partialDir, archiveRoot(version, info.target), info.binary);
     const binary = (await isFile(expected)) ? expected : await findFile(partialDir, info.binary);
@@ -182,10 +206,51 @@ async function install(
     await rm(targetDir, { recursive: true, force: true });
     await rename(dirname(binary), targetDir);
 
-    return join(targetDir, info.binary);
+    const installed = join(targetDir, info.binary);
+    // A binary for the wrong architecture installs and then fails to exec, so
+    // prove it runs before declaring success.
+    const reported = await probeBinaryVersion(installed);
+    if (!reported) {
+      await rm(targetDir, { recursive: true, force: true });
+      throw new BinaryError(
+        `the ${info.target} binary did not run on this machine; set binary.target or install the native build`,
+      );
+    }
+
+    return installed;
   } finally {
     await rm(partialDir, { recursive: true, force: true });
     await rm(downloadPath, { force: true });
+  }
+}
+
+/**
+ * Extracts a release archive. `tar -xf` handles tar.gz everywhere and zip on
+ * Windows (bsdtar ships with Windows 10+). If tar is missing or refuses the
+ * zip, PowerShell's Expand-Archive is the fallback.
+ */
+async function extractArchive(
+  archivePath: string,
+  destination: string,
+  info: PlatformInfo,
+  logger: Logger,
+): Promise<void> {
+  try {
+    await run("tar", ["-xf", archivePath, "-C", destination]);
+    return;
+  } catch (error) {
+    if (info.archive !== "zip" || process.platform !== "win32") throw error;
+    logger.warn("tar could not extract the archive; trying PowerShell", String(error));
+    await run(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "Expand-Archive -LiteralPath $env:XERJ_ZIP -DestinationPath $env:XERJ_DST -Force",
+      ],
+      { env: { ...process.env, XERJ_ZIP: archivePath, XERJ_DST: destination } },
+    );
   }
 }
 
@@ -248,9 +313,21 @@ async function readFileJson(path: string): Promise<unknown> {
   }
 }
 
-function run(command: string, args: ReadonlyArray<string>): Promise<string> {
+interface RunOptions {
+  readonly env?: NodeJS.ProcessEnv;
+}
+
+function run(
+  command: string,
+  args: ReadonlyArray<string>,
+  options: RunOptions = {},
+): Promise<string> {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(command, [...args], { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, [...args], {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: options.env,
+      windowsHide: true,
+    });
     let stdout = "";
     let stderr = "";
 

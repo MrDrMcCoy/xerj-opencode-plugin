@@ -42,8 +42,15 @@ export function dataRoot(env: Environment, platform: NodeJS.Platform = process.p
   return join(base, APP_DIR);
 }
 
-export function binaryPath(root: string, version: string, platform: NodeJS.Platform): string {
-  return join(root, "bin", version, binaryName(platform));
+export function binaryPath(
+  root: string,
+  version: string,
+  platform: NodeJS.Platform,
+  target: string,
+): string {
+  // The target is part of the directory so a shared data root can hold more
+  // than one platform's binary without one overwriting the other.
+  return join(root, "bin", `${version}-${target}`, binaryName(platform));
 }
 
 export function binaryName(platform: NodeJS.Platform): string {

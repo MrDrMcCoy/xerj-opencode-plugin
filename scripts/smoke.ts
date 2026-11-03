@@ -8,11 +8,11 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { detectRuntime } from "../src/binary/detect.ts";
 import { ensureBinary, probeBinaryVersion } from "../src/binary/manager.ts";
 import { createLogger } from "../src/log.ts";
 import { XerjClient } from "../src/node/client.ts";
 import { ensureNode, stopNode } from "../src/node/supervisor.ts";
-import { releaseTarget } from "../src/platform.ts";
 
 const memory = new Map<string, unknown>();
 const storage = {
@@ -23,7 +23,8 @@ const storage = {
 const logger = createLogger(storage, { echoToConsole: true });
 
 const root = await mkdtemp(join(tmpdir(), "xerj-smoke-"));
-const info = releaseTarget(process.platform, process.arch);
+const host = await detectRuntime({ libc: "musl", target: null });
+const info = host.info;
 if (!info) throw new Error(`unsupported platform: ${process.platform}/${process.arch}`);
 
 try {

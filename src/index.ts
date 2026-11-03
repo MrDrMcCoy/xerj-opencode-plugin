@@ -5,7 +5,8 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Plugin } from "@opencode/plugin";
-import { ensureBinary, type InstalledBinary } from "./binary/manager.ts";
+import { detectRuntime } from "./binary/detect.ts";
+import { ensureBinary, externalBinary, type InstalledBinary } from "./binary/manager.ts";
 import { loadConfig } from "./config.ts";
 import { registerSessionHooks } from "./hooks/session.ts";
 import { CorpusService, type CorpusSnapshot } from "./index/watcher.ts";
@@ -26,7 +27,6 @@ import {
   projectStateDir,
   webPrefix,
 } from "./paths.ts";
-import { releaseTarget } from "./platform.ts";
 import { PLUGIN_VERSION, XerjRpc, type StatusSnapshot } from "./rpc.ts";
 import { MemoryStore } from "./memory/store.ts";
 import { RemoteSpool } from "./remote/spool.ts";
@@ -81,10 +81,17 @@ export default Plugin.define({
       logger,
     });
 
-    const info = releaseTarget(process.platform, process.arch);
-    if (!info) {
+    const host = await detectRuntime({
+      libc: config.binary.libc,
+      target: config.binary.target,
+      env: process.env,
+    });
+    const info = host.info;
+    if (!info && !config.binary.path) {
       runtime.phase = "disabled";
-      runtime.error = `unsupported platform: ${process.platform}/${process.arch}`;
+      runtime.error = config.binary.target
+        ? `binary.target ${config.binary.target} cannot run on ${host.platform}/${host.arch}`
+        : `unsupported platform: ${host.platform}/${host.arch}`;
       logger.error(runtime.error);
     }
 
@@ -104,6 +111,7 @@ export default Plugin.define({
           version: runtime.binary?.version ?? null,
           path: runtime.binary?.path ?? null,
           upgraded: runtime.binary?.upgraded ?? false,
+          target: info?.target ?? null,
         },
         index: {
           prefix,
@@ -231,23 +239,31 @@ export default Plugin.define({
 
     const bootstrap = async (): Promise<void> => {
       try {
-        if (!info) return;
+        if (!info && !config.binary.path) return;
 
         // Project state is created before the first tool call so a read-only
         // workspace surfaces here, not mid-session.
         await ensureProjectState(projectRoot);
 
-        runtime.binary = await ensureBinary({
-          root,
-          requested: config.binary.version,
-          platform: process.platform,
-          info,
-          logger,
-        });
+        // An explicit path wins over download and detection: the user already
+        // built or installed a binary, possibly for a platform we do not ship.
+        const binary = config.binary.path
+          ? await externalBinary(config.binary.path, logger)
+          : info
+            ? await ensureBinary({
+                root,
+                requested: config.binary.version,
+                platform: process.platform,
+                info,
+                logger,
+              })
+            : null;
+        if (!binary) return;
+        runtime.binary = binary;
 
         runtime.node = await ensureNode({
-          binaryPath: runtime.binary.path,
-          binaryVersion: runtime.binary.version,
+          binaryPath: binary.path,
+          binaryVersion: binary.version,
           root,
           dataDir: config.node.dataDir,
           preferredPort: config.node.port,

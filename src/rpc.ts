@@ -17,6 +17,7 @@ export interface BinaryStatus {
   readonly version: string | null;
   readonly path: string | null;
   readonly upgraded: boolean;
+  readonly target: string | null;
 }
 
 export interface IndexStatus {
@@ -99,6 +100,7 @@ const definition = {
           version: { type: ["string", "null"] },
           path: { type: ["string", "null"] },
           upgraded: { type: "boolean" },
+          target: { type: ["string", "null"] },
         }),
         index: object({
           prefix: { type: "string" },
@@ -147,4 +149,4 @@ const definition = {
 
 export const XerjRpc = Rpc.define(definition);
 
-export const PLUGIN_VERSION = "0.1.0";
+export const PLUGIN_VERSION = "0.1.1";

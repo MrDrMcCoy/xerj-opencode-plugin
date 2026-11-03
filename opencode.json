@@ -4,6 +4,8 @@
     {
       "package": "./",
       "options": {
+        "binary": { "libc": "musl" },
+        "context": { "maxPassages": 4 },
         "index": {
           "brain": [".agents"]
         }

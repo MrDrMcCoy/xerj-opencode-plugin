@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { isRosetta, releaseTarget } from "../../src/platform.ts";
+import {
+  effectiveArch,
+  isRosetta,
+  platformInfoForTarget,
+  releaseTarget,
+} from "../../src/platform.ts";
 
 describe("releaseTarget", () => {
   test("uses the static musl build on Linux", () => {
@@ -25,11 +30,47 @@ describe("releaseTarget", () => {
       archive: "zip",
       binary: "xerj.exe",
     });
+    expect(releaseTarget("win32", "arm64")?.target).toBe("aarch64-pc-windows-msvc");
+  });
+
+  test("honours an explicit libc on Linux", () => {
+    expect(releaseTarget("linux", "x64", false, "gnu")?.target).toBe(
+      "x86_64-unknown-linux-gnu",
+    );
+    expect(releaseTarget("linux", "arm64", false, "gnu")?.target).toBe(
+      "aarch64-unknown-linux-gnu",
+    );
   });
 
   test("returns null for unpublished platforms", () => {
     expect(releaseTarget("freebsd", "x64")).toBeNull();
     expect(releaseTarget("linux", "ppc64")).toBeNull();
+  });
+});
+
+describe("platformInfoForTarget", () => {
+  test("accepts a matching host and target", () => {
+    expect(platformInfoForTarget("aarch64-apple-darwin", "darwin")).toEqual({
+      target: "aarch64-apple-darwin",
+      archive: "tar.gz",
+      binary: "xerj",
+    });
+    expect(platformInfoForTarget("x86_64-pc-windows-msvc", "win32")?.archive).toBe("zip");
+  });
+
+  test("rejects cross-OS targets and malformed triples", () => {
+    expect(platformInfoForTarget("x86_64-unknown-linux-musl", "win32")).toBeNull();
+    expect(platformInfoForTarget("x86_64-pc-windows-msvc", "darwin")).toBeNull();
+    expect(platformInfoForTarget("not-a-target", "linux")).toBeNull();
+  });
+});
+
+describe("effectiveArch", () => {
+  test("trusts the host except where Node reports x64 on arm64", () => {
+    expect(effectiveArch("linux", "arm64", {})).toBe("arm64");
+    expect(effectiveArch("darwin", "x64", {}, true)).toBe("arm64");
+    expect(effectiveArch("win32", "x64", { PROCESSOR_ARCHITECTURE: "ARM64" })).toBe("arm64");
+    expect(effectiveArch("win32", "x64", { PROCESSOR_ARCHITECTURE: "AMD64" })).toBe("x64");
   });
 });
 
