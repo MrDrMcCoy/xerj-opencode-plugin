@@ -5,6 +5,14 @@ Updated: 2026-11-03
 ## Where things stand
 
 - M0 is implemented and verified against a real XERJ `v1.0.0-rc.100` binary.
+- M1 is implemented and verified live: the project index is built by a
+  supervised `autoindex --watch --no-graph` process. Adding a file moved the
+  corpus from 304 to 305 records in one pass; deleting it moved it back; the
+  generation counter incremented each time. Current index: 304 records,
+  ~550 KB, state `watching`, no restarts.
+- The journal lives at `<data root>/state/<prefix>/`, not in `.xerj`:
+  `--watch` refuses a state dir inside the watched tree, because journal writes
+  are filesystem events that would restart the pass forever.
 - The plugin is live in this OpenCode server: `xerj_status` answers, the node
   auto-starts on 9200, and plugin options arrive intact (nested objects are not
   flattened). Reloading the config re-attached to the running node instead of
@@ -26,6 +34,8 @@ src/binary/release.ts  asset naming, checksums, release cache
 src/binary/manager.ts  download, verify, extract, upgrade
 src/node/client.ts     HTTP client, size parsing
 src/node/supervisor.ts probe, spawn, attach, port selection, stop
+src/index/corpus.ts    layout, command line, run-document parsing
+src/index/watcher.ts   supervised watch process + periodic fallback
 src/rpc.ts             typed RPC contract + status types
 src/index.ts           server part
 src/tui.tsx            sidebar slot + /xerj commands
@@ -35,12 +45,11 @@ test/unit/*.test.ts    pure-function tests
 
 ## Next actions
 
-1. M1: run `autoindex --watch --no-graph` as a supervised process, record the
-   last run in storage, expose docs/bytes/freshness through `xerj_status`.
-2. Add `.opencode/opencode.json` dogfooding the plugin with
-   `index.brain: [".agents"]` once indexing exists.
-3. Load the plugin in a real OpenCode server and confirm the tool plus the
-   sidebar slot render.
+1. M2: `xerj_search` and `xerj_def` tools, passage formatting with
+   `path:line`, prompt-time retrieval with a deadline, and the savings ledger.
+2. Verify the TUI sidebar and `/xerj` commands in a real terminal session.
+3. Optional: `index.brain` execution over `.agents` (M6 features exist in the
+   node already, but nothing consumes edges yet).
 
 ## Work in progress
 
@@ -90,3 +99,7 @@ Nothing. Working tree has M0 changes not yet committed.
 - 2026-11-03: M0 verified inside the running OpenCode server: the plugin loads
   from `opencode.json`, `xerj_status` answers, options are intact, the node is
   shared across reloads. Index root corrected to the project canonical path.
+- 2026-11-03: M1 implemented and verified live: supervised watch indexing,
+  run-document parsing, periodic fallback, `reindex` RPC, freshness and counts
+  in `xerj_status`. Journal moved to the data root after `--watch` refused a
+  state dir inside the watched tree.

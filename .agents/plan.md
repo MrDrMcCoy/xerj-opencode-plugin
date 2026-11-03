@@ -66,8 +66,9 @@ Plugin options in `opencode.json(c)`; every value has a default.
     "options": {
       "binary":  { "version": "auto", "path": null },
       "node":    { "url": null, "port": 9200, "dataDir": null },
-      "index":   { "auto": true, "debounceMs": 5000, "periodicMs": 900000,
-                   "workers": null, "brain": [] },
+      "index":   { "auto": true, "watch": true, "debounceMs": 800, "periodicMs": 900000,
+                   "workers": null, "brain": [], "semantic": true,
+                   "maxBytes": 2147483648, "maxMinutes": 10 },
       "remote":  { "enabled": true, "maxBytes": 2000000 },
       "context": { "enabled": true, "maxTokens": 1500, "memoryTokens": 400,
                    "minScore": 0.2, "timeoutMs": 400 },
@@ -82,13 +83,13 @@ Plugin options in `opencode.json(c)`; every value has a default.
 `binary.version: "auto"` means "latest minor, pin the resolved patch".
 `node.url` set means "attach, never spawn".
 
-This repo dogfoods its own plugin. `.opencode/opencode.json` here loads the
-package with `.agents` as the example brain:
+This repo dogfoods its own plugin. `opencode.json` at the repo root loads it
+from the working tree; a published install uses the scoped package name:
 
 ```jsonc
 {
   "plugins": [{
-    "package": "@mrdrmccoy/xerj-opencode-plugin",
+    "package": "./",
     "options": { "index": { "brain": [".agents"] } }
   }]
 }
@@ -106,8 +107,8 @@ binary        ~/.local/share/opencode/xerj/bin/<ver>/xerj
 port          <data dir>/port                          (resolved, persisted)
 pid           <data dir>/node.pid
 spool         <data dir>/spool/<prefix>/               (remote documents)
-project       <project>/.xerj/                         (journal, config, cache)
-journal       <project>/.xerj/state/journal.ndjson
+project       <project>/.xerj/                         (ignore file, caches)
+journal       <data root>/state/<prefix>/journal.ndjson
 ```
 
 Index prefix, stable per canonical project path:
@@ -128,6 +129,11 @@ reach the project index. That is why the brain is the only way `.agents` is
 searchable, and why `index.brain` is not redundant with the project corpus.
 
 `.xerj/.gitignore` contains `*` so project state never lands in git.
+
+The journal lives under the data root, not in `.xerj`. `autoindex --watch`
+refuses a `--state-dir` inside the watched tree: every pass writes the journal,
+those writes are filesystem events, and the events would start the next pass
+forever. Verified by the binary's own error message.
 
 ## 5. Binary management
 
@@ -195,7 +201,7 @@ On setup, asynchronously:
 
 ```
 xerj autoindex <project root>
-  --url <node> --prefix <prefix> --state-dir <project>/.xerj/state
+  --url <node> --prefix <prefix> --state-dir <data root>/state/<prefix>
   --no-graph --json --progress none
 ```
 
@@ -215,7 +221,7 @@ anyway. The plan is:
 |---|---|
 | plugin setup | start `autoindex --watch --no-graph` as a supervised resident process |
 | watcher exits | restart with exponential backoff (1 s → 60 s, max 5), then fall back to periodic runs |
-| `write`/`edit`/`patch` tool result | mark dirty; the watcher picks it up (fallback: debounce 5 s) |
+| `write`/`edit`/`patch` tool result | mark dirty; the watcher picks it up |
 | periodic timer | only when the watcher is unavailable |
 | `/xerj reindex` | run `--watch` once more, or a one-shot run when watch is disabled |
 

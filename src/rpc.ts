@@ -24,6 +24,12 @@ export interface IndexStatus {
   readonly docs: number;
   readonly bytes: number;
   readonly indices: number;
+  readonly state: "disabled" | "starting" | "watching" | "idle" | "error";
+  readonly lastRunAt: number | null;
+  readonly lastGeneration: number | null;
+  readonly lastRecords: number | null;
+  readonly restarts: number;
+  readonly lastError: string | null;
 }
 
 export interface UsageStatus {
@@ -98,6 +104,15 @@ const definition = {
           docs: { type: "number" },
           bytes: { type: "number" },
           indices: { type: "number" },
+          state: {
+            type: "string",
+            enum: ["disabled", "starting", "watching", "idle", "error"],
+          },
+          lastRunAt: { type: ["number", "null"] },
+          lastGeneration: { type: ["number", "null"] },
+          lastRecords: { type: ["number", "null"] },
+          restarts: { type: "number" },
+          lastError: { type: ["string", "null"] },
         }),
         config: object({
           indexRoot: { type: "string" },
@@ -115,6 +130,10 @@ const definition = {
         warnings: { type: "array", items: { type: "string" } },
         errors: { type: "array", items: { type: "string" } },
       }),
+    },
+    reindex: {
+      input: valueSchema({}),
+      output: valueSchema({ queued: { type: "boolean" } }),
     },
   },
   events: {

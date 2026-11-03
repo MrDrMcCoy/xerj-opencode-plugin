@@ -17,12 +17,14 @@ import {
   type NodeHandle,
 } from "./node/supervisor.ts";
 import { XerjClient } from "./node/client.ts";
+import { CorpusService, type CorpusSnapshot } from "./index/watcher.ts";
 import { PLUGIN_VERSION, XerjRpc, type StatusSnapshot } from "./rpc.ts";
 
 interface Runtime {
   phase: "starting" | "ready" | "error" | "disabled";
   binary: InstalledBinary | null;
   node: NodeHandle | null;
+  corpus: CorpusService | null;
   error: string | null;
   warnings: string[];
 }
@@ -55,6 +57,7 @@ export default Plugin.define({
       phase: "starting",
       binary: null,
       node: null,
+      corpus: null,
       error: null,
       warnings: [...warnings],
     };
@@ -82,7 +85,13 @@ export default Plugin.define({
           path: runtime.binary?.path ?? null,
           upgraded: runtime.binary?.upgraded ?? false,
         },
-        index: { prefix, docs: 0, bytes: 0, indices: 0 },
+        index: {
+          prefix,
+          docs: 0,
+          bytes: 0,
+          indices: 0,
+          ...corpusStatus(runtime.corpus),
+        },
         config: {
           indexRoot: projectRoot,
           brain: config.index.brain,
@@ -107,6 +116,7 @@ export default Plugin.define({
             docs: mine.reduce((total, entry) => total + entry.docs, 0),
             bytes: mine.reduce((total, entry) => total + entry.bytes, 0),
             indices: mine.length,
+            ...corpusStatus(runtime.corpus),
           },
         };
       } catch (error) {
@@ -116,6 +126,10 @@ export default Plugin.define({
 
     const registration = await ctx.rpc.register(XerjRpc, {
       status: async () => snapshot(),
+      reindex: async () => {
+        await runtime.corpus?.reindex();
+        return { queued: runtime.corpus !== null };
+      },
     });
 
     await ctx.tool.transform((editor) => {
@@ -168,6 +182,24 @@ export default Plugin.define({
           url: runtime.node.baseUrl,
           version: runtime.node.version,
         });
+
+        runtime.corpus = new CorpusService({
+          binaryPath: runtime.binary.path,
+          nodeUrl: runtime.node.baseUrl,
+          projectRoot,
+          prefix,
+          dataRoot: root,
+          config,
+          storage,
+          logger,
+          onChange: () => {
+            void registration.events
+              .emit("updated", { updatedAt: Date.now() })
+              .catch(() => {});
+          },
+        });
+        await runtime.corpus.start();
+
         await registration.events.emit("updated", { updatedAt: Date.now() });
       } catch (error) {
         runtime.phase = "error";
@@ -184,8 +216,11 @@ export default Plugin.define({
 
     return () => {
       shutdown.abort();
-      logger
-        .flush()
+      const corpus = runtime.corpus;
+      runtime.corpus = null;
+
+      void (corpus?.stop() ?? Promise.resolve())
+        .then(() => logger.flush())
         .then(() => registration.dispose())
         .catch(() => {});
     };
@@ -197,6 +232,21 @@ async function ensureProjectState(projectRoot: string): Promise<void> {
   const directory = projectStateDir(projectRoot);
   await mkdir(directory, { recursive: true });
   await writeFile(join(directory, ".gitignore"), "*\n", { flag: "wx" }).catch(() => {});
+}
+
+function corpusStatus(corpus: CorpusService | null): Pick<
+  StatusSnapshot["index"],
+  "state" | "lastRunAt" | "lastGeneration" | "lastRecords" | "restarts" | "lastError"
+> {
+  const snapshot: CorpusSnapshot | null = corpus?.snapshot() ?? null;
+  return {
+    state: snapshot?.state ?? "disabled",
+    lastRunAt: snapshot?.lastRun?.at ?? null,
+    lastGeneration: snapshot?.lastRun?.generation ?? null,
+    lastRecords: snapshot?.lastRun?.records ?? null,
+    restarts: snapshot?.restarts ?? 0,
+    lastError: snapshot?.lastError ?? null,
+  };
 }
 
 function asStorage(storage: Plugin.Context["storage"]): KeyValueStorage {

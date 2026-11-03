@@ -28,6 +28,8 @@ export interface IndexOptions {
   readonly brain: ReadonlyArray<string>;
   readonly semantic: boolean;
   readonly maxBytes: number;
+  /** Upper bound on the measured first-index estimate before asking. */
+  readonly maxMinutes: number;
 }
 
 export interface RemoteOptions {
@@ -78,12 +80,13 @@ export const DEFAULT_CONFIG: Config = {
   index: {
     auto: true,
     watch: true,
-    debounceMs: 5000,
+    debounceMs: 800,
     periodicMs: 900_000,
     workers: null,
     brain: [],
     semantic: true,
     maxBytes: 2 * 1024 ** 3,
+    maxMinutes: 10,
   },
   remote: { enabled: true, maxBytes: 2_000_000 },
   context: {
@@ -161,6 +164,14 @@ export function loadConfig(
         0,
         Number.MAX_SAFE_INTEGER,
         "index.maxBytes",
+        warnings,
+      ),
+      maxMinutes: readInteger(
+        index.maxMinutes,
+        DEFAULT_CONFIG.index.maxMinutes,
+        1,
+        10_080,
+        "index.maxMinutes",
         warnings,
       ),
     },

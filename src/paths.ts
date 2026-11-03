@@ -70,14 +70,11 @@ export function spoolDir(root: string, prefix: string): string {
   return join(root, "spool", prefix);
 }
 
-/** Project-local state: journal, config, caches. Never the engine index. */
+/** Project-local state: ignore file and caches. Never the engine index. */
 export function projectStateDir(projectRoot: string): string {
   return join(projectRoot, ".xerj");
 }
 
-export function projectJournalDir(projectRoot: string): string {
-  return join(projectStateDir(projectRoot), "state");
-}
 
 /** Lowercase alphanumeric slug, joined by single dashes. */
 export function slug(name: string, maxLength = MAX_SLUG_LENGTH): string {

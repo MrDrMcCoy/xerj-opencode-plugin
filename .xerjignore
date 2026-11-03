@@ -1,0 +1,6 @@
+# Written once by the XERJ OpenCode plugin. Edit freely; it is not rewritten.
+.env
+.env.*
+*.pem
+*.key
+**/secrets/**

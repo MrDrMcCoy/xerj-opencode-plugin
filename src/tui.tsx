@@ -74,11 +74,16 @@ export default Plugin.define({
           group: "XERJ",
           palette: true,
           enabled: () => state.ready,
-          run: () => {
-            context.ui.toast.show({
-              message: "Reindex is not wired up yet (M1).",
-              variant: "info",
-            });
+          run: async () => {
+            try {
+              const result = (await rpc.reindex({})) as { queued?: boolean };
+              context.ui.toast.show({
+                message: result.queued ? "XERJ reindex queued" : "XERJ indexing is disabled",
+                variant: result.queued ? "success" : "info",
+              });
+            } catch {
+              context.ui.toast.show({ message: "XERJ is not available", variant: "error" });
+            }
           },
         },
       ],
@@ -119,7 +124,11 @@ function detail(snapshot: StatusSnapshot): string {
   }
 
   const version = node.serverVersion ?? "unknown";
-  return `node ${version} · ${snapshot.index?.indices ?? 0} indices`;
+  const index = snapshot.index;
+  const state = index?.state ?? "disabled";
+  const docs = index?.docs ?? 0;
+  const suffix = docs > 0 ? ` · ${formatCount(docs)} docs` : "";
+  return `node ${version} · ${state}${suffix}`;
 }
 
 function formatCount(value: number): string {
