@@ -60,6 +60,11 @@ Updated: 2026-11-03
 - The TUI was exercised with a stub host: 4 commands registered, 2 slot claims,
   event refresh, panel open, search alert, and remember toast all fired. Actual
   rendering needs a real terminal, which this session cannot observe.
+- The panel now has a close affordance. `escape` is bound to a keymap command
+  that exists only while this plugin's panel is open, the footer carries a
+  clickable `✕ close` box wired to the slot input's `close`, and `/xerj`
+  toggles instead of reopening. Five TUI tests cover the location, the client
+  swap, the close command's gating, and the toggle.
 - The TUI reported "offline" in the sidebar and "waiting for the XERJ server
   part" in the panel while every server-side tool worked. Two faults, both
   failing client-side, so the server logged no request: the sub-client was
@@ -96,7 +101,7 @@ Updated: 2026-11-03
 - The index root is `ctx.location.project.canonical`, not the session directory:
   a session opened in `.agents/` was deriving
   `xop-agents-<hash>` before the fix.
-- `bun test test/unit` passes (167 tests); `tsc --noEmit` is clean.
+- `bun test test/unit` passes (169 tests); `tsc --noEmit` is clean.
 
 ## Layout
 

@@ -83,6 +83,11 @@ export default Plugin.define({
 
     const showStatus = async (): Promise<void> => {
       await refresh();
+      // Re-running the command closes the panel it opened.
+      if (context.ui.panel.current()?.name === PANEL_NAME) {
+        context.ui.panel.close();
+        return;
+      }
       if (context.ui.panel.open(PANEL_NAME)) return;
 
       await context.ui.dialog.alert({
@@ -198,6 +203,15 @@ export default Plugin.define({
           },
         },
         {
+          id: "xerj.close",
+          title: "Close XERJ panel",
+          description: "Close the XERJ details panel",
+          group: "XERJ",
+          bind: "escape",
+          enabled: () => context.ui.panel.current()?.name === PANEL_NAME,
+          run: () => context.ui.panel.close(),
+        },
+        {
           id: "xerj.reindex",
           title: "XERJ reindex",
           description: "Queue an incremental reindex of this project",
@@ -253,21 +267,39 @@ export default Plugin.define({
         const sections = snapshot ? panelSections(snapshot, Date.now()) : [];
 
         return (
-          <scrollbox flexDirection="column">
-            {sections.map((section) => (
-              <box flexDirection="column" marginBottom={1}>
-                <text fg={context.theme.text.base}>{section.title}</text>
-                {section.lines.map((line) => (
-                  <text fg={context.theme.text.muted}>{line}</text>
-                ))}
+          <box flexDirection="column">
+            <scrollbox flexDirection="column">
+              {sections.map((section) => (
+                <box flexDirection="column" marginBottom={1}>
+                  <text fg={context.theme.text.base}>{section.title}</text>
+                  {section.lines.map((line) => (
+                    <text fg={context.theme.text.muted}>{line}</text>
+                  ))}
+                </box>
+              ))}
+              {sections.length === 0 ? (
+                <text fg={context.theme.text.faint}>
+                  {state.reason ?? "waiting for the XERJ server part"}
+                </text>
+              ) : null}
+            </scrollbox>
+            <box
+              flexDirection="row"
+              justifyContent="space-between"
+              marginTop={1}
+            >
+              <text fg={context.theme.text.faint}>esc or /xerj closes</text>
+              <box
+                border
+                borderColor={context.theme.border.base}
+                paddingLeft={1}
+                paddingRight={1}
+                onMouseDown={() => input.close()}
+              >
+                <text fg={context.theme.text.base}>✕ close</text>
               </box>
-            ))}
-            {sections.length === 0 ? (
-              <text fg={context.theme.text.faint}>
-                {state.reason ?? "waiting for the XERJ server part"}
-              </text>
-            ) : null}
-          </scrollbox>
+            </box>
+          </box>
         );
       },
     });

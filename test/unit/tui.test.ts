@@ -1,6 +1,6 @@
 // The TUI half fails silently when it captures a stale client or omits the
 // location, so this drives the real plugin against a stub host and asserts the
-// two properties a live terminal cannot show in a test.
+// properties a live terminal cannot show in a test.
 import { describe, expect, test } from "bun:test";
 import TuiPlugin from "../../src/tui.tsx";
 import type { StatusSnapshot } from "../../src/rpc.ts";
@@ -51,13 +51,19 @@ const SNAPSHOT: StatusSnapshot = {
   errors: [],
 };
 
-type Command = { id: string; run: (input?: string) => Promise<unknown> };
+type Command = {
+  id: string;
+  enabled?: boolean | (() => boolean);
+  run: (input?: string) => Promise<unknown>;
+};
 
 interface Host {
   readonly calls: Call[];
   readonly commands: Command[];
+  readonly closes: () => number;
   setStatus(handler: () => Promise<StatusSnapshot>): void;
   setLocation(directory: string | undefined): void;
+  setPanel(open: boolean): void;
   swapClient(): void;
 }
 
@@ -69,6 +75,8 @@ function makeHost(): Host {
   let status = async () => SNAPSHOT;
   let location: { directory: string } | undefined = { directory: "/proj" };
   let generation = 0;
+  let panelOpen = false;
+  let closeCount = 0;
 
   const rpc = () => {
     const tag = generation;
@@ -119,21 +127,39 @@ function makeHost(): Host {
     },
     ui: {
       slot: () => () => {},
-      panel: { open: () => true },
+      panel: {
+        open: () => {
+          panelOpen = true;
+          return true;
+        },
+        close: () => {
+          panelOpen = false;
+          closeCount += 1;
+        },
+        current: () =>
+          panelOpen ? { name: "xerj.stats", sessionID: "s" } : undefined,
+      },
       dialog: { alert: async () => {}, prompt: async () => "" },
       toast: { show: () => {} },
     },
-    theme: { text: { base: "white", muted: "gray", faint: "gray" } },
+    theme: {
+      text: { base: "white", muted: "gray", faint: "gray" },
+      border: { base: "gray" },
+    },
   };
 
   const host: Host = {
     calls,
     commands,
+    closes: () => closeCount,
     setStatus: (handler) => {
       status = handler;
     },
     setLocation: (directory) => {
       location = directory === undefined ? undefined : { directory };
+    },
+    setPanel: (open) => {
+      panelOpen = open;
     },
     swapClient: () => {
       generation += 1;
@@ -200,5 +226,38 @@ describe("tui rpc access", () => {
     const call = host.calls.find((entry) => entry.method.startsWith("status"));
     expect(call).toBeDefined();
     expect(call?.options.location).toBeUndefined();
+  });
+});
+
+describe("tui panel close", () => {
+  test("binds a close command only while the panel is open", async () => {
+    const host = makeHost();
+    const { run, dispose } = await setup(host);
+
+    const close = host.commands.find((command) => command.id === "xerj.close");
+    expect(close).toBeDefined();
+    const enabled = close?.enabled;
+    expect(typeof enabled === "function" ? enabled() : enabled).toBe(false);
+
+    await run("");
+    await flush();
+    await close?.run();
+    const closedByCommand = host.closes();
+    dispose();
+
+    expect(closedByCommand).toBe(1);
+  });
+
+  test("re-running the command closes the open panel", async () => {
+    const host = makeHost();
+    const { run, dispose } = await setup(host);
+
+    await run("");
+    await flush();
+    await run("");
+    await flush();
+    dispose();
+
+    expect(host.closes()).toBe(1);
   });
 });

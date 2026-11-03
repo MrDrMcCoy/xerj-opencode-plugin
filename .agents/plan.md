@@ -568,6 +568,12 @@ Commands (keymap layer, `palette: true`, slash names):
 | `/xerj-remember` | prompt for text, store a memory |
 | `/xerj-search` | prompt for a query, show cited passages in a dialog |
 
+The panel closes three ways: `escape`, the `✕ close` button in its footer, or
+running `/xerj` again. The escape binding is a keymap command enabled only
+while `ui.panel.current()` is this plugin's panel, so it cannot shadow the
+host's escape handling elsewhere. The button calls the slot input's `close`,
+so it stays correct if the host stops honouring `ui.panel.close()`.
+
 `ctx.command.transform` on the server part is deliberately not used. A
 server-side command cannot open a panel or a dialog, so it could only toast or
 emit a synthetic message. The TUI owns the commands; the server part owns the
