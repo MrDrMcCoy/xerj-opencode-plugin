@@ -17,7 +17,10 @@ cited passages instead of whole files. Nothing leaves the machine.
 - **Memory.** `xerj_remember`, `xerj_recall`, and `xerj_forget` keep durable
   project facts across sessions.
 - **Remote ingest.** Pages fetched during a session are spooled and indexed, so
-  a URL read today is searchable tomorrow.
+  a URL read today is searchable tomorrow. Reading a file outside the project
+  also indexes it.
+- **Hidden trees.** `index.hidden` indexes folders that `autoindex` skips, such
+  as `.agents` or `.github`, as plain searchable documents.
 - **Second brain.** Opt in with `index.brain` to build a graph over a docs
   folder. Hits expand one hop along citation and sequence edges.
 - **Accounting.** `xerj_status` reports queries, hit rate, bytes returned, and
@@ -70,7 +73,8 @@ failing plugin load.
   "node":    { "url": null, "port": 9200, "dataDir": null },
   "index":   { "auto": true, "watch": true, "debounceMs": 800,
                "periodicMs": 900000, "workers": null, "brain": [],
-               "semantic": true, "maxBytes": 2147483648, "maxMinutes": 10 },
+               "hidden": [], "hiddenMaxBytes": 262144, "semantic": true,
+               "maxBytes": 2147483648, "maxMinutes": 10 },
   "remote":  { "enabled": true, "maxBytes": 2000000 },
   "context": { "enabled": true, "maxTokens": 1500, "memoryTokens": 400,
                "maxPassages": 4, "timeoutMs": 400 },
@@ -89,9 +93,11 @@ failing plugin load.
 | `binary.libc` | `musl` (default) or `gnu` on Linux. |
 | `node.url` | Attach to this node and never spawn one. |
 | `node.port` | Preferred port. The supervisor advances it if taken. |
-| `index.auto` | Run project and brain indexing on startup. |
+| `index.auto` | Run project, hidden, and brain indexing on startup. |
 | `index.watch` | Keep a resident `autoindex --watch` process. |
 | `index.brain` | Folders to index as second brains, e.g. `[".agents"]`. |
+| `index.hidden` | Hidden folders to index as plain documents, e.g. `[".agents"]`. |
+| `index.hiddenMaxBytes` | Per-file ceiling for hidden documents. |
 | `index.semantic` | Include the semantic retrieval leg. |
 | `remote.enabled` | Spool and index fetched pages. |
 | `context.enabled` | Inject retrieved context; the kill switch. |
@@ -156,9 +162,9 @@ restarts. The plugin never kills it on unload.
 
 - XERJ is pre-1.0. The plugin pins a release and isolates every call behind
   `node/client.ts`; upgrades require the same major and never downgrade.
-- Hidden files and directories are skipped by `autoindex`. `.env`, `.git`, and
-  `.agents` never reach the project index. A brain is the only way to index
-  such a folder.
+- `autoindex` skips hidden paths. `index.hidden` covers configured folders
+  (`.agents`, `.github`) through a separate `_bulk` index. `.git`, `.xerj`,
+  build output, virtualenvs, and secret-shaped files are always skipped.
 - External files are indexed as plain text through `_bulk`; no AST or symbol
   extraction.
 - `autoindex` cannot watch a graph, so brains reindex on startup and on

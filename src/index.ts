@@ -3,13 +3,14 @@
 // download or a missing node must not delay OpenCode startup.
 
 import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { Plugin } from "@opencode/plugin";
 import { detectRuntime } from "./binary/detect.ts";
 import { ensureBinary, externalBinary, type InstalledBinary } from "./binary/manager.ts";
 import { loadConfig } from "./config.ts";
 import { registerSessionHooks } from "./hooks/session.ts";
 import { BrainIndexer, type BrainRun } from "./index/brain.ts";
+import { HiddenIndex } from "./index/hidden.ts";
 import { CorpusService, type CorpusSnapshot } from "./index/watcher.ts";
 import { createLogger, type KeyValueStorage, type Logger } from "./log.ts";
 import { XerjClient, type IndexSummary } from "./node/client.ts";
@@ -22,6 +23,7 @@ import {
 import {
   brainSpecs,
   dataRoot,
+  documentRoots,
   environmentFrom,
   externalPrefix,
   indexPrefix,
@@ -29,6 +31,7 @@ import {
   projectStateDir,
   webPrefix,
   type BrainSpec,
+  type DocumentRoot,
 } from "./paths.ts";
 import {
   PLUGIN_VERSION,
@@ -56,6 +59,8 @@ interface Runtime {
   web: CorpusService | null;
   brain: BrainIndexer | null;
   brains: ReadonlyArray<BrainSpec>;
+  hidden: HiddenIndex | null;
+  hiddenRoots: ReadonlyArray<DocumentRoot>;
   anomaly: AnomalyService | null;
   error: string | null;
   warnings: string[];
@@ -75,6 +80,7 @@ export default Plugin.define({
     const projectRoot = ctx.location.project.canonical;
     const prefix = indexPrefix(projectRoot);
     const brains = brainSpecs(projectRoot, config.index.brain);
+    const hiddenRoots = documentRoots(projectRoot, config.index.hidden);
     const runtime: Runtime = {
       phase: "starting",
       binary: null,
@@ -86,6 +92,8 @@ export default Plugin.define({
       web: null,
       brain: null,
       brains,
+      hidden: null,
+      hiddenRoots,
       anomaly: null,
       error: null,
       warnings: [...warnings],
@@ -209,12 +217,17 @@ export default Plugin.define({
     const registration = await ctx.rpc.register(XerjRpc, {
       status: async () => snapshot(),
       reindex: async () => {
-        await Promise.all([runtime.corpus?.reindex(), runtime.web?.reindex()]);
+        await Promise.all([
+          runtime.corpus?.reindex(),
+          runtime.web?.reindex(),
+          runtime.hidden?.reindex(),
+        ]);
         void runtime.brain?.runAll();
         return {
           queued:
             runtime.corpus !== null ||
             runtime.web !== null ||
+            runtime.hidden !== null ||
             runtime.brain !== null,
         };
       },
@@ -288,6 +301,19 @@ export default Plugin.define({
             : null;
       if (filePath === null) return;
       await ledger.recordRead(event.sessionID, filePath, contentBytes(event.result.content));
+
+      // A read outside the project is the only signal that the file matters.
+      // Index it in the background so the read itself is not delayed.
+      if (runtime.spool && isOutside(projectRoot, filePath)) {
+        void runtime.spool
+          .ingestExternalFile(filePath, { skipUnchanged: true })
+          .then((stored) => {
+            if (stored) runtime.search?.invalidate();
+          })
+          .catch((error: unknown) => {
+            logger.debug("could not index an external file", String(error));
+          });
+      }
     });
 
     await registerSessionHooks(ctx, {
@@ -410,6 +436,25 @@ export default Plugin.define({
         });
         await runtime.corpus.start();
 
+        if (runtime.hiddenRoots.length > 0) {
+          runtime.hidden = new HiddenIndex({
+            client,
+            projectRoot,
+            prefix,
+            roots: runtime.hiddenRoots,
+            maxBytes: config.index.hiddenMaxBytes,
+            logger,
+            onChange: () => {
+              runtime.search?.invalidate();
+              void registration.events
+                .emit("updated", { updatedAt: Date.now() })
+                .catch(() => {});
+            },
+          });
+
+          if (config.index.auto) await runtime.hidden.start();
+        }
+
         if (runtime.brains.length > 0) {
           runtime.brain = new BrainIndexer({
             binaryPath: binary.path,
@@ -450,10 +495,12 @@ export default Plugin.define({
       shutdown.abort();
       const corpus = runtime.corpus;
       const web = runtime.web;
+      const hidden = runtime.hidden;
       runtime.corpus = null;
       runtime.web = null;
+      runtime.hidden = null;
 
-      void Promise.all([corpus?.stop(), web?.stop()])
+      void Promise.all([corpus?.stop(), web?.stop(), hidden?.stop()])
         .then(() => ledger.flush())
         .then(() => logger.flush())
         .then(() => registration.dispose())
@@ -496,7 +543,13 @@ function datasetRows(
   const groups = [
     {
       name: "project",
-      matches: (index: string) => index.startsWith(`${project}-`),
+      matches: (index: string) =>
+        index.startsWith(`${project}-`) &&
+        !index.startsWith(`${project}-hidden-`),
+    },
+    {
+      name: "hidden",
+      matches: (index: string) => index.startsWith(`${project}-hidden-`),
     },
     { name: "web", matches: (index: string) => index.startsWith(`${web}-`) },
     {
@@ -523,6 +576,12 @@ function datasetRows(
       };
     })
     .filter((dataset) => dataset.docs > 0 || dataset.bytes > 0);
+}
+
+function isOutside(root: string, filePath: string): boolean {
+  const base = resolve(root);
+  const absolute = resolve(filePath);
+  return absolute !== base && !absolute.startsWith(base + sep);
 }
 
 function brainStatus(

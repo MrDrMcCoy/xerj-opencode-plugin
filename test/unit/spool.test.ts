@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Logger } from "../../src/log.ts";
-import type { XerjClient } from "../../src/node/client.ts";
+import { NodeRequestError, type XerjClient } from "../../src/node/client.ts";
 import { digest, redact, RemoteSpool, truncate } from "../../src/remote/spool.ts";
 
 const root = await mkdtemp(join(tmpdir(), "xerj-spool-"));
@@ -109,5 +109,78 @@ describe("RemoteSpool.ingestUrl", () => {
     const file = join(root, "blob.exe");
     await writeFile(file, "binary");
     expect(await spool().ingestExternalFile(file)).toBeNull();
+  });
+
+  test("skips re-bulking an unchanged external file", async () => {
+    const file = join(root, "cached.md");
+    await writeFile(file, "first version");
+    let bulks = 0;
+    const counting = {
+      put: async () => {},
+      bulk: async () => void (bulks += 1),
+    } as unknown as XerjClient;
+    const spooler = new RemoteSpool({
+      root,
+      projectRoot: root,
+      prefix: "xop-web-cache",
+      externalPrefix: "xop-ext-cache",
+      maxBytes: 10_000,
+      client: counting,
+      logger,
+    });
+
+    expect(await spooler.ingestExternalFile(file, { skipUnchanged: true })).not.toBeNull();
+    expect(await spooler.ingestExternalFile(file, { skipUnchanged: true })).toBeNull();
+    expect(bulks).toBe(1);
+  });
+
+  test("tolerates an external index that already exists", async () => {
+    const file = join(root, "existing.md");
+    await writeFile(file, "body under an existing index");
+    const existing = {
+      put: async () => {
+        throw new NodeRequestError("exists", 409, "already exists");
+      },
+      bulk: async () => {},
+    } as unknown as XerjClient;
+    const spooler = new RemoteSpool({
+      root,
+      projectRoot: root,
+      prefix: "xop-web-existing",
+      externalPrefix: "xop-ext-existing",
+      maxBytes: 10_000,
+      client: existing,
+      logger,
+    });
+
+    expect(await spooler.ingestExternalFile(file)).not.toBeNull();
+  });
+
+  test("reuses the document id when the file changes", async () => {
+    const file = join(root, "changing.md");
+    const ids: string[] = [];
+    const capturing = {
+      put: async () => {},
+      bulk: async (_index: string, actions: ReadonlyArray<{ id: string }>) => {
+        ids.push(...actions.map((action) => action.id));
+      },
+    } as unknown as XerjClient;
+    const spooler = new RemoteSpool({
+      root,
+      projectRoot: root,
+      prefix: "xop-web-change",
+      externalPrefix: "xop-ext-change",
+      maxBytes: 10_000,
+      client: capturing,
+      logger,
+    });
+
+    await writeFile(file, "first");
+    await spooler.ingestExternalFile(file);
+    await writeFile(file, "second version");
+    await spooler.ingestExternalFile(file);
+
+    expect(ids).toHaveLength(2);
+    expect(ids[0]).toBe(ids[1]);
   });
 });

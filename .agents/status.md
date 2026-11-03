@@ -34,6 +34,14 @@ Updated: 2026-11-03
 - The journal lives at `<data root>/state/<prefix>/`, not in `.xerj`:
   `--watch` refuses a state dir inside the watched tree, because journal writes
   are filesystem events that would restart the pass forever.
+- Hidden folders are now indexed. `index.hidden: [".agents"]` walks the folder,
+  skips secrets and binaries, and bulks text into `<prefix>-hidden-docs` with
+  project-relative paths. Deletions reconcile by id, and a recursive watcher
+  with a 30 s poll fallback keeps it current. `.agents` produced 4 documents.
+- Files outside the project are indexed when `read` touches them. The ingest
+  runs in the background, skips an unchanged mtime+size, and reuses one id per
+  path. A read of `/tmp/opencode/auto-read-probe.md` became searchable without
+  `xerj_index`.
 - M5 is implemented: the sidebar follows the RPC `updated` event with a 30 s
   fallback, a `session.panel` claim renders the details view, and `/xerj` plus
   `/xerj-reindex`, `/xerj-remember`, `/xerj-search` cover the commands. The
@@ -68,7 +76,7 @@ Updated: 2026-11-03
 - The index root is `ctx.location.project.canonical`, not the session directory:
   a session opened in `.agents/` was deriving
   `xop-agents-<hash>` before the fix.
-- `bun test test/unit` passes (135 tests); `tsc --noEmit` is clean.
+- `bun test test/unit` passes (146 tests); `tsc --noEmit` is clean.
 
 ## Layout
 
@@ -86,6 +94,7 @@ src/node/supervisor.ts probe, spawn, attach, port selection, stop
 src/index/corpus.ts    layout, command line, run-document parsing
 src/index/watcher.ts   supervised watch process + periodic fallback
 src/index/brain.ts     one-shot brain runs, run-document parsing
+src/index/hidden.ts    hidden-folder scan, bulk index, deletion reconciliation
 src/search/brains.ts   one-hop neighbor expansion for brain hits
 src/search/service.ts  two-leg retrieval, RRF, line resolution, formatting
 src/stats/ledger.ts    measured savings with partial-read subtraction
@@ -110,6 +119,8 @@ test/unit/*.test.ts    pure-function tests
    the stub host stops where the renderer starts.
 3. Retrieval quality: a rare-term query still puts `package-lock.json` above the
    exact match. Consider skipping lockfiles at index time or in the baseline.
+4. A file in both a hidden corpus and a brain now appears twice, once per
+   index. Dedupe by `path:line` when the text is identical.
 
 ## Work in progress
 
@@ -146,9 +157,16 @@ TUI verification remain.
 - `xerj gain --json` shape (searches, hit_rate, took_ms, top_indices).
 - `GET /_memory/<namespace>?size=1` returns `count` with a one-entry page, so
   the panel counts memories without paging through them.
-- `_cat/indices` groups cleanly into project (`<prefix>-*`), web, external,
-  brain (`xop-<brain>-*`), and memory; the memory index is exactly
-  `.xerj-memory-<namespace>`.
+- `_cat/indices` groups cleanly into project (`<prefix>-*`), hidden
+  (`<prefix>-hidden-*`), web, external, brain (`xop-<brain>-*`), and memory;
+  the memory index is exactly `.xerj-memory-<namespace>`.
+- `PUT` on an existing index returns 409, not 400. Both the hidden and external
+  ingesters accept either and continue.
+- Hidden indexing writes `<prefix>-hidden-docs` with `path` relative to the
+  project, so citations keep `.agents/...`; a rescan deletes ids whose files
+  are gone.
+- A `read` outside the project root ingests in the background; the mtime+size
+  stamp prevents re-bulking an unchanged file.
 - `/_graph/<brain>/ego` needs `?node=<id[,id]>`; POST is 405. It returns edges
   and neighbor ids, not text; anchor by id from the brain docs index.
 - `PUT /_ml/anomaly_detectors/<id>` + `POST .../_score` returns
@@ -205,3 +223,7 @@ TUI verification remain.
   retrieval. Anomaly scoring uses stable detector ids. Both verified against
   the running node; the README and config reference are written, and only the
   publish step remains.
+- 2026-11-03: Hidden corpus and automatic external reads added. `.agents`
+  indexes as 4 plain documents alongside the brain copy; reading a file under
+  `/tmp` indexes it without an explicit tool. Existing indices answer 409,
+  which both ingesters now tolerate.

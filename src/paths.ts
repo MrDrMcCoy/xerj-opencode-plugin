@@ -123,6 +123,29 @@ export function brainPrefix(directory: string, brain: string, hashLength = 6): s
   );
 }
 
+export interface DocumentRoot {
+  readonly label: string;
+  readonly directory: string;
+}
+
+/** Resolves configured folders relative to the project, dropping duplicates. */
+export function documentRoots(
+  projectRoot: string,
+  labels: ReadonlyArray<string>,
+): DocumentRoot[] {
+  const seen = new Set<string>();
+
+  return labels.flatMap((label) => {
+    const trimmed = label.trim();
+    const directory = isAbsolute(trimmed)
+      ? resolve(trimmed)
+      : resolve(join(projectRoot, trimmed));
+    if (seen.has(directory)) return [];
+    seen.add(directory);
+    return [{ label: trimmed, directory }];
+  });
+}
+
 export interface BrainSpec {
   /** Graph name, also the `--brain` argument. */
   readonly name: string;

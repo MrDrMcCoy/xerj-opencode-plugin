@@ -68,7 +68,8 @@ Plugin options in `opencode.json(c)`; every value has a default.
                    "libc": "musl" },
       "node":    { "url": null, "port": 9200, "dataDir": null },
       "index":   { "auto": true, "watch": true, "debounceMs": 800, "periodicMs": 900000,
-                   "workers": null, "brain": [], "semantic": true,
+                   "workers": null, "brain": [], "hidden": [],
+                   "hiddenMaxBytes": 262144, "semantic": true,
                    "maxBytes": 2147483648, "maxMinutes": 10 },
       "remote":  { "enabled": true, "maxBytes": 2000000 },
       "context": { "enabled": true, "maxTokens": 1500, "memoryTokens": 400,
@@ -274,6 +275,28 @@ A single-flight queue per prefix: at most one `autoindex` process, at most one
 queued rerun. Runs are `nice -n 10`; the node's 429 back-pressure is handled by
 `autoindex` itself (it re-offers rejected records).
 
+### Hidden documents
+
+`autoindex` skips hidden files and directories unconditionally, so a configured
+`.agents` or `.github` tree never reaches the project corpus. `index.hidden`
+lists folders to index as plain documents:
+
+- `HiddenIndex` scans each folder recursively, skipping `.git`, `.xerj`,
+  `node_modules`, build output, virtualenvs, and secret-shaped names (`.env*`,
+  `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.crt`, `secrets/`).
+- Text files only, at most `index.hiddenMaxBytes` each, at most 2000 files.
+- Documents go through `_bulk` into `<prefix>-hidden-docs` with `path`
+  relative to the project, `abs_path`, `mtime`, and `hidden: true`. The mapping
+  makes `body` `semantic_text`.
+- Ids are `sha256(relative path)`, so an edited file replaces its document and
+  a scan deletes ids that disappeared.
+- `fs.watch(..., {recursive:true})` with a 1.5 s debounce drives refreshes; if
+  recursive watch is unavailable it polls every 30 s. Startup and
+  `/xerj-reindex` always run a scan.
+- The index matches the project prefix, so search covers it and citations keep
+  the `.agents/...` path. Datasets label it `hidden` and exclude it from the
+  `project` row so totals do not double count.
+
 ### Remote documents
 
 `webfetch` and any tool whose input has a `url` and whose result is text
@@ -295,6 +318,13 @@ and `sk-`/`ghp_`/`xox` keys are redacted before writing.
 External files go through `_bulk` into `xop-ext-<hash>-docs` (autoindex refuses
 a single file). The mapping declares `body` as `semantic_text` so passages work;
 fields are `path`, `abs_path`, `mtime`, `title`. Plain text only; no AST.
+
+A file outside the project root is indexed automatically when the `read` tool
+reads it: the hook fires the ingest in the background so the read is not
+delayed, and an mtime+size stamp prevents re-bulking an unchanged file.
+`xerj_index path` forces the same path on demand. Ids are stable per absolute
+path, so an edited file replaces its document instead of leaving a stale
+version.
 
 A prefix with no indices answers 404 on `_mapping`; that is not a failure for
 the other corpora. The mapping cache is invalidated when any watcher reports a
@@ -455,9 +485,11 @@ Definitions:
 - **tokens saved** = `saved / bytesPerToken`, rendered with `~`.
 - **top cited files**: each file gains one citation per query that cited it,
   deduped within the query. Counts are persisted with the ledger.
-- **datasets**: indices grouped by prefix: project (`<prefix>-*`), web
-  (`xop-web-*`), external (`xop-ext-*`), memory (`.xerj-memory-<namespace>`).
-  Sizes parse the human strings from `_cat/indices`.
+- **datasets**: indices grouped by prefix: project (`<prefix>-*` minus
+  hidden), hidden (`<prefix>-hidden-*`), web (`xop-web-*`), external
+  (`xop-ext-*`), brain (`xop-<brain>-*`), memory
+  (`.xerj-memory-<namespace>`). Sizes parse the human strings from
+  `_cat/indices`.
 - **recent**: the last four warn/error entries from the logger's ring buffer,
   shown in the panel's health section.
 
@@ -579,6 +611,8 @@ visible in the panel. Nothing throws out of `setup`.
 |---|---|---|
 | M0 | package skeleton (server + RPC + TUI), config, paths, storage, binary manager, node supervisor | `opencode` loads the plugin on a clean machine, downloads and starts a node, `xerj_status` answers |
 | M1 | project corpus: prefix, `.xerj` state, first index, debounced refresh, status | a fresh repo indexes without intervention; editing a file changes search results within 10 s; deleting a file removes its docs |
+| M1b | hidden corpus: `index.hidden` folders through `_bulk`, deletion reconciliation | editing `.agents/plan.md` changes its hidden document; a deleted file disappears |
+| M4b | external reads: a `read` outside the project indexes the file automatically | reading a file under `/tmp` makes it searchable without `xerj_index` |
 | M2 | retrieval: `xerj_search`/`xerj_def`, formatting, context injection, budgets, accounting | the model answers a repo question from a citation without reading the file; counters match the transcript |
 | M3 | memory: namespace, remember/recall/forget, compaction capture, prompt-time recall | a fact stored in one session is recalled in the next; forget removes it; namespaces don't leak |
 | M4 | remote: spool + web index, external single files, `xerj_index` | fetching a URL makes its content searchable in the same session |
@@ -630,6 +664,11 @@ Confirm against a real binary before relying on these.
 - [x] **12. `_passage.start_offset`** is a byte offset into the record field.
   When the record starts at line 1 it maps onto the file, so the exact line is
   readable; a section record that starts later falls back to its start line.
+- [x] **14. Hidden corpus and automatic external reads.** Verified: `.agents`
+  produced 4 hidden docs and a query cited `.agents/plan.md`; a read of
+  `/tmp/opencode/auto-read-probe.md` made its phrase searchable without
+  `xerj_index`. An existing index answers `PUT` with 409, not 400, and both
+  ingesters tolerate it.
 - [x] **13. Multi-platform binary selection.** Six release triples are computed
   (Linux x86_64/aarch64 musl or gnu, macOS x86_64/arm64, Windows
   x86_64/arm64 zip). Rosetta shells and x64 Node on Windows ARM64 resolve to

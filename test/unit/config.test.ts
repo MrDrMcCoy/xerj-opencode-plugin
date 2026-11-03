@@ -73,6 +73,20 @@ describe("loadConfig", () => {
     expect(warnings.some((entry) => entry.includes("binary.libc"))).toBe(true);
   });
 
+  test("reads hidden folders and their size cap", () => {
+    const { config } = loadConfig({
+      index: { hidden: [".agents", ".github"], hiddenMaxBytes: 4096 },
+    });
+    expect(config.index.hidden).toEqual([".agents", ".github"]);
+    expect(config.index.hiddenMaxBytes).toBe(4096);
+  });
+
+  test("clamps a tiny hidden size cap", () => {
+    const { config, warnings } = loadConfig({ index: { hiddenMaxBytes: 1 } });
+    expect(config.index.hiddenMaxBytes).toBe(1024);
+    expect(warnings.some((entry) => entry.includes("index.hiddenMaxBytes"))).toBe(true);
+  });
+
   test("rejects a malformed pinned version", () => {
     const { config, warnings } = loadConfig({ binary: { version: "latest" } });
     expect(config.binary.version).toBe("auto");

@@ -32,6 +32,9 @@ export interface IndexOptions {
   readonly periodicMs: number;
   readonly workers: number | null;
   readonly brain: ReadonlyArray<string>;
+  /** Hidden folders indexed as plain documents, e.g. `.agents`. */
+  readonly hidden: ReadonlyArray<string>;
+  readonly hiddenMaxBytes: number;
   readonly semantic: boolean;
   readonly maxBytes: number;
   /** Upper bound on the measured first-index estimate before asking. */
@@ -92,6 +95,8 @@ export const DEFAULT_CONFIG: Config = {
     periodicMs: 900_000,
     workers: null,
     brain: [],
+    hidden: [],
+    hiddenMaxBytes: 256 * 1024,
     semantic: true,
     maxBytes: 2 * 1024 ** 3,
     maxMinutes: 10,
@@ -162,6 +167,15 @@ export function loadConfig(
       ),
       workers: readOptionalInteger(index.workers, 1, 1024, "index.workers", warnings),
       brain: readStringArray(index.brain, "index.brain", warnings),
+      hidden: readStringArray(index.hidden, "index.hidden", warnings),
+      hiddenMaxBytes: readInteger(
+        index.hiddenMaxBytes,
+        DEFAULT_CONFIG.index.hiddenMaxBytes,
+        1_024,
+        Number.MAX_SAFE_INTEGER,
+        "index.hiddenMaxBytes",
+        warnings,
+      ),
       semantic: readBoolean(
         index.semantic,
         DEFAULT_CONFIG.index.semantic,

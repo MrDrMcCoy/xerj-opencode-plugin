@@ -134,6 +134,25 @@ export class XerjClient {
     }
   }
 
+  async bulkDelete(index: string, ids: ReadonlyArray<string>): Promise<void> {
+    if (ids.length === 0) return;
+
+    const lines = ids
+      .map((id) => JSON.stringify({ delete: { _index: index, _id: id } }))
+      .join("\n");
+
+    const response = await this.request(`/_bulk?refresh=true`, {
+      method: "POST",
+      headers: { "content-type": "application/x-ndjson" },
+      body: `${lines}\n`,
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new NodeRequestError("bulk delete failed", response.status, text.slice(0, 500));
+    }
+  }
+
   async bulk(
     index: string,
     actions: ReadonlyArray<{ id: string; source: Record<string, unknown> }>,

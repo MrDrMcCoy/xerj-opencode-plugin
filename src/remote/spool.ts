@@ -9,7 +9,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { basename, extname, join, relative, resolve, sep } from "node:path";
 import type { Logger } from "../log.ts";
-import type { XerjClient } from "../node/client.ts";
+import { NodeRequestError, type XerjClient } from "../node/client.ts";
 
 export interface SpoolOptions {
   readonly root: string;
@@ -27,6 +27,7 @@ export interface StoredDocument {
   readonly title: string;
 }
 
+/** Text formats the plugin will index from disk; binaries are skipped. */
 const TEXT_EXTENSIONS = new Set([
   ".md",
   ".markdown",
@@ -57,6 +58,8 @@ export class RemoteSpool {
   readonly directory: string;
 
   private mapped = false;
+  /** `<absolute path> -> mtime:size`, so a repeated read does not re-bulk. */
+  private readonly externalStamps = new Map<string, string>();
 
   constructor(private readonly options: SpoolOptions) {
     this.directory = join(options.root, "spool", options.prefix);
@@ -92,13 +95,20 @@ export class RemoteSpool {
   }
 
   /** Ingests one file outside the project index through `_bulk`. */
-  async ingestExternalFile(filePath: string): Promise<StoredDocument | null> {
+  async ingestExternalFile(
+    filePath: string,
+    options: { skipUnchanged?: boolean } = {},
+  ): Promise<StoredDocument | null> {
     const absolute = resolve(filePath);
-    const extension = extname(absolute).toLowerCase();
-    if (!TEXT_EXTENSIONS.has(extension)) return null;
+    if (!isTextPath(absolute)) return null;
 
     const info = await stat(absolute).catch(() => null);
-    if (!info?.isFile()) return null;
+    if (!info?.isFile() || info.size === 0) return null;
+
+    const stamp = `${info.mtimeMs}:${info.size}`;
+    if (options.skipUnchanged && this.externalStamps.get(absolute) === stamp) {
+      return null;
+    }
 
     const raw = await readFile(absolute, "utf8").catch(() => null);
     if (raw === null || raw.includes("\u0000")) return null;
@@ -120,9 +130,11 @@ export class RemoteSpool {
       mtime: new Date(info.mtimeMs).toISOString(),
     };
 
+    // A stable id means a changed file replaces its old document.
     await this.options.client.bulk(`${this.options.externalPrefix}-docs`, [
-      { id: digest(`${absolute}:${info.mtimeMs}`).slice(0, 24), source },
+      { id: digest(absolute).slice(0, 24), source },
     ]);
+    this.externalStamps.set(absolute, stamp);
 
     return {
       path: relativePath,
@@ -134,21 +146,31 @@ export class RemoteSpool {
   private async ensureMapping(): Promise<void> {
     if (this.mapped) return;
 
-    await this.options.client.put(
-      `/${this.options.externalPrefix}-docs`,
-      {
-        mappings: {
-          properties: {
-            body: { type: "semantic_text" },
-            title: { type: "keyword" },
-            path: { type: "keyword" },
-            abs_path: { type: "keyword" },
-            mtime: { type: "date" },
+    try {
+      await this.options.client.put(
+        `/${this.options.externalPrefix}-docs`,
+        {
+          mappings: {
+            properties: {
+              body: { type: "semantic_text" },
+              title: { type: "keyword" },
+              path: { type: "keyword" },
+              abs_path: { type: "keyword" },
+              mtime: { type: "date" },
+            },
           },
         },
-      },
-      "could not create the external index",
-    );
+        "could not create the external index",
+      );
+    } catch (error) {
+      // The index survives restarts; 400/409 mean it already exists.
+      if (
+        !(error instanceof NodeRequestError) ||
+        (error.status !== 400 && error.status !== 409)
+      ) {
+        throw error;
+      }
+    }
 
     this.mapped = true;
   }
@@ -156,6 +178,10 @@ export class RemoteSpool {
   private async removeVersions(id: string): Promise<void> {
     await rm(join(this.directory, `${id}.md`), { force: true });
   }
+}
+
+export function isTextPath(filePath: string): boolean {
+  return TEXT_EXTENSIONS.has(extname(filePath).toLowerCase());
 }
 
 export function digest(value: string): string {
