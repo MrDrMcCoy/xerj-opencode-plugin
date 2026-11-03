@@ -41,7 +41,7 @@ export interface ContextOptions {
   readonly enabled: boolean;
   readonly maxTokens: number;
   readonly memoryTokens: number;
-  readonly minScore: number;
+  readonly maxPassages: number;
   readonly timeoutMs: number;
 }
 
@@ -52,6 +52,8 @@ export interface MemoryOptions {
 export interface StatsOptions {
   readonly enabled: boolean;
   readonly bytesPerToken: number;
+  /** Baseline credited per cited file; a lockfile should not count as 700 KB. */
+  readonly maxBaselineBytes: number;
 }
 
 export interface TelemetryOptions {
@@ -93,11 +95,11 @@ export const DEFAULT_CONFIG: Config = {
     enabled: true,
     maxTokens: 1500,
     memoryTokens: 400,
-    minScore: 0.2,
+    maxPassages: 4,
     timeoutMs: 400,
   },
   memory: { enabled: true },
-  stats: { enabled: true, bytesPerToken: 4 },
+  stats: { enabled: true, bytesPerToken: 4, maxBaselineBytes: 128 * 1024 },
   telemetry: { anomaly: false },
 };
 
@@ -204,12 +206,12 @@ export function loadConfig(
         "context.memoryTokens",
         warnings,
       ),
-      minScore: readNumber(
-        context.minScore,
-        DEFAULT_CONFIG.context.minScore,
-        0,
+      maxPassages: readInteger(
+        context.maxPassages,
+        DEFAULT_CONFIG.context.maxPassages,
         1,
-        "context.minScore",
+        20,
+        "context.maxPassages",
         warnings,
       ),
       timeoutMs: readInteger(
@@ -232,6 +234,14 @@ export function loadConfig(
         1,
         100,
         "stats.bytesPerToken",
+        warnings,
+      ),
+      maxBaselineBytes: readInteger(
+        stats.maxBaselineBytes,
+        DEFAULT_CONFIG.stats.maxBaselineBytes,
+        0,
+        Number.MAX_SAFE_INTEGER,
+        "stats.maxBaselineBytes",
         warnings,
       ),
     },
@@ -315,29 +325,6 @@ function readOptionalInteger(
 ): number | null {
   if (value === undefined || value === null) return null;
   return readInteger(value, min, min, max, key, warnings);
-}
-
-function readNumber(
-  value: unknown,
-  fallback: number,
-  min: number,
-  max: number,
-  key: string,
-  warnings: string[],
-): number {
-  if (value === undefined) return fallback;
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    warnings.push(`${key} must be a number; using ${fallback}`);
-    return fallback;
-  }
-
-  if (value < min || value > max) {
-    const clamped = Math.min(max, Math.max(min, value));
-    warnings.push(`${key} must be between ${min} and ${max}; using ${clamped}`);
-    return clamped;
-  }
-
-  return value;
 }
 
 function readStringArray(value: unknown, key: string, warnings: string[]): ReadonlyArray<string> {

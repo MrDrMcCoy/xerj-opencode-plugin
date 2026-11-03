@@ -87,16 +87,53 @@ export class XerjClient {
       .reduce((total, entry) => total + entry.docs, 0);
   }
 
-  async search(index: string, body: unknown): Promise<unknown> {
-    const response = await this.request(`/${encodeURIComponent(index)}/_search`, {
+  async search(index: string, body: unknown, signal?: AbortSignal): Promise<unknown> {
+    return this.post(`/${encodeIndexPattern(index)}/_search`, body, "search failed", signal);
+  }
+
+  /** Flattened `field -> type` map per index matching the pattern. */
+  async mappings(pattern: string): Promise<Record<string, Record<string, string>>> {
+    const body = await this.get(`/${encodeIndexPattern(pattern)}/_mapping`, "mapping failed");
+    if (!isRecord(body)) return {};
+
+    const result: Record<string, Record<string, string>> = {};
+    for (const [index, value] of Object.entries(body)) {
+      if (!isRecord(value) || !isRecord(value.mappings)) continue;
+      const properties = value.mappings.properties;
+      if (!isRecord(properties)) continue;
+
+      const fields: Record<string, string> = {};
+      flattenProperties(properties, "", fields);
+      result[index] = fields;
+    }
+    return result;
+  }
+
+  async get(path: string, label = `request failed: ${path}`): Promise<unknown> {
+    const response = await this.request(path);
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new NodeRequestError(label, response.status, text.slice(0, 500));
+    }
+    return response.json();
+  }
+
+  async post(
+    path: string,
+    body: unknown,
+    label: string,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
+    const response = await this.request(path, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
+      signal,
     });
 
     if (!response.ok) {
       const text = await response.text().catch(() => "");
-      throw new NodeRequestError("search failed", response.status, text.slice(0, 500));
+      throw new NodeRequestError(label, response.status, text.slice(0, 500));
     }
 
     return response.json();
@@ -105,7 +142,7 @@ export class XerjClient {
   private request(path: string, init?: RequestInit): Promise<Response> {
     return fetch(`${this.baseUrl}${path}`, {
       ...init,
-      signal: AbortSignal.timeout(this.timeoutMs),
+      signal: init?.signal ?? AbortSignal.timeout(this.timeoutMs),
     });
   }
 }
@@ -144,4 +181,37 @@ function toNumber(value: unknown): number {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Keeps `*`, `,` and name characters intact while encoding the rest. */
+function encodeIndexPattern(value: string): string {
+  return value
+    .split("")
+    .map((character) =>
+      /[A-Za-z0-9*_,.-]/.test(character) ? character : encodeURIComponent(character),
+    )
+    .join("");
+}
+
+/** Flattens nested object properties into `parent.child` type entries. */
+function flattenProperties(
+  properties: Record<string, unknown>,
+  prefix: string,
+  out: Record<string, string>,
+  depth = 0,
+): void {
+  if (depth > 3) return;
+
+  for (const [name, definition] of Object.entries(properties)) {
+    if (!isRecord(definition)) continue;
+    const path = prefix ? `${prefix}.${name}` : name;
+    if (typeof definition.type === "string") {
+      out[path] = definition.type;
+      if (definition.type === "object" && isRecord(definition.properties)) {
+        flattenProperties(definition.properties, path, out, depth + 1);
+      }
+    } else if (isRecord(definition.properties)) {
+      flattenProperties(definition.properties, path, out, depth + 1);
+    }
+  }
 }

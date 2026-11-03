@@ -71,9 +71,10 @@ Plugin options in `opencode.json(c)`; every value has a default.
                    "maxBytes": 2147483648, "maxMinutes": 10 },
       "remote":  { "enabled": true, "maxBytes": 2000000 },
       "context": { "enabled": true, "maxTokens": 1500, "memoryTokens": 400,
-                   "minScore": 0.2, "timeoutMs": 400 },
+                   "maxPassages": 4, "timeoutMs": 400 },
       "memory":  { "enabled": true },
-      "stats":   { "enabled": true, "bytesPerToken": 4 },
+      "stats":   { "enabled": true, "bytesPerToken": 4,
+                   "maxBaselineBytes": 131072 },
       "telemetry": { "anomaly": false }
     }
   }]
@@ -300,15 +301,21 @@ files, so do not label it as a file count in the UI.
 
 ### Query path
 
-1. Prompt hook records `{sessionID, text, messageID}` and starts retrieval.
-2. Retrieval: `xerj_search` semantics over the project prefix, plus the web
-   prefix when the prompt contains a URL or a domain, plus memory recall.
-3. Merge by reciprocal rank, cut at `context.maxTokens` (XERJ's UAX #29 word
-   budget, not BPE), drop hits below `context.minScore`.
-4. Format as compact passages with `path:line` citations and one line of
-   provenance (`index`, `score`). No vectors, no `_source` noise.
-5. Cache by `sha256(last user message)`; the context hook splices the block in
-   and marks the passage ids as injected.
+1. Prompt hook records `{sessionID, text, messageID}` and runs retrieval once,
+   with `context.timeoutMs` as a hard deadline.
+2. Two legs over the project prefix: a `multi_match` over `body` (the field
+   that produces `_passage`) and a `semantic` query on `body` when the mapping
+   says it is `semantic_text`.
+3. Fuse the legs with RRF in the plugin. The engine refuses `_passage` for a
+   server-side `hybrid` query, so fusion is the only way to keep passages and
+   both signals. Dedupe by `index:id:passage`.
+4. Cut at `context.maxTokens` with an equal per-hit share, so one whole-section
+   match cannot hide the other results. Drop nothing on score: RRF scores have
+   no absolute scale.
+5. Format with `path:line` citations. Symbol records carry `code` but no
+   `_passage`; they belong to `xerj_def`, not the search leg.
+6. Cache by `(sessionID, messageID)`; the context hook splices the block in
+   once and marks the turn as injected.
 
 ### Context hook
 
@@ -328,7 +335,7 @@ If retrieval missed the `timeoutMs` deadline, inject nothing. Tools remain.
 
 | Tool | Input | Notes |
 |---|---|---|
-| `xerj_search` | `query`, `k?`, `max_tokens?`, `scope?` | `scope` ∈ project/web/external/all |
+| `xerj_search` | `query`, `k?`, `max_tokens?` | `body` passages, lexical + semantic legs |
 | `xerj_def` | `symbol`, `lang?`, `kind?`, `k?` | go-to-definition with signature |
 | `xerj_remember` | `text`, `kind`, `topic?` | project namespace |
 | `xerj_recall` | `query`, `k?` | relevance + recency blend |
@@ -383,12 +390,13 @@ node_spawns, node_restarts, http_429s
 
 Definitions:
 
-- **hit**: a query whose top passage passed `minScore` and reached the model
-  (injected or returned by a tool).
+- **hit**: a query that returned at least one passage to the model (injected
+  or through a tool). With RRF there is no absolute score to threshold on.
 - **hit rate** = `hits / queries`, per session and lifetime.
-- **baseline bytes**: for each cited file, its size, counted at most once per
-  session. If the model later reads that file in full, subtract it from the
-  baseline (the retrieval did not save that read).
+- **baseline bytes**: for each cited file, its size capped at
+  `stats.maxBaselineBytes` (128 KB), counted once per session. Reading the
+  file later subtracts the bytes actually read, not the whole file: a partial
+  read only removes what it covered.
 - **saved bytes** = `baseline − bytes_returned`, floored at 0.
 - **tokens saved** = `saved / bytesPerToken`, rendered with `~`.
 
@@ -529,6 +537,13 @@ Confirm against a real binary before relying on these.
   (human units). `_stats` is not a route.
 - [ ] **6. `/_memory`** filter syntax and `recency_weight` behaviour.
 - [x] **7. `/_graph/<brain>/overview`** shape verified. `ego` still unverified.
+- [x] **11. `_passage` cannot be combined with `hybrid`.** The engine refuses
+  it (`search_phase_execution_exception`: fusion has no single winning
+  passage). Run the legs separately and fuse in the plugin. `_passage` is also
+  absent for plain-`text` symbol records (`code`), which belong to `xerj_def`.
+- [x] **12. `_passage.start_offset`** is a byte offset into the record field.
+  When the record starts at line 1 it maps onto the file, so the exact line is
+  readable; a section record that starts later falls back to its start line.
 - [x] **8. `xerj gain --json`** shape verified (searches, hit_rate, took_ms,
   top_indices, excluded_machine_searches).
 - [x] **9. Node identity** is `cluster_name: "xerj"` in `GET /`. The banner's

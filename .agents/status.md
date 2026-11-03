@@ -10,6 +10,15 @@ Updated: 2026-11-03
   corpus from 304 to 305 records in one pass; deleting it moved it back; the
   generation counter incremented each time. Current index: 304 records,
   ~550 KB, state `watching`, no restarts.
+- M2 is implemented and verified live: `xerj_search` and `xerj_def` return
+  cited passages. `xerj_def` printed `src/search/service.ts:281 [function]` with
+  the declaration. A search for "Reciprocal rank fusion" cited line 280, which
+  is the line the comment is on. The ledger counted the query, the
+  hit, the returned bytes, and the savings; reading a cited file reduced the
+  savings by exactly the bytes read.
+- The context hooks (prompt retrieval + system injection) are registered and
+  typechecked, but the prompt-to-context path has not been observed in a live
+  turn yet. That happens on the next user message.
 - The journal lives at `<data root>/state/<prefix>/`, not in `.xerj`:
   `--watch` refuses a state dir inside the watched tree, because journal writes
   are filesystem events that would restart the pass forever.
@@ -20,7 +29,7 @@ Updated: 2026-11-03
 - The index root is `ctx.location.project.canonical`, not the session directory:
   a session opened in `.agents/` was deriving
   `xop-agents-<hash>` before the fix.
-- `bun test test/unit` passes (57 tests); `tsc --noEmit` is clean.
+- `bun test test/unit` passes (83 tests); `tsc --noEmit` is clean.
 
 ## Layout
 
@@ -36,6 +45,10 @@ src/node/client.ts     HTTP client, size parsing
 src/node/supervisor.ts probe, spawn, attach, port selection, stop
 src/index/corpus.ts    layout, command line, run-document parsing
 src/index/watcher.ts   supervised watch process + periodic fallback
+src/search/service.ts  two-leg retrieval, RRF, line resolution, formatting
+src/stats/ledger.ts    measured savings with partial-read subtraction
+src/hooks/session.ts   prompt retrieval + system injection
+src/tools/search.ts    search, def, status tools
 src/rpc.ts             typed RPC contract + status types
 src/index.ts           server part
 src/tui.tsx            sidebar slot + /xerj commands
@@ -45,11 +58,12 @@ test/unit/*.test.ts    pure-function tests
 
 ## Next actions
 
-1. M2: `xerj_search` and `xerj_def` tools, passage formatting with
-   `path:line`, prompt-time retrieval with a deadline, and the savings ledger.
-2. Verify the TUI sidebar and `/xerj` commands in a real terminal session.
-3. Optional: `index.brain` execution over `.agents` (M6 features exist in the
-   node already, but nothing consumes edges yet).
+1. M3: memory namespace, `xerj_remember`/`xerj_recall`/`xerj_forget`, capture
+   from the compaction hook, and prompt-time recall.
+2. Confirm the prompt-to-context path on the next real user turn: `queries` in
+   `xerj_status` should increment without a tool call, and the model should see
+   the `<xerj-corpus>` block.
+3. Verify the TUI sidebar and `/xerj` commands in a real terminal session.
 
 ## Work in progress
 
@@ -103,3 +117,8 @@ Nothing. Working tree has M0 changes not yet committed.
   run-document parsing, periodic fallback, `reindex` RPC, freshness and counts
   in `xerj_status`. Journal moved to the data root after `--watch` refused a
   state dir inside the watched tree.
+- 2026-11-03: M2 implemented and verified live. Hybrid retrieval runs as two
+  legs fused in the plugin because `_passage` is refused for a server-side
+  `hybrid` query. Line citations resolve exactly for whole-file records and
+  fall back to the section start otherwise. Savings subtract partial reads and
+  cap each file's baseline at 128 KB.

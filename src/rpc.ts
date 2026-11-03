@@ -37,6 +37,7 @@ export interface UsageStatus {
   readonly hits: number;
   readonly hitRate: number;
   readonly bytesReturned: number;
+  readonly bytesRead: number;
   readonly tokensSaved: number;
 }
 
@@ -125,6 +126,7 @@ const definition = {
           hits: { type: "number" },
           hitRate: { type: "number" },
           bytesReturned: { type: "number" },
+          bytesRead: { type: "number" },
           tokensSaved: { type: "number" },
         }),
         warnings: { type: "array", items: { type: "string" } },
