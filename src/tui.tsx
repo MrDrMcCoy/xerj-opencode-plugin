@@ -14,35 +14,66 @@ interface TuiState {
   lines: string[];
   ready: boolean;
   snapshot: StatusSnapshot | null;
+  reason: string | null;
 }
 
 export default Plugin.define({
   id: "xerj.tui",
   setup(context) {
-    const rpc = context.client.rpc(XerjRpc);
+    // Read the client on every call: the host replaces it after a server
+    // restart, and a captured sub-client then fails without sending anything.
+    const rpc = () => context.client.rpc(XerjRpc);
     const [state, update] = context.storage.memory<TuiState>("status", {
-      initial: { lines: ["XERJ  ○ starting"], ready: false, snapshot: null },
+      initial: {
+        lines: ["XERJ  ○ starting"],
+        ready: false,
+        snapshot: null,
+        reason: null,
+      },
     });
+
+    // The RPC lookup is per location; without one the server reports the RPC as
+    // unavailable even though this project's copy is registered.
+    const at = () =>
+      context.location ? { location: context.location } : undefined;
 
     const abort = new AbortController();
     let inFlight = false;
     let disposed = false;
+    let unsubscribe: (() => void) | null = null;
+
+    // Subscriptions do not survive a server restart, so they are re-armed
+    // against the current client after each successful poll.
+    const resubscribe = (): void => {
+      if (disposed || unsubscribe) return;
+      unsubscribe = subscribe(rpc(), () => void refresh(), abort.signal);
+    };
+
+    const unsubscribeEvents = (): void => {
+      unsubscribe?.();
+      unsubscribe = null;
+    };
 
     const refresh = async (): Promise<void> => {
       if (disposed || inFlight) return;
       inFlight = true;
 
       try {
-        const snapshot = (await rpc.status({})) as StatusSnapshot;
+        const snapshot = (await rpc().status({}, at())) as StatusSnapshot;
         update((draft) => {
           draft.snapshot = snapshot;
           draft.lines = sidebarLines(snapshot, Date.now());
           draft.ready = snapshot.node.phase === "ready";
+          draft.reason = null;
         });
-      } catch {
+        resubscribe();
+      } catch (error) {
+        const reason = describe(error);
+        unsubscribeEvents();
         update((draft) => {
           draft.snapshot = null;
-          draft.lines = ["XERJ  ○ offline", "the server plugin is not loaded"];
+          draft.reason = reason;
+          draft.lines = ["XERJ  ○ offline", reason];
           draft.ready = false;
         });
       } finally {
@@ -62,7 +93,7 @@ export default Plugin.define({
 
     const reindex = async (): Promise<void> => {
       try {
-        const result = (await rpc.reindex({})) as { queued?: boolean };
+        const result = (await rpc().reindex({}, at())) as { queued?: boolean };
         context.ui.toast.show({
           message: result.queued
             ? "XERJ reindex queued"
@@ -89,7 +120,7 @@ export default Plugin.define({
       if (!text) return;
 
       try {
-        const result = (await rpc.remember({ text })) as {
+        const result = (await rpc().remember({ text }, at())) as {
           id: string;
           created: boolean;
         };
@@ -114,7 +145,7 @@ export default Plugin.define({
       if (!query) return;
 
       try {
-        const result = (await rpc.search({ query })) as {
+        const result = (await rpc().search({ query }, at())) as {
           text: string;
           hits: number;
           bytes: number;
@@ -136,8 +167,7 @@ export default Plugin.define({
     };
 
     void refresh();
-    // A host without event support still gets the poll fallback.
-    const off = subscribe(rpc, () => void refresh(), abort.signal);
+    // Events arrive on the first success; the timer covers host or node gaps.
     const timer = setInterval(() => void refresh(), FALLBACK_POLL_MS);
 
     context.keymap.layer(() => ({
@@ -234,7 +264,7 @@ export default Plugin.define({
             ))}
             {sections.length === 0 ? (
               <text fg={context.theme.text.faint}>
-                waiting for the XERJ server part
+                {state.reason ?? "waiting for the XERJ server part"}
               </text>
             ) : null}
           </scrollbox>
@@ -246,7 +276,7 @@ export default Plugin.define({
       disposed = true;
       abort.abort();
       clearInterval(timer);
-      off();
+      unsubscribeEvents();
       detachPanel();
       detachSidebar();
     };
@@ -284,6 +314,14 @@ function statusText(
   return panelSections(snapshot, Date.now())
     .flatMap((section) => [section.title, ...section.lines])
     .join("\n");
+}
+
+// Short, single-line failure reason for the sidebar and the empty panel.
+function describe(error: unknown): string {
+  const text = error instanceof Error ? error.message : String(error);
+  const first = text.split("\n")[0]?.trim();
+  if (!first) return "the XERJ server part did not answer";
+  return first.length > 72 ? `${first.slice(0, 71)}…` : first;
 }
 
 function clip(text: string): string {
