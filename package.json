@@ -1,6 +1,6 @@
 {
   "name": "@mrdrmccoy/xerj-opencode-plugin",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "XERJ integration for OpenCode: local code and docs search, agent memory, and retrieval accounting.",
   "repository": {
     "type": "git",
@@ -26,7 +26,8 @@
     "./tui": "./src/tui.tsx"
   },
   "files": [
-    "src"
+    "src",
+    "tsconfig.json"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",

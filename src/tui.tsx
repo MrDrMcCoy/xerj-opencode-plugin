@@ -2,6 +2,8 @@
 // value comes over RPC from the server part, so the TUI never opens the node,
 // reads the index, or touches the filesystem.
 
+/* @jsxImportSource @opentui/solid */
+
 import { Plugin } from "@opencode/plugin/tui";
 import { XerjRpc, type StatusSnapshot } from "./rpc.ts";
 import { panelSections, sidebarLines } from "./ui/format.ts";
