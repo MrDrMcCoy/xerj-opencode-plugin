@@ -6,8 +6,11 @@
 // falls back to periodic one-shot runs so the index still converges.
 
 import { spawn, type ChildProcess } from "node:child_process";
+import { existsSync, readdirSync, watch, type FSWatcher } from "node:fs";
+import { join, relative, resolve, sep } from "node:path";
 import type { Config } from "../config.ts";
 import type { KeyValueStorage, Logger } from "../log.ts";
+import { isPathInside } from "../paths.ts";
 import {
   autoindexArgs,
   corpusLayout,
@@ -61,11 +64,69 @@ const CONTENTION_RETRY_MS = 5_000;
 // document lands: an initial pass over a large corpus takes minutes, and the
 // status would otherwise read "starting" the whole time.
 const WATCH_SETTLE_MS = 3_000;
+// Project-local storage forces one-shot passes; without a recursive watcher the
+// only refresh left is polling, and 15 minutes is too slow to be useful.
+const LOCAL_POLL_MS = 30_000;
+// One inotify watch per directory. The Linux default user limit is 8192, and
+// dependency trees are already excluded, so this cap leaves room for other
+// processes. A tree over the cap falls back to polling.
+const MAX_LOCAL_WATCH_DIRS = 1_024;
+const LOCAL_RESCAN_MS = 1_000;
 
 // One watcher per state directory per process. The same plugin loads once for
 // every open location, and two `--watch` processes cannot share one journal,
 // so the first one owns it and the rest report that they share it.
 const RESIDENT_WATCHERS = new Set<string>();
+
+// Directories whose contents cannot change a corpus: VCS metadata, the
+// project state dir, dependency trees, and build output.
+const LOCAL_WATCH_SKIP = new Set([
+  ".git",
+  ".xerj",
+  "node_modules",
+  "dist",
+  "build",
+  "target",
+  "vendor",
+  "coverage",
+  ".venv",
+  "venv",
+  "__pycache__",
+  ".cache",
+  ".next",
+  ".turbo",
+]);
+
+/**
+ * Lists directories worth watching under `root`, or null when the tree is too
+ * large for one watch each. Hidden and generated directories are skipped for
+ * the same reason the corpus skips them: their contents never reach it.
+ */
+export function listWatchableDirectories(
+  root: string,
+  max = MAX_LOCAL_WATCH_DIRS,
+): string[] | null {
+  const dirs: string[] = [];
+  const pending = [root];
+
+  while (pending.length > 0) {
+    const dir = pending.pop()!;
+    dirs.push(dir);
+    if (dirs.length > max) return null;
+
+    try {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        if (entry.name.startsWith(".") || LOCAL_WATCH_SKIP.has(entry.name)) continue;
+        pending.push(join(dir, entry.name));
+      }
+    } catch {
+      // An unreadable directory cannot contribute files either.
+    }
+  }
+
+  return dirs;
+}
 
 export class CorpusService {
   readonly layout: CorpusLayout;
@@ -79,6 +140,13 @@ export class CorpusService {
   private lastError: string | null = null;
   private child: ChildProcess | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
+  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly watchers = new Map<string, FSWatcher>();
+  private rescanTimer: ReturnType<typeof setTimeout> | null = null;
+  private localWatch = false;
+  private polling = false;
+  private onceRunning = false;
+  private pendingRun = false;
   private stopped = false;
   private spawning = false;
   private lastStderr = "";
@@ -100,17 +168,28 @@ export class CorpusService {
     await this.restore();
     await ensureIgnoreFile(this.layout).catch(() => {});
 
-    if (this.options.config.index.watch) {
+    // `--watch` refuses a state dir inside the watched tree, and the default
+    // storage root is `<project>/.xerj`. In that layout the plugin watches the
+    // tree itself and runs one-shot passes, which keeps all project data in
+    // the project without feeding journal writes back into the next pass.
+    const stateInsideProject =
+      isPathInside(this.options.projectRoot, this.options.stateRoot) ||
+      isPathInside(this.options.projectRoot, this.layout.stateDir);
+
+    if (this.options.config.index.watch && !stateInsideProject) {
       this.spawn(true);
-    } else {
-      await this.runOnce();
-      this.startPeriodic();
+      return;
     }
+
+    await this.runOnce();
+    if (this.options.config.index.watch) this.startLocalWatch();
+    this.startPeriodic();
   }
 
   async stop(): Promise<void> {
     this.stopped = true;
     this.clearTimer();
+    this.closeLocalWatch();
     const child = this.child;
     this.child = null;
     if (!child) return;
@@ -137,7 +216,7 @@ export class CorpusService {
     this.restarts = 0;
     this.lastError = null;
 
-    if (!this.options.config.index.watch) {
+    if (!this.options.config.index.watch || this.localWatch || this.polling) {
       await this.runOnce();
       return;
     }
@@ -311,7 +390,7 @@ export class CorpusService {
   private handleOnceExit(code: number | null): void {
     const meaning = exitMeaning(code);
     if (meaning === "ok" || meaning === "junk") {
-      this.state = "idle";
+      this.state = this.localWatch ? "watching" : "idle";
       return;
     }
 
@@ -327,16 +406,32 @@ export class CorpusService {
 
   private async runOnce(): Promise<void> {
     if (this.stopped) return;
-    const child = this.spawn(false);
-    if (!child) return;
 
-    await new Promise<void>((resolvePromise) => child.once("close", () => resolvePromise()));
-    if (this.lastRun) this.state = "idle";
+    // Filesystem events arrive in bursts. Keep at most one pass running and
+    // one queued, so a large edit does not start a dozen autoindex processes.
+    if (this.onceRunning) {
+      this.pendingRun = true;
+      return;
+    }
+
+    this.onceRunning = true;
+    if (this.state !== "watching") this.state = "starting";
+    const child = this.spawn(false);
+    if (child) {
+      await new Promise<void>((resolvePromise) => child.once("close", () => resolvePromise()));
+    }
+    this.onceRunning = false;
+    if (this.lastRun) this.state = this.localWatch ? "watching" : "idle";
+
+    if (this.pendingRun && !this.stopped) {
+      this.pendingRun = false;
+      void this.runOnce();
+    }
   }
 
   private startPeriodic(): void {
     this.clearTimer();
-    const period = this.options.config.index.periodicMs;
+    const period = this.polling ? LOCAL_POLL_MS : this.options.config.index.periodicMs;
     this.timer = setInterval(() => void this.runOnce(), period);
   }
 
@@ -344,6 +439,113 @@ export class CorpusService {
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
+    }
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
+  }
+
+  /**
+   * Watches the project when the engine's own `--watch` cannot be used.
+   *
+   * `fs.watch(root, {recursive:true})` is a no-op on Linux, so this watches
+   * every directory instead. A new directory is picked up by its parent's
+   * watcher and added on the next rescan.
+   */
+  private startLocalWatch(): void {
+    const dirs = listWatchableDirectories(this.options.projectRoot);
+    if (dirs === null) {
+      this.options.logger.warn(
+        `project has more than ${MAX_LOCAL_WATCH_DIRS} directories; polling instead`,
+      );
+      this.useFallback();
+      return;
+    }
+
+    for (const dir of dirs) this.addDirectoryWatch(dir);
+    this.localWatch = true;
+    this.polling = false;
+    this.state = this.lastRun ? "watching" : "starting";
+    this.options.onChange?.();
+  }
+
+  private addDirectoryWatch(dir: string): void {
+    if (this.watchers.has(dir) || this.stopped) return;
+    try {
+      const watcher = watch(dir, { persistent: false }, (_event, file) => {
+        if (file === null || !this.shouldIgnoreLocal(join(dir, String(file)))) {
+          this.scheduleRun();
+          this.scheduleRescan();
+        }
+      });
+      watcher.on("error", () => {
+        watcher.close();
+        this.watchers.delete(dir);
+        if (this.watchers.size === 0) this.useFallback();
+      });
+      this.watchers.set(dir, watcher);
+    } catch (error) {
+      this.options.logger.warn("local corpus watch unavailable; polling instead", String(error));
+      this.useFallback();
+    }
+  }
+
+  /** Adds watchers for directories created since the last scan. */
+  private scheduleRescan(): void {
+    if (this.rescanTimer || this.stopped) return;
+    this.rescanTimer = setTimeout(() => {
+      this.rescanTimer = null;
+      if (!this.localWatch) return;
+      const dirs = listWatchableDirectories(this.options.projectRoot);
+      if (dirs === null) return;
+      const live = new Set(dirs);
+      for (const [dir, watcher] of this.watchers) {
+        if (live.has(dir) && existsSync(dir)) continue;
+        watcher.close();
+        this.watchers.delete(dir);
+      }
+      for (const dir of dirs) this.addDirectoryWatch(dir);
+    }, LOCAL_RESCAN_MS);
+  }
+
+  private shouldIgnoreLocal(file: string): boolean {
+    const absolute = resolve(this.options.projectRoot, file);
+    if (!isPathInside(this.options.projectRoot, absolute)) return true;
+    if (isPathInside(this.options.stateRoot, absolute)) return true;
+    if (isPathInside(this.layout.stateDir, absolute)) return true;
+
+    return relative(this.options.projectRoot, absolute)
+      .split(sep)
+      .some((segment) => LOCAL_WATCH_SKIP.has(segment) || segment.startsWith("."));
+  }
+
+  private scheduleRun(): void {
+    if (this.stopped) return;
+    if (this.debounceTimer) clearTimeout(this.debounceTimer);
+    const delay = Math.max(200, this.options.config.index.debounceMs);
+    this.debounceTimer = setTimeout(() => {
+      this.debounceTimer = null;
+      void this.runOnce();
+    }, delay);
+  }
+
+  private useFallback(): void {
+    this.closeLocalWatch();
+    this.localWatch = false;
+    // A 30 s one-shot pass replaces the events we cannot receive.
+    this.polling = true;
+    this.state = "idle";
+    if (this.timer) this.startPeriodic();
+    this.options.onChange?.();
+  }
+
+  private closeLocalWatch(): void {
+    for (const watcher of this.watchers.values()) watcher.close();
+    this.watchers.clear();
+    if (this.rescanTimer) {
+      clearTimeout(this.rescanTimer);
+      this.rescanTimer = null;
     }
   }
 

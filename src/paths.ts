@@ -4,7 +4,7 @@
 
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
-import { basename, isAbsolute, join, resolve, sep } from "node:path";
+import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 export interface Environment {
   readonly XDG_DATA_HOME?: string;
@@ -34,7 +34,6 @@ export function isOverbroadRoot(
   const root = platform === "win32" ? resolve(resolved, sep) : "/";
   return resolved === root || resolved === resolve(home);
 }
-
 
 const APP_DIR = "opencode/xerj";
 const PREFIX_ROOT = "xop";
@@ -114,6 +113,52 @@ export function projectStateDir(projectRoot: string): string {
   return join(projectRoot, ".xerj");
 }
 
+/** True when `child` is strictly below `parent`, not equal to it. */
+export function isPathInside(parent: string, child: string): boolean {
+  const rel = relative(resolve(parent), resolve(child));
+  return rel.length > 0 && !rel.startsWith("..") && !isAbsolute(rel);
+}
+
+/** True when the first path segment below `parent` is a dot-directory. */
+export function isHiddenPathInside(parent: string, child: string): boolean {
+  if (!isPathInside(parent, child)) return false;
+  const first = relative(resolve(parent), resolve(child)).split(sep)[0] ?? "";
+  return first.startsWith(".");
+}
+
+/** Resolves a configured path against the project unless it is absolute. */
+export function projectPath(projectRoot: string, value: string): string {
+  const trimmed = value.trim();
+  return isAbsolute(trimmed) ? resolve(trimmed) : resolve(join(projectRoot, trimmed));
+}
+
+export interface ResolvedStorageRoot {
+  readonly root: string;
+  /** Set when a configured path inside the project was refused as visible. */
+  readonly rejected: string | null;
+}
+
+/**
+ * Per-project storage lives in `.xerj` unless configured elsewhere. A path
+ * inside the project is accepted only under a dot-directory: a visible engine
+ * data dir would be indexed by the watcher, which feeds its own writes back
+ * into the next pass forever.
+ */
+export function resolveStorageRoot(
+  projectRoot: string,
+  configured: string | null,
+): ResolvedStorageRoot {
+  if (configured === null || configured.trim().length === 0) {
+    return { root: projectStateDir(projectRoot), rejected: null };
+  }
+
+  const root = projectPath(projectRoot, configured);
+  if (isPathInside(projectRoot, root) && !isHiddenPathInside(projectRoot, root)) {
+    return { root: projectStateDir(projectRoot), rejected: root };
+  }
+
+  return { root, rejected: null };
+}
 
 /** Lowercase alphanumeric slug, joined by single dashes. */
 export function slug(name: string, maxLength = MAX_SLUG_LENGTH): string {

@@ -49,7 +49,13 @@ function snapshot(overrides: Partial<StatusSnapshot> = {}): StatusSnapshot {
         { name: "web", docs: 1, bytes: 15_000 },
       ],
     },
-    config: { indexRoot: "/repo", brain: [], watch: true, contextEnabled: true },
+    config: {
+      indexRoot: "/repo",
+      storageRoot: "/repo/.xerj",
+      brain: [],
+      watch: true,
+      contextEnabled: true,
+    },
     usage: {
       queries: 12,
       hits: 9,

@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_CONFIG } from "../../src/config.ts";
 import type { KeyValueStorage, Logger } from "../../src/log.ts";
-import { CorpusService } from "../../src/index/watcher.ts";
+import { CorpusService, listWatchableDirectories } from "../../src/index/watcher.ts";
 
 // A fake engine: emits one run document, then stays resident like --watch.
 const FAKE_ENGINE = `#!/bin/sh
@@ -21,6 +21,28 @@ function storage(): KeyValueStorage {
     },
   };
 }
+
+describe("listWatchableDirectories", () => {
+  test("skips hidden and generated directories", () => {
+    const root = mkdtempSync(join(tmpdir(), "xerj-dirs-"));
+    mkdirSync(join(root, "src", "nested"), { recursive: true });
+    mkdirSync(join(root, ".xerj"), { recursive: true });
+    mkdirSync(join(root, "node_modules", "pkg"), { recursive: true });
+
+    const dirs = listWatchableDirectories(root)!;
+    expect(dirs).toContain(join(root, "src"));
+    expect(dirs).toContain(join(root, "src", "nested"));
+    expect(dirs.some((dir) => dir.includes(".xerj"))).toBe(false);
+    expect(dirs.some((dir) => dir.includes("node_modules"))).toBe(false);
+  });
+
+  test("refuses a tree beyond the watch budget", () => {
+    const root = mkdtempSync(join(tmpdir(), "xerj-dirs-"));
+    mkdirSync(join(root, "a"));
+    mkdirSync(join(root, "b"));
+    expect(listWatchableDirectories(root, 2)).toBeNull();
+  });
+});
 
 const logger: Logger = {
   debug: () => {},

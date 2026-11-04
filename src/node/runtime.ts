@@ -25,6 +25,8 @@ export interface NodeRuntimeOptions {
   readonly projectRoot: string;
   readonly preferredPort: number;
   readonly dataDir: string | null;
+  /** Global lock covering port selection and spawn for every project. */
+  readonly portLockPath: string;
   /** Attach to this URL and never spawn or stop anything. */
   readonly explicitUrl: string | null;
   readonly logger: Logger;
@@ -111,6 +113,7 @@ export class NodeRuntime {
         nodeDir: this.options.nodeDir,
         projectRoot: this.options.projectRoot,
         dataDir: this.options.dataDir ?? nodeDataDir(this.options.nodeDir),
+        portLockPath: this.options.portLockPath,
         preferredPort: this.options.preferredPort,
         persistedPort: await readPersistedPort(this.options.nodeDir),
         explicitUrl: this.options.explicitUrl,

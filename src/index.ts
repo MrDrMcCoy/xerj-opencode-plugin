@@ -2,7 +2,7 @@
 // and registers tools, hooks, and RPC. Nothing here blocks plugin load: a slow
 // download or a missing node must not delay OpenCode startup.
 
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, stat, writeFile } from "node:fs/promises";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { Plugin } from "@opencode/plugin";
 import { detectRuntime } from "./binary/detect.ts";
@@ -16,7 +16,7 @@ import { createLogger, type KeyValueStorage, type Logger } from "./log.ts";
 import { ProjectLifecycle, startSessionTracking } from "./lifecycle.ts";
 import { XerjClient, type IndexSummary } from "./node/client.ts";
 import { NodeRuntime } from "./node/runtime.ts";
-import { type NodeHandle } from "./node/supervisor.ts";
+import { detectNode, stopNode, type NodeHandle } from "./node/supervisor.ts";
 import {
   brainSpecs,
   dataRoot,
@@ -28,7 +28,9 @@ import {
   memoryNamespace,
   nodeDataDir,
   projectNodeDir,
+  projectPath,
   projectStateDir,
+  resolveStorageRoot,
   scopedStorageKey,
   webPrefix,
   type BrainSpec,
@@ -43,7 +45,7 @@ import {
 } from "./rpc.ts";
 import { MemoryStore } from "./memory/store.ts";
 import { startCompactionCapture } from "./memory/capture.ts";
-import { migrateMemoryIndex } from "./memory/migrate.ts";
+import { migrateMemoryIndex, migrateProjectStorage } from "./memory/migrate.ts";
 import { RemoteSpool } from "./remote/spool.ts";
 import { shellReadPaths } from "./remote/shell.ts";
 import { BrainGraph } from "./search/brains.ts";
@@ -152,13 +154,27 @@ export default Plugin.define({
     }
 
     const memoryNs = memoryNamespace(projectRoot);
+    // Every project's data lives in `<project>/.xerj` by default. The binary,
+    // release cache, and the shared port lock stay in the global data root.
+    const storageLocation = resolveStorageRoot(projectRoot, config.storage.root);
+    const storageRoot = storageLocation.root;
+    if (storageLocation.rejected !== null) {
+      const refusal =
+        `storage.root ${storageLocation.rejected} is inside the project but not hidden; ` +
+        "using .xerj so the index does not index its own data.";
+      indexWarnings.push(refusal);
+      logger.warn(refusal);
+    }
+
     // One node directory per project, so two projects (or two locations of the
     // same project) never share a process, a port, or an idle timer.
-    const nodeDir = projectNodeDir(root, prefix);
+    const nodeDir = projectNodeDir(storageRoot, prefix);
     // Index journals live beside the engine data they describe, so a node with
     // a new data dir always starts from a full pass instead of trusting a
     // journal that describes documents the engine no longer has.
-    const engineDataDir = config.node.dataDir ?? nodeDataDir(nodeDir);
+    const engineDataDir = config.node.dataDir
+      ? projectPath(projectRoot, config.node.dataDir)
+      : nodeDataDir(nodeDir);
     const stateRoot = engineDataDir;
 
     const idleSnapshot = (): number | null => {
@@ -204,6 +220,7 @@ export default Plugin.define({
         },
         config: {
           indexRoot: projectRoot,
+          storageRoot,
           brain: config.index.brain,
           watch: config.index.watch,
           contextEnabled: config.context.enabled,
@@ -550,7 +567,8 @@ export default Plugin.define({
       nodeDir,
       projectRoot,
       preferredPort: config.node.port,
-      dataDir: config.node.dataDir,
+      dataDir: engineDataDir,
+      portLockPath: join(root, "nodes", ".port-lock"),
       explicitUrl: config.node.url,
       logger,
       binary: () => runtime.binary,
@@ -634,7 +652,7 @@ export default Plugin.define({
 
       if (config.remote.enabled && !overbroad) {
         const spool = new RemoteSpool({
-          root,
+          root: storageRoot,
           projectRoot,
           prefix: webPrefix(projectRoot),
           externalPrefix: externalPrefix(projectRoot),
@@ -664,6 +682,29 @@ export default Plugin.define({
         runtime.phase = "ready";
         logger.info("xerj is idle: the project root is too broad to index", { projectRoot });
         return;
+      }
+
+      // Project data moved into `<project>/.xerj`. Carry the old node directory
+      // and spool over once, stopping a node still using the old tree first so
+      // it cannot keep writing to a directory we are about to move.
+      if (resolve(storageRoot) !== resolve(root)) {
+        const legacyNodeDir = projectNodeDir(root, prefix);
+        if (await pathExists(legacyNodeDir)) {
+          if ((await detectNode(legacyNodeDir)).running) {
+            await stopNode(legacyNodeDir).catch((error: unknown) => {
+              logger.warn("could not stop the legacy xerj node", String(error));
+            });
+          }
+        }
+        await migrateProjectStorage(
+          root,
+          storageRoot,
+          prefix,
+          webPrefix(projectRoot),
+          logger,
+        ).catch((error: unknown) => {
+          logger.warn("could not migrate project storage", String(error));
+        });
       }
 
       // Memory cannot be rebuilt from the corpus, so carry it over before the
@@ -819,6 +860,15 @@ function toolCwd(input: unknown, fallback: string): string {
     }
   }
   return fallback;
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function isOutside(root: string, filePath: string): boolean {

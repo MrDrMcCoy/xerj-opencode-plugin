@@ -95,6 +95,7 @@ export interface CounterStatus {
 
 export interface ConfigStatus {
   readonly indexRoot: string;
+  readonly storageRoot: string;
   readonly brain: ReadonlyArray<string>;
   readonly watch: boolean;
   readonly contextEnabled: boolean;
@@ -193,6 +194,7 @@ const definition = {
         }),
         config: object({
           indexRoot: { type: "string" },
+          storageRoot: { type: "string" },
           brain: { type: "array", items: { type: "string" } },
           watch: { type: "boolean" },
           contextEnabled: { type: "boolean" },

@@ -36,7 +36,13 @@ const SNAPSHOT: StatusSnapshot = {
     lastError: null,
     datasets: [{ name: "project", docs: 3, bytes: 512 }],
   },
-  config: { indexRoot: "/proj", brain: [], watch: true, contextEnabled: true },
+  config: {
+    indexRoot: "/proj",
+    storageRoot: "/proj/.xerj",
+    brain: [],
+    watch: true,
+    contextEnabled: true,
+  },
   usage: {
     queries: 1,
     hits: 1,

@@ -7,6 +7,8 @@ import {
   isOverbroadRoot,
   memoryNamespace,
   pathHash,
+  projectNodeDir,
+  resolveStorageRoot,
   scopedStorageKey,
   slug,
   webPrefix,
@@ -30,6 +32,39 @@ describe("dataRoot", () => {
   test("uses LOCALAPPDATA on Windows", () => {
     expect(dataRoot({ LOCALAPPDATA: "C:/Users/me/AppData/Local" }, "win32")).toBe(
       "C:/Users/me/AppData/Local/opencode/xerj",
+    );
+  });
+});
+
+describe("resolveStorageRoot", () => {
+  test("defaults to the project's .xerj", () => {
+    expect(resolveStorageRoot("/repo", null)).toEqual({
+      root: "/repo/.xerj",
+      rejected: null,
+    });
+  });
+
+  test("accepts an absolute path outside the project", () => {
+    expect(resolveStorageRoot("/repo", "/var/lib/xerj")).toEqual({
+      root: "/var/lib/xerj",
+      rejected: null,
+    });
+  });
+
+  test("refuses a visible directory inside the project", () => {
+    expect(resolveStorageRoot("/repo", "data")).toEqual({
+      root: "/repo/.xerj",
+      rejected: "/repo/data",
+    });
+  });
+
+  test("accepts another hidden directory inside the project", () => {
+    expect(resolveStorageRoot("/repo", ".cache/xerj").root).toBe("/repo/.cache/xerj");
+  });
+
+  test("puts each project's node under its own storage root", () => {
+    expect(projectNodeDir("/repo/.xerj", "xop-a")).not.toBe(
+      projectNodeDir("/other/.xerj", "xop-b"),
     );
   });
 });

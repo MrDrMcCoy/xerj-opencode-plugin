@@ -13,12 +13,19 @@ describe("loadConfig", () => {
       context: { enabled: false, maxTokens: 200 },
       index: { brain: ["docs", "notes"] },
       binary: { version: "1.0.0-rc.100" },
+      storage: { root: "/var/lib/xerj" },
     });
 
     expect(config.context.enabled).toBe(false);
     expect(config.context.maxTokens).toBe(200);
     expect(config.index.brain).toEqual(["docs", "notes"]);
     expect(config.binary.version).toBe("1.0.0-rc.100");
+    expect(config.storage.root).toBe("/var/lib/xerj");
+  });
+
+  test("defaults project storage to .xerj", () => {
+    const { config } = loadConfig(undefined);
+    expect(config.storage.root).toBeNull();
   });
 
   test("clamps out-of-range numbers and warns", () => {

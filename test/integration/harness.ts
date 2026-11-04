@@ -133,6 +133,7 @@ export async function startHarness(): Promise<Harness> {
     projectRoot: project,
     preferredPort: 9700,
     dataDir: join(root, "data"),
+    portLockPath: join(root, "nodes", ".port-lock"),
     explicitUrl: null,
     logger,
     binary: () => ({ path: binaryPath, version: "test", upgraded: false }),

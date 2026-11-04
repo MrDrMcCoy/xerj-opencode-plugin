@@ -46,6 +46,8 @@ export interface EnsureNodeOptions {
   /** Working directory for the spawned process. */
   readonly projectRoot: string;
   readonly dataDir?: string | null;
+  /** Shared lock covering port selection and spawn across all projects. */
+  readonly portLockPath?: string;
   readonly preferredPort: number;
   readonly persistedPort: number | null;
   readonly onPort?: (port: number) => Promise<void>;
@@ -131,7 +133,7 @@ export async function ensureNode(options: EnsureNodeOptions): Promise<NodeHandle
   // Port selection and spawn are shared resources across every project in this
   // data root, so they take one lock there. Per-project locking would still let
   // two first starts race onto the same free port and share one node.
-  const portLock = join(dirname(options.nodeDir), ".port-lock");
+  const portLock = options.portLockPath ?? join(dirname(options.nodeDir), ".port-lock");
   if (!(await acquirePortLock(portLock, options.startupTimeoutMs ?? 30_000))) {
     throw new NodeError("another process is starting a XERJ node and did not let go");
   }
@@ -301,6 +303,9 @@ async function acquirePortLock(path: string, timeoutMs: number): Promise<boolean
 /** `mkdir` is the atomic primitive; a lock older than a minute is stale. */
 async function acquireLock(path: string): Promise<boolean> {
   try {
+    // The lock lives beside the project node directories, which may not exist
+    // on a first run in a fresh storage root.
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
     await mkdir(path, { recursive: false });
     return true;
   } catch {

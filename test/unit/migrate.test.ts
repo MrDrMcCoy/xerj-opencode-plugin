@@ -2,11 +2,18 @@
 // upgrade has to carry it over instead of starting with empty memory.
 
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Logger } from "../../src/log.ts";
-import { migrateMemoryIndex } from "../../src/memory/migrate.ts";
+import { migrateMemoryIndex, migrateProjectStorage } from "../../src/memory/migrate.ts";
 
 const NAMESPACE = "proj-demo-1234abcd";
 
@@ -64,6 +71,46 @@ describe("migrateMemoryIndex", () => {
     const moved = await migrateMemoryIndex(legacy, node, NAMESPACE, silent);
 
     expect(moved).toBe(false);
+    rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe("migrateProjectStorage", () => {
+  test("moves the old node directory and web spool into project storage", async () => {
+    const root = mkdtempSync(join(tmpdir(), "xerj-storage-"));
+    const legacy = join(root, "global");
+    const target = join(root, "project", ".xerj");
+    const prefix = "xop-demo-1234abcd";
+    const web = "xop-web-5678efgh";
+    const oldNode = join(legacy, "nodes", prefix);
+    const oldSpool = join(legacy, "spool", web);
+    mkdirSync(join(oldNode, "data"), { recursive: true });
+    mkdirSync(oldSpool, { recursive: true });
+    writeFileSync(join(oldNode, "port"), "9200");
+    writeFileSync(join(oldSpool, "page.md"), "cached");
+
+    const moved = await migrateProjectStorage(legacy, target, prefix, web, silent);
+
+    expect(moved).toEqual({ nodeDir: true, spool: true });
+    expect(readFileSync(join(target, "nodes", prefix, "port"), "utf8")).toBe("9200");
+    expect(readFileSync(join(target, "spool", web, "page.md"), "utf8")).toBe("cached");
+    expect(existsSync(oldNode)).toBe(false);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("keeps an existing target and never nests a move inside itself", async () => {
+    const root = mkdtempSync(join(tmpdir(), "xerj-storage-"));
+    const legacy = join(root, "project", ".xerj");
+    const prefix = "xop-demo-1234abcd";
+    const oldNode = join(legacy, "nodes", prefix);
+    const target = join(oldNode, "nested");
+    mkdirSync(oldNode, { recursive: true });
+    writeFileSync(join(oldNode, "port"), "9200");
+
+    const moved = await migrateProjectStorage(legacy, target, prefix, "xop-web-1", silent);
+
+    expect(moved.nodeDir).toBe(false);
+    expect(readFileSync(join(oldNode, "port"), "utf8")).toBe("9200");
     rmSync(root, { recursive: true, force: true });
   });
 });

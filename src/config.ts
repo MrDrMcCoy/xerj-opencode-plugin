@@ -73,8 +73,14 @@ export interface TelemetryOptions {
   readonly anomaly: boolean;
 }
 
+export interface StorageOptions {
+  /** Per-project XERJ data. Relative paths resolve inside the project. */
+  readonly root: string | null;
+}
+
 export interface Config {
   readonly binary: BinaryOptions;
+  readonly storage: StorageOptions;
   readonly node: NodeOptions;
   readonly index: IndexOptions;
   readonly remote: RemoteOptions;
@@ -91,6 +97,7 @@ export interface LoadedConfig {
 
 export const DEFAULT_CONFIG: Config = {
   binary: { version: "auto", path: null, target: null, libc: "musl" },
+  storage: { root: null },
   node: {
     url: null,
     port: 9200,
@@ -134,6 +141,7 @@ export function loadConfig(
   const root = asObject(raw);
 
   const binary = asObject(root.binary);
+  const storage = asObject(root.storage);
   const node = asObject(root.node);
   const index = asObject(root.index);
   const remote = asObject(root.remote);
@@ -145,6 +153,7 @@ export function loadConfig(
   const envUrl = env.XERJ_URL?.trim();
 
   const config: Config = {
+    storage: { root: readString(storage.root, null) },
     binary: {
       version: readVersion(binary.version, warnings),
       path: readString(binary.path, null),

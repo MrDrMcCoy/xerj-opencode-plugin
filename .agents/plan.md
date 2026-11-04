@@ -50,7 +50,7 @@ choice.
 | D6 | Second brain is opt-in and separate | `xerj brain <folder>` builds its own edge index. Running it over the whole repo duplicates indexing. |
 | D7 | Lexical embedder by default | Offline, deterministic, no 90 MB download. Neural is opt-in and documented as re-index-required. |
 | D8 | Context injection is on, budgeted, and killable | This is the product. It gets a hard token cap, a score threshold, per-turn dedupe, and `context.enabled=false`. |
-| D9 | `.xerj/` holds project state, not the engine index | Engine data and the autoindex journal live outside the indexed tree (required by XERJ). `.xerj/` holds config and a self-ignoring `.gitignore`. |
+| D9 | `.xerj/` holds all of a project's XERJ state | The engine data, journal, node runtime files and spool live under `<project>/.xerj`, inside the indexed tree but hidden, which every ingester skips. A visible path would be indexed and feed its own writes back forever. |
 | D10 | Savings are measured, not asserted | Baseline = full size of each cited file, counted once per session, and only for files the model did not read anyway. |
 | D11 | Fetched documents persist across sessions | Re-fetching a URL is a no-op, and yesterday's page is still searchable today. Bounded by `remote.maxBytes`, redacted, and killable with `remote.enabled=false`. |
 | D12 | Package name `@mrdrmccoy/xerj-opencode-plugin` | Matches the repo owner. No unscoped-name risk, and the scoped name installs the same way from any project. |
@@ -66,6 +66,7 @@ Plugin options in `opencode.json(c)`; every value has a default.
     "options": {
       "binary":  { "version": "auto", "path": null, "target": null,
                    "libc": "musl" },
+      "storage": { "root": null },
       "node":    { "url": null, "port": 9200, "dataDir": null,
                    "idleMs": 1800000, "shutdownOnIdle": true },
       "index":   { "auto": true, "watch": true, "debounceMs": 800, "periodicMs": 900000,
@@ -89,6 +90,14 @@ Plugin options in `opencode.json(c)`; every value has a default.
 `binary.libc` chooses the Linux build. `binary.path` bypasses download and
 detection entirely. `node.url` set means "attach, never spawn".
 
+`storage.root` is the per-project XERJ root. It defaults to
+`<project>/.xerj`; a relative value resolves against the project and an
+absolute value may point anywhere, so a shared or external volume is one key
+away. A configured path inside the project must be under a dot-directory: a
+visible engine data dir would be indexed by the watcher, which feeds its own
+writes back into the next pass forever. A refused path falls back to `.xerj`
+and is reported in `warnings`.
+
 This repo dogfoods its own plugin. `opencode.json` at the repo root loads it
 from the working tree; a published install uses the scoped package name:
 
@@ -108,16 +117,26 @@ grows.
 ## 4. Paths and identity
 
 ```
-data root     ~/.local/share/opencode/xerj               (0700)
+data root     ~/.local/share/opencode/xerj               (binary only, 0700)
 binary        <data root>/bin/<ver>-<target>/xerj
-node dir      <data root>/nodes/<prefix>/             (one per project)
-engine data   <node dir>/data/                        (engine storage)
+storage root  <project>/.xerj                          (storage.root)
+node dir      <storage root>/nodes/<prefix>/           (one per project)
+engine data   <node dir>/data/                         (engine storage)
 port          <node dir>/port                          (resolved, persisted)
 pid           <node dir>/node.pid
-spool         <data root>/spool/<prefix>/             (remote documents)
-project       <project>/.xerj/                         (ignore file, caches)
+lock          <storage root>/nodes/.port-lock
+spool         <storage root>/spool/<prefix>/           (remote documents)
 journal       <node dir>/data/state/<prefix>/journal.ndjson
 ```
+
+The global data root still owns the managed binary and the release cache,
+because they are shared by every project and installing one per project would
+repeat a large download. Everything else follows `storage.root`.
+
+The shared port lock sits in the storage root, not the global data root: port
+selection only needs to be serialised among projects that share one XERJ
+installation's ports, and two projects with separate storage roots cannot
+collide on a node directory.
 
 Index prefix, stable per canonical project path:
 
@@ -139,10 +158,21 @@ not redundant.
 
 `.xerj/.gitignore` contains `*` so project state never lands in git.
 
-The journal lives inside the node directory, not in `.xerj`. `autoindex --watch`
-refuses a `--state-dir` inside the watched tree: every pass writes the journal,
-those writes are filesystem events, and the events would start the next pass
-forever. Verified by the binary's own error message.
+The journal lives inside the node directory, which is under `.xerj`. The
+engine's `autoindex --watch` refuses a `--state-dir` inside the watched tree:
+every pass writes the journal, those writes are filesystem events, and the
+events would start the next pass forever. Our own watcher uses one-shot runs
+behind a debounce instead, and skips `.xerj` explicitly (as do the hidden and
+external ingesters), so the journal loop cannot form. The engine's refusal is
+still why watch mode is not used by default.
+
+Upgrades: a project whose data still sits in the old global layout
+(`<data root>/nodes/<prefix>`, `<data root>/spool/<web prefix>`) is moved into
+`storage.root` once on setup. A node still running from the old tree is
+stopped first so it cannot keep writing into the directory being moved.
+Project memory is copied separately into the node data dir when the target is
+empty, because an already-running node enumerated its indices at startup and
+would not see the copied index until it restarted.
 
 ## 5. Binary management
 
