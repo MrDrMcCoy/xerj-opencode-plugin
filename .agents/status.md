@@ -42,6 +42,14 @@ Updated: 2026-11-03
   entry is now prebuilt (`bun build --production --packages external` into
   `dist/tui.js`) and imports `@opentui/solid/jsx-runtime`, the specifier the
   host provides to plugins. `prepack` regenerates it.
+- The host pins the resolved package version per install epoch: after 0.4.3
+  was published the plugin registry still reported `version: 0.4.1`,
+  `outdated: true`, and the cache directory was untouched, so a restart keeps
+  loading the old build. Purging
+  `cache/npm/@mrdrmccoy/xerj-opencode-plugin@latest/` forces a re-resolve.
+- Upgrading a TUI plugin's runtime dependencies requires the new install tree:
+  the host installs `dependencies` and skips optional peers, so the cache must
+  contain `@opentui/solid` before the entry's `jsx-runtime` import can resolve.
 - Per-process counters are live: rpc calls, injected turns, node spawns, 429s,
   and index runs, shown in the panel and the status snapshot.
 - Brain neighbor expansion was measured. On a fixture brain with a `pathcite`
