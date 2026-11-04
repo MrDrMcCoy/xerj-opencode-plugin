@@ -4,6 +4,7 @@
 // values are structurally `unknown` in the plugin's type surface.
 
 import { Rpc } from "@opencode/plugin/rpc";
+import packageJson from "../package.json";
 
 export interface NodeStatus {
   readonly phase: "starting" | "ready" | "error" | "disabled";
@@ -51,7 +52,13 @@ export interface IndexStatus {
   readonly docs: number;
   readonly bytes: number;
   readonly indices: number;
-  readonly state: "disabled" | "starting" | "watching" | "idle" | "error";
+  readonly state:
+    | "disabled"
+    | "starting"
+    | "watching"
+    | "shared"
+    | "idle"
+    | "error";
   readonly lastRunAt: number | null;
   readonly lastGeneration: number | null;
   readonly lastRecords: number | null;
@@ -151,7 +158,14 @@ const definition = {
           indices: { type: "number" },
           state: {
             type: "string",
-            enum: ["disabled", "starting", "watching", "idle", "error"],
+            enum: [
+              "disabled",
+              "starting",
+              "watching",
+              "shared",
+              "idle",
+              "error",
+            ],
           },
           lastRunAt: { type: ["number", "null"] },
           lastGeneration: { type: ["number", "null"] },
@@ -247,4 +261,6 @@ const definition = {
 
 export const XerjRpc = Rpc.define(definition);
 
-export const PLUGIN_VERSION = "0.4.5";
+// Read from the manifest so the reported version cannot drift from the
+// published one: a hand-maintained constant goes stale on every bump.
+export const PLUGIN_VERSION: string = packageJson.version;

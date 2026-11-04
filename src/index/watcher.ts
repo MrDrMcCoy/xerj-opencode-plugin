@@ -18,7 +18,13 @@ import {
   type CorpusLayout,
 } from "./corpus.ts";
 
-export type CorpusState = "disabled" | "starting" | "watching" | "idle" | "error";
+export type CorpusState =
+  | "disabled"
+  | "starting"
+  | "watching"
+  | "shared"
+  | "idle"
+  | "error";
 
 export interface CorpusSnapshot {
   readonly state: CorpusState;
@@ -54,6 +60,11 @@ const CONTENTION_RETRY_MS = 5_000;
 // document lands: an initial pass over a large corpus takes minutes, and the
 // status would otherwise read "starting" the whole time.
 const WATCH_SETTLE_MS = 3_000;
+
+// One watcher per state directory per process. The same plugin loads once for
+// every open location, and two `--watch` processes cannot share one journal,
+// so the first one owns it and the rest report that they share it.
+const RESIDENT_WATCHERS = new Set<string>();
 
 export class CorpusService {
   readonly layout: CorpusLayout;
@@ -150,7 +161,21 @@ export class CorpusService {
 
   private spawn(watch: boolean): ChildProcess | null {
     if (this.stopped || this.spawning) return null;
+
+    const watcherKey = this.layout.stateDir;
+    if (watch && RESIDENT_WATCHERS.has(watcherKey)) {
+      this.state = "shared";
+      this.lastError = null;
+      this.options.logger.debug(
+        "watching through the resident autoindex",
+        watcherKey,
+      );
+      this.options.onChange?.();
+      return null;
+    }
+
     this.spawning = true;
+    if (watch) RESIDENT_WATCHERS.add(watcherKey);
 
     const args = autoindexArgs({
       layout: this.layout,
@@ -168,6 +193,7 @@ export class CorpusService {
       });
     } catch (error) {
       this.spawning = false;
+      RESIDENT_WATCHERS.delete(watcherKey);
       this.fail(error);
       return null;
     }
@@ -181,6 +207,7 @@ export class CorpusService {
     this.attachOutput(child);
     child.once("close", (code, signal) => {
       this.child = null;
+      RESIDENT_WATCHERS.delete(watcherKey);
       if (this.stopped) return;
 
       if (watch) {
