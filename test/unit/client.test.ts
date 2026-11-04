@@ -1,5 +1,10 @@
-import { describe, expect, test } from "bun:test";
-import { parseSize } from "../../src/node/client.ts";
+import { afterEach, describe, expect, test } from "bun:test";
+import {
+  NodeRequestError,
+  parseSize,
+  XerjClient,
+  type ClientResolver,
+} from "../../src/node/client.ts";
 
 describe("parseSize", () => {
   test("parses the units _cat/indices emits", () => {
@@ -17,5 +22,300 @@ describe("parseSize", () => {
     expect(parseSize(undefined)).toBe(0);
     expect(parseSize("")).toBe(0);
     expect(parseSize("lots")).toBe(0);
+  });
+});
+
+interface FakeResponse {
+  ok: boolean;
+  status: number;
+  json: () => Promise<unknown>;
+  text: () => Promise<string>;
+}
+
+function response(
+  status: number,
+  body: unknown,
+  options: { textBody?: string } = {},
+): FakeResponse {
+  const ok = status >= 200 && status < 300;
+  return {
+    ok,
+    status,
+    json: async () => body,
+    text: async () => options.textBody ?? JSON.stringify(body),
+  };
+}
+
+interface FetchCall {
+  url: string;
+  init: RequestInit | undefined;
+}
+
+type FetchBehavior = (url: string, init: RequestInit | undefined) => Promise<FakeResponse>;
+
+const realFetch = globalThis.fetch;
+const calls: FetchCall[] = [];
+let behave: FetchBehavior = async () => response(200, {});
+
+function stubFetch(behavior?: FetchBehavior): void {
+  if (behavior) behave = behavior;
+  globalThis.fetch = ((url: string | URL, init?: RequestInit) => {
+    const urlText = String(url);
+    calls.push({ url: urlText, init });
+    return behave(urlText, init);
+  }) as typeof fetch;
+}
+
+afterEach(() => {
+  globalThis.fetch = realFetch;
+  calls.length = 0;
+  behave = async () => response(200, {});
+});
+
+function client(
+  overrides: { timeout?: number; observer?: (status: number) => void; resolver?: ClientResolver } = {},
+): XerjClient {
+  return new XerjClient("http://127.0.0.1:9200", overrides.timeout, overrides.observer && {
+    onResponse: overrides.observer,
+  }, overrides.resolver);
+}
+
+describe("XerjClient.info", () => {
+  test("identifies a xerj node by cluster name", async () => {
+    stubFetch();
+    behave = async () => response(200, { cluster_name: "xerj", version: { number: "8.13.0" } });
+    const info = await client().info();
+    expect(info).toEqual({ clusterName: "xerj", wireVersion: "8.13.0" });
+  });
+
+  test("rejects other clusters and missing versions", async () => {
+    stubFetch();
+    behave = async () => response(200, { cluster_name: "elasticsearch" });
+    expect(await client().info()).toBeNull();
+
+    behave = async () => response(200, { cluster_name: "xerj", version: {} });
+    expect((await client().info())?.wireVersion).toBe("unknown");
+  });
+
+  test("propagates a transport failure without a resolver", async () => {
+    stubFetch(async () => {
+      throw new TypeError("fetch failed");
+    });
+    await expect(client().info()).rejects.toBeInstanceOf(TypeError);
+  });
+});
+
+describe("XerjClient.indices", () => {
+  test("parses _cat/indices rows", async () => {
+    stubFetch();
+    behave = async () =>
+      response(200, [
+        { index: "xop-a-docs", "docs.count": "12", "store.size": "1.2mb", health: "green" },
+        { index: "xop-b-docs", "docs.count": 3, "store.size": "0b" },
+        { notAnIndex: true },
+      ]);
+    const indices = await client().indices();
+    expect(indices).toEqual([
+      { index: "xop-a-docs", docs: 12, bytes: 1_258_291, health: "green" },
+      { index: "xop-b-docs", docs: 3, bytes: 0, health: "unknown" },
+    ]);
+  });
+
+  test("throws on a failed listing and returns nothing for a non-array", async () => {
+    stubFetch();
+    behave = async () => response(503, {});
+    await expect(client().indices()).rejects.toBeInstanceOf(NodeRequestError);
+
+    behave = async () => response(200, { taken: true });
+    expect(await client().indices()).toEqual([]);
+  });
+
+  test("count sums the docs of one prefix", async () => {
+    stubFetch();
+    behave = async () =>
+      response(200, [
+        { index: "p-docs", "docs.count": "10", "store.size": "1b" },
+        { index: "p-hidden-docs", "docs.count": "4", "store.size": "1b" },
+        { index: "other-docs", "docs.count": "100", "store.size": "1b" },
+      ]);
+    expect(await client().count("p")).toBe(14);
+  });
+});
+
+describe("XerjClient.mappings", () => {
+  test("flattens nested properties and skips malformed entries", async () => {
+    stubFetch();
+    behave = async () =>
+      response(200, {
+        "xop-a-docs": {
+          mappings: { properties: { body: { type: "semantic_text" }, meta: { properties: { kind: { type: "keyword" } } } } },
+        },
+        broken: { nope: true },
+      });
+    const mappings = await client().mappings("xop-*");
+    expect(mappings).toEqual({
+      "xop-a-docs": { body: "semantic_text", "meta.kind": "keyword" },
+    });
+  });
+
+  test("keeps pattern characters intact in the URL", async () => {
+    stubFetch();
+    behave = async () => response(200, {});
+    await client().search("xop-a-*,xop-b-*", { query: {} });
+    expect(calls[0]!.url).toBe("http://127.0.0.1:9200/xop-a-*,xop-b-*/_search");
+  });
+});
+
+describe("memory endpoints", () => {
+  test("store returns the id and created flag", async () => {
+    stubFetch();
+    behave = async () => response(200, { id: "abc", created: true });
+    const result = await client().memoryStore("ns", { text: "t", metadata: {} });
+    expect(result).toEqual({ id: "abc", created: true });
+    expect(calls[0]!.url).toBe("http://127.0.0.1:9200/_memory/ns");
+  });
+
+  test("store fails without an id", async () => {
+    stubFetch();
+    behave = async () => response(200, { ok: true });
+    await expect(client().memoryStore("ns", { text: "t", metadata: {} })).rejects.toBeInstanceOf(
+      NodeRequestError,
+    );
+  });
+
+  test("recall flattens hits and tolerates malformed rows", async () => {
+    stubFetch();
+    behave = async () =>
+      response(200, {
+        hits: [
+          { id: "1", text: "a", metadata: { kind: "fact" }, score: 0.9 },
+          { id: 2 },
+          { id: "3", text: "b" },
+        ],
+      });
+    const hits = await client().memoryRecall("ns", { query: "q", k: 5 });
+    expect(hits).toEqual([
+      { id: "1", text: "a", metadata: { kind: "fact" }, score: 0.9 },
+      { id: "3", text: "b", metadata: {}, score: null },
+    ]);
+  });
+
+  test("summary reads count and exists", async () => {
+    stubFetch();
+    behave = async () => response(200, { count: 7, exists: true });
+    expect(await client().memorySummary("ns")).toEqual({ count: 7, exists: true });
+
+    // A failed listing is an error, not a silent zero.
+    behave = async () => response(404, { error: "no index" });
+    await expect(client().memorySummary("ns")).rejects.toBeInstanceOf(NodeRequestError);
+  });
+
+  test("forget is true only when the node says so", async () => {
+    stubFetch();
+    behave = async () => response(200, { forgotten: true });
+    expect(await client().memoryForget("ns", "abc")).toBe(true);
+
+    behave = async () => response(404, {});
+    expect(await client().memoryForget("ns", "abc")).toBe(false);
+
+    behave = async () => response(200, { forgotten: false });
+    expect(await client().memoryForget("ns", "abc")).toBe(false);
+  });
+});
+
+describe("bulk", () => {
+  test("sends ndjson index and delete actions", async () => {
+    stubFetch();
+    behave = async () => response(200, { errors: false });
+    await client().bulk("i", [{ id: "1", source: { body: "a" } }, { id: "2", source: { body: "b" } }]);
+    expect(calls[0]!.init?.body).toBe(
+      `{"index":{"_index":"i","_id":"1"}}\n{"body":"a"}\n{"index":{"_index":"i","_id":"2"}}\n{"body":"b"}\n`,
+    );
+
+    await client().bulkDelete("i", ["1", "2"]);
+    expect(String(calls[1]!.init?.body)).toBe(
+      `{"delete":{"_index":"i","_id":"1"}}\n{"delete":{"_index":"i","_id":"2"}}\n`,
+    );
+  });
+
+  test("skips empty batches and reports failures", async () => {
+    stubFetch();
+    await client().bulk("i", []);
+    await client().bulkDelete("i", []);
+    expect(calls).toHaveLength(0);
+
+    behave = async () => response(500, { error: "boom" });
+    await expect(client().bulk("i", [{ id: "1", source: {} }])).rejects.toBeInstanceOf(
+      NodeRequestError,
+    );
+  });
+});
+
+describe("error surfaces", () => {
+  test("get throws a labelled NodeRequestError with the body", async () => {
+    stubFetch();
+    behave = async () => response(404, { error: "nope" });
+    const error = await client().get("/missing", "missing thing").catch((e) => e);
+    expect(error).toBeInstanceOf(NodeRequestError);
+    expect((error as NodeRequestError).status).toBe(404);
+    expect((error as NodeRequestError).body).toContain("nope");
+  });
+
+  test("the observer sees every response status", async () => {
+    stubFetch();
+    const statuses: number[] = [];
+    behave = async () => response(429, {});
+    await client({ observer: (status) => statuses.push(status) })
+      .get("/x")
+      .catch(() => {});
+    expect(statuses).toEqual([429]);
+  });
+});
+
+describe("transport retry", () => {
+  function transportError(): TypeError {
+    return Object.assign(new TypeError("fetch failed"), {
+      cause: Object.assign(new Error("socket"), { code: "ECONNREFUSED" }),
+    });
+  }
+
+  test("re-ensures and retries once on a dead socket", async () => {
+    stubFetch();
+    let attempts = 0;
+    const ensured: string[] = [];
+    const resolver: ClientResolver = {
+      ensure: async () => {
+        ensured.push("ensure");
+        return "http://127.0.0.1:9300";
+      },
+      invalidate: () => {
+        ensured.push("invalidate");
+      },
+    };
+    behave = async (url) => {
+      attempts += 1;
+      if (attempts === 1) throw transportError();
+      return response(200, { cluster_name: "xerj" });
+    };
+
+    const info = await client({ resolver }).info();
+    expect(info?.clusterName).toBe("xerj");
+    expect(ensured).toEqual(["ensure", "invalidate", "ensure"]);
+    expect(calls[1]!.url).toBe("http://127.0.0.1:9300/");
+  });
+
+  test("does not retry without a resolver, or on HTTP errors", async () => {
+    stubFetch();
+    behave = async () => {
+      throw transportError();
+    };
+    await expect(client().info()).rejects.toBeInstanceOf(TypeError);
+
+    // A failed HTTP status is a response, not a transport problem: the
+    // resolver is consulted once for the base URL but never re-ensured.
+    behave = async () => response(500, {});
+    const resolver: ClientResolver = { ensure: async () => "http://elsewhere" };
+    expect(await client({ resolver }).info()).toBeNull();
+    expect(calls.filter((call) => call.url.includes("elsewhere"))).toHaveLength(1);
   });
 });
