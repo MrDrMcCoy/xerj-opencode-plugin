@@ -26,6 +26,7 @@ import {
   indexPrefix,
   isOverbroadRoot,
   memoryNamespace,
+  nodeDataDir,
   projectNodeDir,
   projectStateDir,
   webPrefix,
@@ -144,6 +145,10 @@ export default Plugin.define({
     // One node directory per project, so two projects (or two locations of the
     // same project) never share a process, a port, or an idle timer.
     const nodeDir = projectNodeDir(root, prefix);
+    // Index journals live beside the engine data they describe, so a node with
+    // a new data dir always starts from a full pass instead of trusting a
+    // journal that describes documents the engine no longer has.
+    const stateRoot = nodeDataDir(nodeDir);
 
     const idleSnapshot = (): number | null => {
       const idle = runtime.lifecycle?.snapshot();
@@ -430,7 +435,7 @@ export default Plugin.define({
             nodeUrl: handle.baseUrl,
             projectRoot,
             prefix,
-            dataRoot: root,
+            stateRoot,
             config,
             storage,
             logger,
@@ -451,7 +456,7 @@ export default Plugin.define({
             nodeUrl: handle.baseUrl,
             projectRoot: runtime.spool.directory,
             prefix: webPrefix(projectRoot),
-            dataRoot: root,
+            stateRoot,
             config,
             storage,
             logger,
@@ -490,7 +495,7 @@ export default Plugin.define({
           runtime.brain = new BrainIndexer({
             binaryPath: runtime.binary?.path ?? "",
             nodeUrl: handle.baseUrl,
-            dataRoot: root,
+            stateRoot,
             config,
             specs: runtime.brains,
             logger,

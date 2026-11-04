@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_CONFIG } from "../../src/config.ts";
@@ -31,21 +31,21 @@ const logger: Logger = {
   flush: async () => {},
 };
 
-function fakeBinary(): string {
+function fakeBinary(script = FAKE_ENGINE): string {
   const dir = mkdtempSync(join(tmpdir(), "xerj-watch-"));
   const path = join(dir, "xerj");
-  writeFileSync(path, FAKE_ENGINE);
+  writeFileSync(path, script);
   chmodSync(path, 0o755);
   return path;
 }
 
-function service(binaryPath: string, dataRoot: string): CorpusService {
+function service(binaryPath: string, stateRoot: string): CorpusService {
   return new CorpusService({
     binaryPath,
     nodeUrl: "http://127.0.0.1:9200",
     projectRoot: "/tmp/project",
     prefix: "xop-project-12345678",
-    dataRoot,
+    stateRoot,
     config: DEFAULT_CONFIG,
     storage: storage(),
     logger,
@@ -61,9 +61,9 @@ afterEach(async () => {
 describe("CorpusService watch ownership", () => {
   test("a second service for one state dir shares the resident watcher", async () => {
     const binary = fakeBinary();
-    const dataRoot = mkdtempSync(join(tmpdir(), "xerj-data-"));
-    const first = service(binary, dataRoot);
-    const second = service(binary, dataRoot);
+    const stateRoot = mkdtempSync(join(tmpdir(), "xerj-data-"));
+    const first = service(binary, stateRoot);
+    const second = service(binary, stateRoot);
     running.push(first, second);
 
     // Same project, same data root: the journal is shared, so the second
@@ -85,5 +85,27 @@ describe("CorpusService watch ownership", () => {
 
     expect(owner.snapshot().state).toBe("watching");
     expect(owner.snapshot().lastRun?.records).toBe(3);
+  });
+
+  test("a watcher killed by a signal is restarted, not left idle", async () => {
+    const script = `#!/bin/sh
+ echo $$ > "$0.pid"
+ echo '{"doc_kind":"run","generation":1,"records_total":3}'
+ exec sleep 30
+ `;
+    const binary = fakeBinary(script);
+    const owner = service(binary, mkdtempSync(join(tmpdir(), "xerj-data-")));
+    running.push(owner);
+
+    await owner.start();
+    await Bun.sleep(300);
+    const pid = Number(readFileSync(`${binary}.pid`, "utf8").trim());
+    process.kill(pid, "SIGTERM");
+    // The first restart waits one second, so this window proves the exit was
+    // treated as a crash rather than as a clean stop.
+    await Bun.sleep(1_500);
+
+    expect(owner.snapshot().lastError).toContain("exited");
+    expect(owner.snapshot().state).not.toBe("idle");
   });
 });

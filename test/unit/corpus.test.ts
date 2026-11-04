@@ -7,11 +7,17 @@ import {
   parseRunDocument,
 } from "../../src/index/corpus.ts";
 
-const layout = corpusLayout("/data/project", "xop-project-12345678", "/data/root");
+const layout = corpusLayout("/data/project", "xop-project-12345678", "/data/engine");
 
 function config(patch: Partial<Config["index"]> = {}): Config {
   return { ...DEFAULT_CONFIG, index: { ...DEFAULT_CONFIG.index, ...patch } };
 }
+
+describe("corpusLayout", () => {
+  test("keeps the journal under the engine data it describes", () => {
+    expect(layout.stateDir).toBe("/data/engine/state/xop-project-12345678");
+  });
+});
 
 describe("autoindexArgs", () => {
   test("always indexes with the non-graph reconciling path", () => {
@@ -26,7 +32,9 @@ describe("autoindexArgs", () => {
     expect(args).toContain("--json");
     expect(args).toContain("--prefix");
     expect(args[args.indexOf("--prefix") + 1]).toBe("xop-project-12345678");
-    expect(args[args.indexOf("--state-dir") + 1]).toBe("/data/root/state/xop-project-12345678");
+    expect(args[args.indexOf("--state-dir") + 1]).toBe(
+      "/data/engine/state/xop-project-12345678",
+    );
     expect(args).not.toContain("--watch");
   });
 

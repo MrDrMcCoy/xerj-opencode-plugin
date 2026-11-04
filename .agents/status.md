@@ -14,6 +14,16 @@ Updated: 2026-11-03
   and status reports a node another process started. Verified live: spawn,
   attach (same pid), idle stop (no answer), restart on the same port with the
   index intact and the doc still searchable. 220 unit tests pass.
+- Plugin state now follows the project node: the autoindex journal, watcher
+ownership and brain state all resolve under `<data root>/nodes/<prefix>/`.
+The old layout left unreachable indices (`xop-agents-…`, its edge index) that
+nothing could attribute or delete; clearing the node data reclaimed them. Live
+verification: journal at `<node dir>/data/state/xop-…/journal.ndjson`, 777
+project docs plus the 69-doc catalog after a reindex.
+- A resident watcher killed by a signal used to report `idle` forever, with no
+error and no restart, because every signal exit was treated as our own stop.
+Only a stop this supervisor requested is idle now; a signaled watcher is
+restarted with backoff. Unit test covers a SIGTERM to the resident child.
 - Concurrent projects each run their own node. Starting two projects at once
   takes one spawn lock at the data root (per-project locks still let both pick
   the same free port), and attach requires the listening pid to equal this
@@ -213,9 +223,10 @@ test/unit/*.test.ts    pure-function tests
 
 ## Next actions
 
-1. Publish the lifecycle change (0.5.0): one node per project with idle and
-   session-end shutdown. `npm publish --access public` still needs a fresh 2FA
-   factor when the token is stale.
+1. Restart OpenCode to load 0.5.2: the node-scoped journal path, the
+   watcher signal-restart fix, and the lifecycle are not in the running
+   module yet. Then publish with `npm publish --access public` (fresh 2FA when
+   the token is stale).
 2. 0.4.5 is `latest` on npm and is the first release whose TUI half loads:
    the entry is prebuilt, the runtime packages are real dependencies, and JSX
    binds to the host through a shim. 0.4.2 on the registry is the broken
@@ -378,3 +389,10 @@ TUI verification remain.
 - 2026-11-03: Shell reads and duplicate collapse added. `bash` parsing covers
   cat-like commands with literal paths; brain sections replace hidden
   whole-file duplicates and now cite `.agents/...` paths.
+- 2026-11-04: Plugin state re-rooted on the project node directory: the
+  autoindex journal, watcher ownership and brain state now live under
+  `<data root>/nodes/<prefix>/`. Clearing the node data reclaimed the orphaned
+  `xop-agents-…` and edge indices from the pre-lifecycle layout. A signaled
+  resident watcher now restarts with backoff instead of reporting `idle`
+  forever. Live corpus restored at 777 project docs plus the 69-doc catalog.
+  222 unit tests pass.

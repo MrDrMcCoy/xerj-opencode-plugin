@@ -141,7 +141,7 @@ export async function startHarness(): Promise<Harness> {
   const node = await nodes.ensure();
 
   const client = new XerjClient(node.baseUrl);
-  const layout = corpusLayout(project, PREFIX, root);
+  const layout = corpusLayout(project, PREFIX, join(root, "data"));
 
   const fastConfig: typeof DEFAULT_CONFIG = {
     ...DEFAULT_CONFIG,

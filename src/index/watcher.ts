@@ -40,7 +40,8 @@ export interface CorpusServiceOptions {
   readonly nodeUrl: string;
   readonly projectRoot: string;
   readonly prefix: string;
-  readonly dataRoot: string;
+  /** Directory holding the engine data; the journal lives under it. */
+  readonly stateRoot: string;
   readonly config: Config;
   readonly storage: KeyValueStorage;
   readonly logger: Logger;
@@ -84,7 +85,11 @@ export class CorpusService {
   private spawnedAt = 0;
 
   constructor(private readonly options: CorpusServiceOptions) {
-    this.layout = corpusLayout(options.projectRoot, options.prefix, options.dataRoot);
+    this.layout = corpusLayout(
+      options.projectRoot,
+      options.prefix,
+      options.stateRoot,
+    );
     this.storageKey = `${STORAGE_KEY}:${options.prefix}`;
     this.state = options.config.index.auto ? "starting" : "disabled";
   }
@@ -257,6 +262,12 @@ export class CorpusService {
   private handleWatchExit(code: number | null, signal: NodeJS.Signals | null): void {
     const meaning = exitMeaning(code);
 
+    // Our own stop() kills the child; that exit is not a crash.
+    if (this.stopped) {
+      this.state = "idle";
+      return;
+    }
+
     // Another process owns this journal, typically the plugin instance of a
     // server that is being replaced. Ownership frees when that process exits,
     // so wait it out instead of counting a failure or burning the restart
@@ -279,13 +290,8 @@ export class CorpusService {
       return;
     }
 
-    if (signal) {
-      this.state = "idle";
-      return;
-    }
-
     this.failures += 1;
-    this.lastError = `autoindex watcher exited (${code ?? "signal"})`;
+    this.lastError = `autoindex watcher exited (${code ?? signal ?? "signal"})`;
     this.options.logger.warn(this.lastError);
 
     if (this.restarts >= MAX_RESTARTS) {

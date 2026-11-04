@@ -50,7 +50,7 @@ choice.
 | D6 | Second brain is opt-in and separate | `xerj brain <folder>` builds its own edge index. Running it over the whole repo duplicates indexing. |
 | D7 | Lexical embedder by default | Offline, deterministic, no 90 MB download. Neural is opt-in and documented as re-index-required. |
 | D8 | Context injection is on, budgeted, and killable | This is the product. It gets a hard token cap, a score threshold, per-turn dedupe, and `context.enabled=false`. |
-| D9 | `.xerj/` holds project state, not the engine index | Engine data lives outside the indexed tree (required by XERJ). `.xerj/` holds the autoindex journal, config, and a self-ignoring `.gitignore`. |
+| D9 | `.xerj/` holds project state, not the engine index | Engine data and the autoindex journal live outside the indexed tree (required by XERJ). `.xerj/` holds config and a self-ignoring `.gitignore`. |
 | D10 | Savings are measured, not asserted | Baseline = full size of each cited file, counted once per session, and only for files the model did not read anyway. |
 | D11 | Fetched documents persist across sessions | Re-fetching a URL is a no-op, and yesterday's page is still searchable today. Bounded by `remote.maxBytes`, redacted, and killable with `remote.enabled=false`. |
 | D12 | Package name `@mrdrmccoy/xerj-opencode-plugin` | Matches the repo owner. No unscoped-name risk, and the scoped name installs the same way from any project. |
@@ -116,7 +116,7 @@ port          <node dir>/port                          (resolved, persisted)
 pid           <node dir>/node.pid
 spool         <data root>/spool/<prefix>/             (remote documents)
 project       <project>/.xerj/                         (ignore file, caches)
-journal       <data root>/state/<prefix>/journal.ndjson
+journal       <node dir>/data/state/<prefix>/journal.ndjson
 ```
 
 Index prefix, stable per canonical project path:
@@ -132,13 +132,14 @@ Remote documents get `xop-web-<hash>`, external single files
 
 `autoindex` refuses a single file (`... is not a directory`), so external
 single-file ingest has to go through `_bulk`. Hidden files and directories are
-skipped unconditionally: `.env`, `.git`, and this repo's own `.agents/` never
-reach the project index. That is why the brain is the only way `.agents` is
-searchable, and why `index.brain` is not redundant with the project corpus.
+skipped unconditionally, so `.env`, `.git`, and this repo's own `.agents/`
+never reach the project corpus; `index.hidden` indexes listed folders through
+`_bulk` and `index.brain` adds graph edges, which is why the two settings are
+not redundant.
 
 `.xerj/.gitignore` contains `*` so project state never lands in git.
 
-The journal lives under the data root, not in `.xerj`. `autoindex --watch`
+The journal lives inside the node directory, not in `.xerj`. `autoindex --watch`
 refuses a `--state-dir` inside the watched tree: every pass writes the journal,
 those writes are filesystem events, and the events would start the next pass
 forever. Verified by the binary's own error message.
@@ -297,7 +298,10 @@ anyway. The plan is:
 
 Watch mode is one process per project. With several projects open that is
 acceptable (each is idle when nothing changes), but `index.watch=false` must
-exist for users who disagree.
+exist for users who disagree. A resident watcher that dies by signal is
+restarted with backoff like any other crash; only a stop this supervisor
+requested reports `idle`, because a killed watcher would otherwise leave the
+corpus frozen with no error.
 
 The plugin loads once per open location, so one server can hold several
 instances for the same project. A module-level set of state directories grants

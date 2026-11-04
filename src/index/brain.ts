@@ -29,7 +29,8 @@ export interface BrainRunSummary {
 export interface BrainIndexerOptions {
   readonly binaryPath: string;
   readonly nodeUrl: string;
-  readonly dataRoot: string;
+  /** Directory holding the engine data; graph journals live under it. */
+  readonly stateRoot: string;
   readonly config: Config;
   readonly specs: ReadonlyArray<BrainSpec>;
   readonly logger: Logger;
@@ -100,7 +101,7 @@ export class BrainIndexer {
       "--brain",
       spec.name,
       "--state-dir",
-      join(this.options.dataRoot, "state", spec.prefix),
+      join(this.options.stateRoot, "state", spec.prefix),
       "--json",
       "--progress",
       "none",

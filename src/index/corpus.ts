@@ -22,15 +22,16 @@ export interface CorpusLayout {
 export function corpusLayout(
   projectRoot: string,
   prefix: string,
-  dataRoot: string,
+  stateRoot: string,
 ): CorpusLayout {
   return {
     projectRoot,
     prefix,
     // `--watch` refuses a state dir inside the watched tree: journal writes are
-    // filesystem events and would restart the pass forever. Keep the journal
-    // beside the node data instead.
-    stateDir: join(dataRoot, "state", prefix),
+    // filesystem events and would restart the pass forever. The journal lives
+    // under the node's engine data, so a fresh engine starts a fresh pass
+    // instead of trusting a journal that describes an index it cannot see.
+    stateDir: join(stateRoot, "state", prefix),
     ignoreFile: join(projectRoot, ".xerjignore"),
   };
 }
