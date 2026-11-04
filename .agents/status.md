@@ -337,7 +337,9 @@ publish, and live TUI verification remain.
   binary, release cache and shared port lock stay global. Existing projects
   migrate once on setup. The engine's `--watch` cannot use a state dir inside
   the watched tree, so project-local storage runs one-shot indexes behind the
-  plugin's own recursive watcher. 237 unit tests pass; version 0.6.0.
+  plugin's own recursive watcher. Live check on a scratch project: `ensure()`
+  created `<project>/.xerj/nodes/<prefix>/{data,node.log,node.pid,port}` and
+  no node directory under the global root. 237 unit tests pass; version 0.6.0.
 
 - 2026-11-04: Audit of the loaded 0.5.2 instance. The lifetime ledger and log
   ring were shared across locations (`queries: 0` on a 20-RPC session), so both
