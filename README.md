@@ -123,38 +123,49 @@ opencode debug config        # prints every config source with its path
 opencode debug paths         # prints the global config, data, cache, state dirs
 ```
 
-Plugin options belong under the plugin entry, not at the document root:
+## Configuration
+
+Options go under the plugin entry, inside `options`. Never at the document
+root: a top-level `context` key is ignored by the plugin.
+
+Every option has a default, so the file only needs the keys that differ. A
+malformed value warns and falls back instead of failing plugin load. Nested
+objects merge per key, so `{"context": {"maxTokens": 800}}` keeps the other
+context defaults.
+
+This is the complete set with its defaults, in
+`~/.config/opencode/opencode.jsonc` (all projects) or `<project>/opencode.json`
+(one project):
 
 ```jsonc
 {
   "plugins": [
-    { "package": "/path/to/checkout", "options": { "context": { "enabled": false } } }
+    {
+      "package": "@mrdrmccoy/xerj-opencode-plugin",
+      "options": {
+        "binary":  { "version": "auto", "path": null, "target": null,
+                     "libc": "musl" },
+        "node":    { "url": null, "port": 9200, "dataDir": null },
+        "index":   { "auto": true, "watch": true, "debounceMs": 800,
+                     "periodicMs": 900000, "workers": null, "brain": [],
+                     "hidden": [], "hiddenMaxBytes": 262144,
+                     "semantic": true, "maxBytes": 2147483648,
+                     "maxMinutes": 10 },
+        "remote":  { "enabled": true, "maxBytes": 2000000 },
+        "context": { "enabled": true, "maxTokens": 1500, "memoryTokens": 400,
+                     "maxPassages": 4, "timeoutMs": 400 },
+        "memory":  { "enabled": true },
+        "stats":   { "enabled": true, "bytesPerToken": 4,
+                     "maxBaselineBytes": 131072 },
+        "telemetry": { "anomaly": false }
+      }
+    }
   ]
 }
 ```
 
-## Configuration
-
-Every option has a default; a malformed value warns and falls back instead of
-failing plugin load.
-
-```jsonc
-{
-  "binary":  { "version": "auto", "path": null, "target": null, "libc": "musl" },
-  "node":    { "url": null, "port": 9200, "dataDir": null },
-  "index":   { "auto": true, "watch": true, "debounceMs": 800,
-               "periodicMs": 900000, "workers": null, "brain": [],
-               "hidden": [], "hiddenMaxBytes": 262144, "semantic": true,
-               "maxBytes": 2147483648, "maxMinutes": 10 },
-  "remote":  { "enabled": true, "maxBytes": 2000000 },
-  "context": { "enabled": true, "maxTokens": 1500, "memoryTokens": 400,
-               "maxPassages": 4, "timeoutMs": 400 },
-  "memory":  { "enabled": true },
-  "stats":   { "enabled": true, "bytesPerToken": 4,
-               "maxBaselineBytes": 131072 },
-  "telemetry": { "anomaly": false }
-}
-```
+The same entry works with a checkout path instead of the package name; see
+[Install](#install).
 
 | Key | Meaning |
 |---|---|
