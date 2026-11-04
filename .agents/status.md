@@ -27,11 +27,13 @@ Updated: 2026-11-03
   tool traffic in between, so the sidebar and panel reach the server part.
   `injectedTurns` reached 1, so the prompt hook retrieved and the context hook
   spliced a block into a real turn.
-- Automatic memory capture from compaction is implemented: the
-  `session.compaction.ended` event carries `data.text`, so a summary of
-  120-4000 characters is stored as a `summary` memory. Unit tests cover the
-  long, short, and clipped cases. No compaction has fired in this session yet,
-  so the live path is untested.
+- Automatic memory capture from compaction is verified live. A scratch session
+  was compacted through `POST /api/session/:id/compact`; the plugin received
+  `session.compaction.ended` and stored exactly one `summary` memory
+  (`topic: session summary`, the scratch session id, `created` one second after
+  the request). Short summaries and repeat events were covered by the unit
+  tests, and a stubbed event source against the live node confirmed the
+  dedupe and the `summary` kind.
 - Per-process counters are live: rpc calls, injected turns, node spawns, 429s,
   and index runs, shown in the panel and the status snapshot.
 - Brain neighbor expansion was measured. On a fixture brain with a `pathcite`
