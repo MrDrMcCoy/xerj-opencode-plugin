@@ -39,9 +39,33 @@ cited passages instead of whole files. Nothing leaves the machine.
 Only Linux x86_64 has been exercised end to end. The other release targets are
 selected, downloaded, and probed for execution, but not tested in CI.
 
-## Install from a local checkout
+## Install
 
-There is no published package. A checkout is the install source.
+The plugin is published as `@mrdrmccoy/xerj-opencode-plugin`. Add it to any
+OpenCode config file, global or project:
+
+```jsonc
+// ~/.config/opencode/opencode.jsonc   (all projects)
+// or <project>/opencode.json          (one project)
+{
+  "plugins": [
+    {
+      "package": "@mrdrmccoy/xerj-opencode-plugin",
+      "options": {
+        "index": { "hidden": [".agents"] }
+      }
+    }
+  ]
+}
+```
+
+The host fetches the package on first load and caches it under
+`~/.cache/opencode/`. No separate install command is needed.
+
+### From a local checkout
+
+A checkout works the same way. Clone it, install its dev dependencies, and
+point `package` at the directory:
 
 ```bash
 git clone https://github.com/xerj-org/xerj-opencode-plugin.git \
@@ -50,12 +74,9 @@ cd ~/src/xerj-opencode-plugin
 bun install      # dev dependencies; the host supplies @opencode/plugin
 ```
 
-Then register the checkout in the project that should use it. An absolute path
-is the reliable form, because a relative `package` resolves against the project
-holding the config, not against this repository:
-
 ```jsonc
-// <project>/opencode.json
+// ~/.config/opencode/opencode.jsonc   (all projects)
+// or <project>/opencode.json          (one project)
 {
   "plugins": [
     {
@@ -68,15 +89,19 @@ holding the config, not against this repository:
 }
 ```
 
-Inside this repository `"package": "./"` does the same thing, since the config
-and the checkout share a directory. There is no build step: the plugin entry
-points are the TypeScript sources, which the host compiles when it loads them.
+Use an absolute path. A relative `package` resolves against the project holding
+the config, not against the checkout, so `"./"` works only when the config and
+the checkout share a directory. That is what this repository does in its own
+`opencode.json`.
 
-Restart OpenCode once after adding the entry. The first start downloads XERJ,
+There is no build step in either form: the entry points are TypeScript sources
+that the host compiles when it loads them.
+
+After adding the entry, restart OpenCode once. The first start downloads XERJ,
 creates a data root, and builds the project index in the background.
-`xerj_status` reports when it is ready. Watch the plugin load with
-`opencode debug config` (it lists the config files that were read) and with the
-server log.
+`xerj_status` reports when it is ready. `opencode debug config` lists the
+config files that were read, which is the quickest way to confirm the entry was
+picked up.
 
 ## Where the config goes
 
@@ -87,11 +112,11 @@ OpenCode reads two config documents and applies them in order:
 | Global | `~/.config/opencode/opencode.jsonc` | Applies to every project. `$XDG_CONFIG_HOME` replaces `~/.config` when set. |
 | Project | `<project>/opencode.json` | Applies to that project only. |
 
-A directory holds one document: when both `opencode.json` and `opencode.jsonc`
-exist in the project, `opencode.json` wins. In a directory without
-`opencode.json`, `opencode.jsonc` is read instead. Both facts are what
-`opencode debug config` reports, which is the quickest way to check what a
-given project actually loads:
+Each directory holds one document: when both `opencode.json` and
+`opencode.jsonc` exist, `opencode.json` wins. In a directory without
+`opencode.json`, `opencode.jsonc` is read instead. The same rule applies in the
+global config directory, which is why the examples above name
+`opencode.jsonc` there. This is what `opencode debug config` reports:
 
 ```bash
 opencode debug config        # prints every config source with its path
