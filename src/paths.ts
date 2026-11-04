@@ -153,7 +153,12 @@ export function resolveStorageRoot(
   }
 
   const root = projectPath(projectRoot, configured);
-  if (isPathInside(projectRoot, root) && !isHiddenPathInside(projectRoot, root)) {
+  // Equal to the project root is the worst case: engine data would sit beside
+  // the sources and the watcher would index its own writes.
+  const isProjectRoot = resolve(root) === resolve(projectRoot);
+  const visibleInside = isPathInside(projectRoot, root) &&
+    !isHiddenPathInside(projectRoot, root);
+  if (isProjectRoot || visibleInside) {
     return { root: projectStateDir(projectRoot), rejected: root };
   }
 

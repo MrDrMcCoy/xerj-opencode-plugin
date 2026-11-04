@@ -16,7 +16,7 @@ Updated: 2026-11-03
   peer heartbeat exists. A dead socket re-ensures the node once and retries,
   and status reports a node another process started. Verified live: spawn,
   attach (same pid), idle stop (no answer), restart on the same port with the
-  index intact and the doc still searchable. 236 unit tests pass.
+  index intact and the doc still searchable. 237 unit tests pass.
 - Plugin state now follows the project node: the autoindex journal, watcher
   ownership and brain state all resolve under the node dir inside the project
   storage root. The engine's `autoindex --watch` refuses a state dir inside the
@@ -337,7 +337,7 @@ publish, and live TUI verification remain.
   binary, release cache and shared port lock stay global. Existing projects
   migrate once on setup. The engine's `--watch` cannot use a state dir inside
   the watched tree, so project-local storage runs one-shot indexes behind the
-  plugin's own recursive watcher. 236 unit tests pass; version 0.6.0.
+  plugin's own recursive watcher. 237 unit tests pass; version 0.6.0.
 
 - 2026-11-04: Audit of the loaded 0.5.2 instance. The lifetime ledger and log
   ring were shared across locations (`queries: 0` on a 20-RPC session), so both

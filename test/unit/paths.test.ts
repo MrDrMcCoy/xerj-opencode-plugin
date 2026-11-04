@@ -62,6 +62,13 @@ describe("resolveStorageRoot", () => {
     expect(resolveStorageRoot("/repo", ".cache/xerj").root).toBe("/repo/.cache/xerj");
   });
 
+  test("refuses the project root itself", () => {
+    expect(resolveStorageRoot("/repo", ".")).toEqual({
+      root: "/repo/.xerj",
+      rejected: "/repo",
+    });
+  });
+
   test("puts each project's node under its own storage root", () => {
     expect(projectNodeDir("/repo/.xerj", "xop-a")).not.toBe(
       projectNodeDir("/other/.xerj", "xop-b"),
