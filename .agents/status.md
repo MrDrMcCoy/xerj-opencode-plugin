@@ -129,10 +129,14 @@ Updated: 2026-11-03
   integration job that prefers podman, falls back to docker, then to the bare
   runner.
 - Released 2026-11-04: `main` pushed to `github.com:MrDrMcCoy/xerj-opencode-plugin`,
-  annotated tag `v0.4.0`, GitHub release published. CI ran and passed on the
-  push: both jobs green, and the integration job used podman on the hosted
-  runner (`podman info` succeeded), so 9 integration tests ran in
-  `docker.io/oven/bun:1.4.4`.
+  annotated tags `v0.4.0` and `v0.4.1`, both GitHub releases published. CI ran
+  and passed on the first push: both jobs green, and the integration job used
+  podman on the hosted runner (`podman info` succeeded), so 9 integration tests
+  ran in `docker.io/oven/bun:1.4.4`.
+- Published to npm: `@mrdrmccoy/xerj-opencode-plugin@0.4.0`, then `0.4.1` with
+  repository, homepage, and issue metadata. `latest` points at 0.4.1, the
+  tarball carries 33 files (src plus README and LICENSE), and the package was
+  absent from the registry before the first publish.
 - Config discovery verified with `opencode debug config`: the global
   `~/.config/opencode/opencode.jsonc` plus the project's `opencode.json`; a
   project `opencode.jsonc` is read only when no `opencode.json` exists.
@@ -173,11 +177,8 @@ test/unit/*.test.ts    pure-function tests
 
 ## Next actions
 
-1. npm publish is blocked on interactive 2FA. `npm publish --access public`
-   reaches the registry and then fails with `EOTP`; npm prints the auth URL
-   redacted because it is not attached to a TTY. Run it from a terminal, or
-   pass `--otp`. The README already documents the published package name,
-   which is the intended state once this succeeds.
+1. Nothing blocks release. Both the GitHub release and the npm package are
+   live, and the README's published-package install path is now true.
 2. Watch for one real compaction to confirm `session.compaction.ended` stores a
    `summary` memory in practice.
 3. The shell parser does not follow `xargs`, command substitution, pipelines
@@ -245,8 +246,10 @@ TUI verification remain.
 
 ## Log
 
-- 2026-11-04: v0.4.0 pushed and released on GitHub; CI green including the
-  containerized integration job on podman. npm publish needs a TTY for 2FA.
+- 2026-11-04: v0.4.0 pushed, tagged, and released on GitHub; CI green
+  including the containerized integration job on podman. Published to npm as
+  0.4.0, then 0.4.1 with repository metadata after the account's web 2FA login
+  refreshed the token.
 - 2026-11-03: Ranking demotes generated files (score x0.35 unless named), the
   integration harness runs 9 tests against a real node in podman, CI exists
   (podman -> docker -> bare runner), compaction capture subscribes to
