@@ -61,14 +61,19 @@ function fakeBinary(script = FAKE_ENGINE): string {
   return path;
 }
 
-function service(binaryPath: string, stateRoot: string): CorpusService {
+function service(
+  binaryPath: string,
+  stateRoot: string,
+  projectRoot = "/tmp/project",
+  config = DEFAULT_CONFIG,
+): CorpusService {
   return new CorpusService({
     binaryPath,
     nodeUrl: "http://127.0.0.1:9200",
-    projectRoot: "/tmp/project",
+    projectRoot,
     prefix: "xop-project-12345678",
     stateRoot,
-    config: DEFAULT_CONFIG,
+    config,
     storage: storage(),
     logger,
   });
@@ -107,6 +112,69 @@ describe("CorpusService watch ownership", () => {
 
     expect(owner.snapshot().state).toBe("watching");
     expect(owner.snapshot().lastRun?.records).toBe(3);
+  });
+
+  test("watches the tree while the first pass is still running", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "xerj-project-"));
+    const log = join(projectRoot, "runs.log");
+    // The first pass takes long enough for an edit to land during it.
+    const script = `#!/bin/sh
+ echo run >> ${JSON.stringify(log)}
+ echo '{"doc_kind":"run","generation":1,"records_total":3}'
+ sleep 2
+ `;
+    const binary = fakeBinary(script);
+    const owner = service(
+      binary,
+      join(projectRoot, ".xerj", "data"),
+      projectRoot,
+    );
+    running.push(owner);
+
+    const started = owner.start();
+    await Bun.sleep(200);
+    writeFileSync(join(projectRoot, "note.md"), "written during the first pass");
+    await started;
+    // The edit queued a pass behind the first one; without watchers during
+    // the first pass nothing would notice it until the periodic fallback.
+    await Bun.sleep(300);
+
+    expect(readFileSync(log, "utf8").trim().split("\n").length).toBe(2);
+  });
+
+  test("shares the local watcher across instances for one project", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "xerj-project-"));
+    const stateRoot = join(projectRoot, ".xerj");
+    const log = join(projectRoot, "runs.log");
+    const script = `#!/bin/sh
+ echo run >> ${JSON.stringify(log)}
+ echo '{"doc_kind":"run","generation":1,"records_total":3}'
+ `;
+    const binary = fakeBinary(script);
+    const first = service(binary, stateRoot, projectRoot);
+    const second = service(binary, stateRoot, projectRoot);
+    running.push(first, second);
+
+    await first.start();
+    await second.start();
+    await Bun.sleep(300);
+
+    // Only the owner indexes; the second instance must not run a competing
+    // pass over the same journal.
+    expect(first.snapshot().state).not.toBe("shared");
+    expect(second.snapshot().state).toBe("shared");
+    expect(readFileSync(log, "utf8").trim().split("\n")).toHaveLength(1);
+
+    // When the owner stops, a new instance takes the watcher over.
+    await first.stop();
+    running.splice(running.indexOf(first), 1);
+    const third = service(binary, stateRoot, projectRoot);
+    running.push(third);
+    await third.start();
+    await Bun.sleep(300);
+
+    expect(third.snapshot().state).not.toBe("shared");
+    expect(readFileSync(log, "utf8").trim().split("\n")).toHaveLength(2);
   });
 
   test("a watcher killed by a signal is restarted, not left idle", async () => {

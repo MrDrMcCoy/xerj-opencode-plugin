@@ -73,9 +73,10 @@ const LOCAL_POLL_MS = 30_000;
 const MAX_LOCAL_WATCH_DIRS = 1_024;
 const LOCAL_RESCAN_MS = 1_000;
 
-// One watcher per state directory per process. The same plugin loads once for
-// every open location, and two `--watch` processes cannot share one journal,
-// so the first one owns it and the rest report that they share it.
+// One watcher per state directory per process, whether it is the engine's
+// resident `--watch` or the plugin's own directory watchers. The same plugin
+// loads once for every open location, and two watchers cannot share one
+// journal, so the first one owns it and the rest report that they share it.
 const RESIDENT_WATCHERS = new Set<string>();
 
 // Directories whose contents cannot change a corpus: VCS metadata, the
@@ -144,6 +145,7 @@ export class CorpusService {
   private readonly watchers = new Map<string, FSWatcher>();
   private rescanTimer: ReturnType<typeof setTimeout> | null = null;
   private localWatch = false;
+  private ownsLocalWatch = false;
   private polling = false;
   private onceRunning = false;
   private pendingRun = false;
@@ -181,8 +183,19 @@ export class CorpusService {
       return;
     }
 
+    // Watch before the first pass, not after: a full index can take minutes,
+    // and an edit that lands behind the scan would otherwise wait for the
+    // periodic fallback. Only one instance may own the watcher; the rest poll
+    // for ownership so they can take over when the owner stops.
+    if (this.options.config.index.watch) {
+      if (!this.claimLocalWatch()) {
+        this.state = "shared";
+        this.startPeriodic();
+        return;
+      }
+      this.startLocalWatch();
+    }
     await this.runOnce();
-    if (this.options.config.index.watch) this.startLocalWatch();
     this.startPeriodic();
   }
 
@@ -216,7 +229,12 @@ export class CorpusService {
     this.restarts = 0;
     this.lastError = null;
 
-    if (!this.options.config.index.watch || this.localWatch || this.polling) {
+    if (
+      !this.options.config.index.watch ||
+      this.localWatch ||
+      this.polling ||
+      this.state === "shared"
+    ) {
       await this.runOnce();
       return;
     }
@@ -277,7 +295,7 @@ export class CorpusService {
       });
     } catch (error) {
       this.spawning = false;
-      RESIDENT_WATCHERS.delete(watcherKey);
+      if (watch) RESIDENT_WATCHERS.delete(watcherKey);
       this.fail(error);
       return null;
     }
@@ -291,7 +309,9 @@ export class CorpusService {
     this.attachOutput(child);
     child.once("close", (code, signal) => {
       this.child = null;
-      RESIDENT_WATCHERS.delete(watcherKey);
+      // A one-shot run must not release the local watcher's ownership: it
+      // shares the same key but did not claim it.
+      if (watch) RESIDENT_WATCHERS.delete(watcherKey);
       if (this.stopped) return;
 
       if (watch) {
@@ -431,8 +451,25 @@ export class CorpusService {
 
   private startPeriodic(): void {
     this.clearTimer();
-    const period = this.polling ? LOCAL_POLL_MS : this.options.config.index.periodicMs;
-    this.timer = setInterval(() => void this.runOnce(), period);
+    // A shared instance retries ownership often enough to take over; a polling
+    // fallback needs the same short period to notice changes.
+    const local = this.polling || this.state === "shared";
+    const period = local ? LOCAL_POLL_MS : this.options.config.index.periodicMs;
+    this.timer = setInterval(() => this.tick(), period);
+  }
+
+  private tick(): void {
+    if (this.stopped) return;
+
+    if (this.state === "shared" && this.options.config.index.watch) {
+      if (!this.claimLocalWatch()) return;
+      this.startLocalWatch();
+      this.startPeriodic();
+      void this.runOnce();
+      return;
+    }
+
+    void this.runOnce();
   }
 
   private clearTimer(): void {
@@ -453,6 +490,14 @@ export class CorpusService {
    * every directory instead. A new directory is picked up by its parent's
    * watcher and added on the next rescan.
    */
+  private claimLocalWatch(): boolean {
+    const key = this.layout.stateDir;
+    if (RESIDENT_WATCHERS.has(key)) return false;
+    RESIDENT_WATCHERS.add(key);
+    this.ownsLocalWatch = true;
+    return true;
+  }
+
   private startLocalWatch(): void {
     const dirs = listWatchableDirectories(this.options.projectRoot);
     if (dirs === null) {
@@ -543,6 +588,10 @@ export class CorpusService {
   private closeLocalWatch(): void {
     for (const watcher of this.watchers.values()) watcher.close();
     this.watchers.clear();
+    if (this.ownsLocalWatch) {
+      RESIDENT_WATCHERS.delete(this.layout.stateDir);
+      this.ownsLocalWatch = false;
+    }
     if (this.rescanTimer) {
       clearTimeout(this.rescanTimer);
       this.rescanTimer = null;
