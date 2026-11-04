@@ -1,11 +1,11 @@
 // Project session activity and idle shutdown.
 //
-// OpenCode gives no reliable "all sessions closed" signal, and several server
-// processes can hold the same project. So the node is kept alive by activity:
-// every prompt, tool call and RPC touch resets a deadline, and when nothing has
-// touched the project for `idleMs` the node stops. Processes announce
-// themselves with a heartbeat file, so the last one to go idle cannot kill the
-// node out from under a peer that is still answering requests.
+// Several server processes can hold the same project, and a session can be
+// closed without this process seeing the event. So the node is kept alive by
+// activity: every prompt, tool call and RPC touch resets a deadline, and when
+// nothing has touched the project for `idleMs` the node stops. Each process
+// publishes its session count with a heartbeat, so a timer only defers to a
+// peer that still has a live session; two idle instances cannot defer forever.
 
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
@@ -69,7 +69,13 @@ export class ProjectLifecycle {
   /** Records activity for a session; the node stays up while this is fresh. */
   touch(sessionID?: string): void {
     this.lastActivityAt = Date.now();
-    if (sessionID) this.sessions.set(sessionID, this.lastActivityAt);
+    if (sessionID) {
+      const isNew = !this.sessions.has(sessionID);
+      this.sessions.set(sessionID, this.lastActivityAt);
+      // Advertise a new session immediately. Waiting for the periodic heartbeat
+      // lets another instance stop the node before it sees the session.
+      if (isNew) void this.writeHeartbeat();
+    }
     this.pruneSessions();
   }
 
@@ -85,7 +91,11 @@ export class ProjectLifecycle {
     };
   }
 
-  /** Counts live peer processes; excludes this one. */
+  /**
+   * Counts live peers that still have an active session. A running process
+   * with no session does not need the node, and counting it would let two idle
+   * instances defer to each other forever.
+   */
   async peers(): Promise<number> {
     const directory = nodeClientsDir(this.options.nodeDir);
     const entries = await readdir(directory).catch(() => [] as string[]);
@@ -100,8 +110,11 @@ export class ProjectLifecycle {
       if (!info || now - info.mtimeMs > HEARTBEAT_STALE_MS) continue;
 
       const body = await readFile(join(directory, entry), "utf8").catch(() => null);
-      const pid = body === null ? null : readPid(body);
-      if (pid !== null && !heartbeatAlive(pid)) continue;
+      const heartbeat = body === null ? null : readHeartbeat(body);
+      if (heartbeat?.pid != null && !heartbeatAlive(heartbeat.pid)) continue;
+      // A heartbeat from an older build has no session count. Treat it as
+      // active until that process exits rather than risk killing its node.
+      if ((heartbeat?.sessions ?? 1) <= 0) continue;
       live += 1;
     }
 
@@ -125,6 +138,9 @@ export class ProjectLifecycle {
    */
   async closeSession(sessionID: string): Promise<boolean> {
     this.sessions.delete(sessionID);
+    // Publish the new count before checking peers. Otherwise each instance can
+    // still see the other's pre-close heartbeat and defer indefinitely.
+    await this.writeHeartbeat();
     if (this.sessions.size > 0) return false;
     return this.shutdownIfUnused("last session closed");
   }
@@ -160,12 +176,13 @@ export class ProjectLifecycle {
   }
 
   private async writeHeartbeat(): Promise<void> {
-    if (this.stopped) return;
+    if (this.stopped || !this.options.enabled) return;
     const directory = nodeClientsDir(this.options.nodeDir);
     await mkdir(directory, { recursive: true, mode: 0o700 }).catch(() => {});
 
     const body = JSON.stringify({
       pid: process.pid,
+      sessions: this.sessions.size,
       updatedAt: Date.now(),
     });
     await writeFile(join(directory, this.heartbeatName()), body, { mode: 0o600 }).catch(
@@ -201,12 +218,20 @@ export function heartbeatAlive(pid: number): boolean {
   }
 }
 
-function readPid(body: string): number | null {
+interface HeartbeatInfo {
+  readonly pid: number | null;
+  readonly sessions: number | null;
+}
+
+function readHeartbeat(body: string): HeartbeatInfo | null {
   try {
-    const value = JSON.parse(body) as { pid?: unknown };
-    return typeof value.pid === "number" && Number.isInteger(value.pid)
-      ? value.pid
-      : null;
+    const value = JSON.parse(body) as { pid?: unknown; sessions?: unknown };
+    return {
+      pid: typeof value.pid === "number" && Number.isInteger(value.pid)
+        ? value.pid
+        : null,
+      sessions: typeof value.sessions === "number" ? value.sessions : null,
+    };
   } catch {
     return null;
   }

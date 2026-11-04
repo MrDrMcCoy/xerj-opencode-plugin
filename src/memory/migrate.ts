@@ -3,7 +3,7 @@
 // upgrade would otherwise start with an empty memory while the old index still
 // sits on disk.
 
-import { cp, mkdir, rename, rm, stat } from "node:fs/promises";
+import { cp, mkdir, readdir, rename, rm, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import type { Logger } from "../log.ts";
 import { isPathInside } from "../paths.ts";
@@ -77,7 +77,10 @@ async function moveDirectory(
   logger: Logger,
   label: string,
 ): Promise<boolean> {
-  if (!(await exists(source)) || (await exists(target))) return false;
+  if (!(await exists(source))) return false;
+  // A target that already holds data wins; an empty one is a directory another
+  // part of setup created eagerly and can be replaced with the migrated tree.
+  if ((await exists(target)) && !(await isEmptyDirectory(target))) return false;
   // Copying a directory into its own subtree would recurse forever.
   if (isPathInside(source, target)) {
     logger.warn(`cannot migrate the ${label} into itself`, target);
@@ -89,15 +92,29 @@ async function moveDirectory(
   await rm(partial, { recursive: true, force: true });
   await cp(source, partial, { recursive: true, preserveTimestamps: true });
 
-  // Two instances can bootstrap at once; the rename picks one winner.
+  // Two instances can bootstrap at once; the rename picks one winner. An empty
+  // target is removed first, but a peer may fill it after that check.
   if (await exists(target)) {
+    if (!(await isEmptyDirectory(target))) {
+      await rm(partial, { recursive: true, force: true });
+      return false;
+    }
+    await rm(target, { recursive: true, force: true });
+  }
+  try {
+    await rename(partial, target);
+  } catch {
     await rm(partial, { recursive: true, force: true });
     return false;
   }
-  await rename(partial, target);
   await rm(source, { recursive: true, force: true });
   logger.info(`migrated the ${label} into project storage`, target);
   return true;
+}
+
+async function isEmptyDirectory(path: string): Promise<boolean> {
+  const entries = await readdir(path).catch(() => null);
+  return entries !== null && entries.length === 0;
 }
 
 async function exists(path: string): Promise<boolean> {

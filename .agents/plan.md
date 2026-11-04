@@ -172,7 +172,9 @@ Upgrades: a project whose data still sits in the old global layout
 stopped first so it cannot keep writing into the directory being moved.
 Project memory is copied separately into the node data dir when the target is
 empty, because an already-running node enumerated its indices at startup and
-would not see the copied index until it restarted.
+would not see the copied index until it restarted. The spool is constructed
+after the move: its constructor creates the spool directory, and an eagerly
+created empty target would otherwise make the move skip the legacy pages.
 
 ## 5. Binary management
 
@@ -270,9 +272,13 @@ lifecycle and records its session id. Three things stop the node:
 - the plugin instance itself is torn down.
 
 Each path checks the peer heartbeats first: an instance writes
-`<node dir>/clients/<instanceId>.json` every 15 s, an entry is stale after 90 s
-or when its pid is gone, and a live peer defers the shutdown to that process's
-own deadline. `node.shutdownOnIdle=false` keeps the node up. Stopping sends
+`<node dir>/clients/<instanceId>.json` every 15 s with its session count, an
+entry is stale after 90 s or when its pid is gone, and only a peer that still
+holds a session defers the shutdown to its own deadline. Counting every live
+process instead would deadlock two idle instances, each deferring to the
+other. A new session and a session close publish the count immediately rather
+than waiting for the next periodic write. `node.shutdownOnIdle=false` keeps
+the node up. Stopping sends
 `SIGTERM`, waits five seconds, then `SIGKILL`s and removes the pidfile. The
 node directory and engine data stay, so the next request restarts the node on
 the same port with the same index.

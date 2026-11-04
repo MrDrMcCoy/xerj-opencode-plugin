@@ -98,6 +98,25 @@ describe("migrateProjectStorage", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  test("replaces an empty target created before the migration runs", async () => {
+    const root = mkdtempSync(join(tmpdir(), "xerj-storage-"));
+    const legacy = join(root, "global");
+    const target = join(root, "project", ".xerj");
+    const prefix = "xop-demo-1234abcd";
+    const web = "xop-web-5678efgh";
+    const oldSpool = join(legacy, "spool", web);
+    mkdirSync(oldSpool, { recursive: true });
+    writeFileSync(join(oldSpool, "page.md"), "cached");
+    // A spool constructed before migration creates its directory eagerly.
+    mkdirSync(join(target, "spool", web), { recursive: true });
+
+    const moved = await migrateProjectStorage(legacy, target, prefix, web, silent);
+
+    expect(moved.spool).toBe(true);
+    expect(readFileSync(join(target, "spool", web, "page.md"), "utf8")).toBe("cached");
+    rmSync(root, { recursive: true, force: true });
+  });
+
   test("keeps an existing target and never nests a move inside itself", async () => {
     const root = mkdtempSync(join(tmpdir(), "xerj-storage-"));
     const legacy = join(root, "project", ".xerj");

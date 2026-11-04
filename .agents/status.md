@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-11-03
+Updated: 2026-11-04
 
 ## Where things stand
 
@@ -12,11 +12,14 @@ Updated: 2026-11-03
   Two runtimes on the same node directory attach to the same pid. The node
   stops when the last recorded session emits `session.deleted`, after
   `node.idleMs` (default 30 min) with no activity, or when this plugin instance
-  is torn down — each only when no live
-  peer heartbeat exists. A dead socket re-ensures the node once and retries,
-  and status reports a node another process started. Verified live: spawn,
-  attach (same pid), idle stop (no answer), restart on the same port with the
-  index intact and the doc still searchable. 237 unit tests pass.
+  is torn down — each only when a peer heartbeat with a live session exists.
+  Counting running-but-idle instances was a deadlock: every instance deferred
+  to the other and none ever stopped. A new session and a session close now
+  publish their heartbeat immediately, so two instances cannot both defer on
+  stale counts. A dead socket re-ensures the node once and retries, and status
+  reports a node another process started. Verified live: spawn, attach (same
+  pid), idle stop (no answer), restart on the same port with the index intact
+  and the doc still searchable. 242 unit tests pass.
 - Plugin state now follows the project node: the autoindex journal, watcher
   ownership and brain state all resolve under the node dir inside the project
   storage root. The engine's `autoindex --watch` refuses a state dir inside the
@@ -25,9 +28,11 @@ Updated: 2026-11-03
 - Existing projects migrate on setup: data in the old global layout
   (`<data root>/nodes/<prefix>`, `<data root>/spool/<web prefix>`) is moved
   into `<project>/.xerj` once, after stopping any node still running from the
-  old tree. Legacy project memory is copied separately into the node data dir
-  when the target is empty. A refused `storage.root` path falls back to `.xerj`
-  and is reported in warnings.
+  old tree. An empty target directory left by another part of setup (the spool
+  is now constructed after the move) is replaced rather than treated as
+  already-migrated. Legacy project memory is copied separately into the node
+  data dir when the target is empty. A refused `storage.root` path falls back
+  to `.xerj` and is reported in warnings.
 - A resident watcher killed by a signal used to report `idle` forever, with
   no error and no restart, because every signal exit was treated as our own
   stop. Only a stop this supervisor requested is idle now; a signaled watcher
@@ -330,6 +335,16 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-04: Two faults in the new in-project layout. (1) Every plugin
+  instance writes a heartbeat, so with two locations open neither idle timer
+  ever stopped the node: each saw a live peer and deferred to it since idle
+  peers cannot run timers. Heartbeats now carry the instance's session count,
+  a peer counts only while it holds a session, and a new session or close
+  publishes immediately. Older heartbeats without a count stay conservative.
+  (2) `RemoteSpool.init()` ran before `migrateProjectStorage`, so the spool
+  directory existed as an empty target and the legacy web pages were left
+  behind; the spool is constructed after the move and an empty target is
+  replaced. Six new unit tests; 242 pass.
 - 2026-11-04: Per-project XERJ storage moved into `<project>/.xerj` by
   default. `storage.root` selects another location; a visible directory inside
   the project is refused because the watcher would index its own writes. The

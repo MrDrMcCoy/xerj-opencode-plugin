@@ -30,10 +30,18 @@ async function scratch(): Promise<string> {
 }
 
 /** Writes a heartbeat as another instance would, named by pid plus suffix. */
-async function peerHeartbeat(nodeDir: string, name: string, pid: number): Promise<void> {
+async function peerHeartbeat(
+  nodeDir: string,
+  name: string,
+  pid: number,
+  sessions: number | undefined = 1,
+): Promise<void> {
   const directory = nodeClientsDir(nodeDir);
   await mkdir(directory, { recursive: true });
-  await writeFile(join(directory, `${name}.json`), JSON.stringify({ pid }));
+  await writeFile(
+    join(directory, `${name}.json`),
+    JSON.stringify(sessions === undefined ? { pid } : { pid, sessions }),
+  );
 }
 
 function lifecycle(
@@ -111,9 +119,27 @@ describe("idle deadline", () => {
 });
 
 describe("peer heartbeats", () => {
-  test("counts a fresh heartbeat from another instance", async () => {
+  test("counts a fresh heartbeat from another instance with a session", async () => {
     const nodeDir = await scratch();
-    await peerHeartbeat(nodeDir, `other-${process.pid}`, process.pid);
+    await peerHeartbeat(nodeDir, `other-${process.pid}`, process.pid, 1);
+    const idle = lifecycle(nodeDir);
+
+    expect(await idle.peers()).toBe(1);
+    await idle.stop();
+  });
+
+  test("ignores a live peer that has no active session", async () => {
+    const nodeDir = await scratch();
+    await peerHeartbeat(nodeDir, `idle-${process.pid}`, process.pid, 0);
+    const idle = lifecycle(nodeDir);
+
+    expect(await idle.peers()).toBe(0);
+    await idle.stop();
+  });
+
+  test("counts a heartbeat without a session count as active", async () => {
+    const nodeDir = await scratch();
+    await peerHeartbeat(nodeDir, "legacy", process.pid, undefined);
     const idle = lifecycle(nodeDir);
 
     expect(await idle.peers()).toBe(1);
@@ -139,9 +165,9 @@ describe("peer heartbeats", () => {
     await idle.stop();
   });
 
-  test("does not fire while a live peer exists", async () => {
+  test("does not fire while a peer has an active session", async () => {
     const nodeDir = await scratch();
-    await peerHeartbeat(nodeDir, "peer", process.pid);
+    await peerHeartbeat(nodeDir, "peer", process.pid, 1);
     let fired = 0;
     const idle = lifecycle(nodeDir, { idleMs: 10, checkMs: 5 }, async () => {
       fired += 1;
@@ -152,6 +178,57 @@ describe("peer heartbeats", () => {
     await idle.stop();
 
     expect(fired).toBe(0);
+  });
+
+  test("fires while an idle peer process is still running", async () => {
+    const nodeDir = await scratch();
+    await peerHeartbeat(nodeDir, "idle-peer", process.pid, 0);
+    let fired = 0;
+    const idle = lifecycle(nodeDir, { idleMs: 10, checkMs: 5 }, async () => {
+      fired += 1;
+    });
+
+    idle.start();
+    await Bun.sleep(60);
+    await idle.stop();
+
+    expect(fired).toBeGreaterThan(0);
+  });
+
+  test("two idle instances do not count each other as peers", async () => {
+    const nodeDir = await scratch();
+    const first = lifecycle(nodeDir, {}, async () => {});
+    const second = lifecycle(nodeDir, {}, async () => {});
+
+    first.start();
+    second.start();
+    await Bun.sleep(20);
+
+    expect(await first.peers()).toBe(0);
+    expect(await second.peers()).toBe(0);
+    await first.stop();
+    await second.stop();
+  });
+
+  test("clears its own heartbeat when a session closes", async () => {
+    const nodeDir = await scratch();
+    const first = lifecycle(nodeDir, {}, async () => {});
+    let fired = 0;
+    const second = lifecycle(nodeDir, {}, async () => {
+      fired += 1;
+    });
+
+    first.start();
+    second.start();
+    await Bun.sleep(10);
+    first.touch("ses_a");
+    second.touch("ses_b");
+    await Bun.sleep(10);
+    expect(await first.closeSession("ses_a")).toBe(false);
+    expect(await second.closeSession("ses_b")).toBe(true);
+    expect(fired).toBe(1);
+    await first.stop();
+    await second.stop();
   });
 });
 

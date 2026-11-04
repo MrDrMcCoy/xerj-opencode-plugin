@@ -650,20 +650,6 @@ export default Plugin.define({
       runtime.memory = new MemoryStore(client, memoryNamespace(projectRoot), logger);
       runtime.anomaly = new AnomalyService(client, logger);
 
-      if (config.remote.enabled && !overbroad) {
-        const spool = new RemoteSpool({
-          root: storageRoot,
-          projectRoot,
-          prefix: webPrefix(projectRoot),
-          externalPrefix: externalPrefix(projectRoot),
-          maxBytes: config.remote.maxBytes,
-          client,
-          logger,
-        });
-        await spool.init();
-        runtime.spool = spool;
-      }
-
       // Subscribe before the node exists: a compaction can arrive while the
       // node is starting, and the memory write re-ensures it.
       if (config.memory.enabled && runtime.memory) {
@@ -705,6 +691,23 @@ export default Plugin.define({
         ).catch((error: unknown) => {
           logger.warn("could not migrate project storage", String(error));
         });
+      }
+
+      // Construct the spool after the move: init creates the spool directory,
+      // and an eagerly created empty target would make the migration skip the
+      // legacy pages.
+      if (config.remote.enabled) {
+        const spool = new RemoteSpool({
+          root: storageRoot,
+          projectRoot,
+          prefix: webPrefix(projectRoot),
+          externalPrefix: externalPrefix(projectRoot),
+          maxBytes: config.remote.maxBytes,
+          client,
+          logger,
+        });
+        await spool.init();
+        runtime.spool = spool;
       }
 
       // Memory cannot be rebuilt from the corpus, so carry it over before the
