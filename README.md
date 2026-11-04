@@ -94,11 +94,13 @@ the config, not against the checkout, so `"./"` works only when the config and
 the checkout share a directory. That is what this repository does in its own
 `opencode.json`.
 
-There is no build step in either form: the entry points are TypeScript sources
-that the host compiles when it loads them.
+The server and RPC entries are TypeScript sources that the host compiles when
+it loads them. The TUI entry ships prebuilt (`dist/tui.js`) because it must bind
+to the host's JSX runtime rather than resolve its own copy; `prepack`
+regenerates it.
 
 After adding the entry, restart OpenCode once. The first start downloads XERJ,
-creates a data root, and builds the project index in the background.
+creates `<project>/.xerj`, and builds the project index in the background.
 `xerj_status` reports when it is ready. `opencode debug config` lists the
 config files that were read, which is the quickest way to confirm the entry was
 picked up.
@@ -145,7 +147,9 @@ This is the complete set with its defaults, in
       "options": {
         "binary":  { "version": "auto", "path": null, "target": null,
                      "libc": "musl" },
-        "node":    { "url": null, "port": 9200, "dataDir": null },
+        "storage": { "root": null },
+        "node":    { "url": null, "port": 9200, "dataDir": null,
+                     "idleMs": 1800000, "shutdownOnIdle": true },
         "index":   { "auto": true, "watch": true, "debounceMs": 800,
                      "periodicMs": 900000, "workers": null, "brain": [],
                      "hidden": [], "hiddenMaxBytes": 262144,
@@ -173,10 +177,13 @@ The same entry works with a checkout path instead of the package name; see
 | `binary.path` | Use this binary; skip download, upgrade, and platform checks. |
 | `binary.target` | Explicit release triple, e.g. `aarch64-apple-darwin`. |
 | `binary.libc` | `musl` (default) or `gnu` on Linux. |
+| `storage.root` | Per-project XERJ root. Defaults to `<project>/.xerj`; relative paths resolve inside the project, absolute paths may point elsewhere. |
 | `node.url` | Attach to this node and never spawn one. |
 | `node.port` | Preferred port. The supervisor advances it if taken. |
+| `node.idleMs` | Stop this project's node after this long with no session activity. |
+| `node.shutdownOnIdle` | Set false to keep the node up after the last session closes. |
 | `index.auto` | Run project, hidden, and brain indexing on startup. |
-| `index.watch` | Keep a resident `autoindex --watch` process. |
+| `index.watch` | Refresh on file changes. Project-local state forces the plugin's own watcher with one-shot index runs; set false for polling only. |
 | `index.brain` | Folders to index as second brains, e.g. `[".agents"]`. |
 | `index.hidden` | Hidden folders to index as plain documents, e.g. `[".agents"]`. |
 | `index.hiddenMaxBytes` | Per-file ceiling for hidden documents. |
@@ -233,15 +240,23 @@ covered.
 
 ```
 ~/.local/share/opencode/xerj/bin/<version>-<target>/xerj
-~/.local/share/opencode/xerj/data/            engine storage
-~/.local/share/opencode/xerj/state/<prefix>/  autoindex journals
-~/.local/share/opencode/xerj/spool/<prefix>/  fetched pages
-<project>/.xerj/                              marker and gitignore
-~/.local/share/opencode/xerj/data/node.pid    detached node
+~/.local/share/opencode/xerj/nodes/.port-lock  shared port lock
+<project>/.xerj/                               storage root by default
+<project>/.xerj/nodes/<prefix>/                node port, pid, log, heartbeats
+<project>/.xerj/nodes/<prefix>/data/           engine storage and journal
+<project>/.xerj/spool/<prefix>/                fetched pages
 ```
 
-The node is detached and outlives OpenCode; indexing and memory survive
-restarts. The plugin never kills it on unload.
+Set `storage.root` to an absolute path to keep a project's data elsewhere. A
+configured path inside the project must be under a dot-directory; a visible
+engine data directory would be indexed by the watcher and feed its own writes
+back into the next pass. A refused path falls back to `.xerj` and appears in
+the status warnings.
+
+The node is scoped to the project and stops when the last session closes, after
+`node.idleMs` with no activity, or when the plugin unloads. Indexing and memory
+survive the stop; the next request restarts the node on the same port with the
+same data.
 
 ## Limitations
 

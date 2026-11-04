@@ -124,19 +124,19 @@ node dir      <storage root>/nodes/<prefix>/           (one per project)
 engine data   <node dir>/data/                         (engine storage)
 port          <node dir>/port                          (resolved, persisted)
 pid           <node dir>/node.pid
-lock          <storage root>/nodes/.port-lock
+lock          <data root>/nodes/.port-lock            (shared by all projects)
 spool         <storage root>/spool/<prefix>/           (remote documents)
 journal       <node dir>/data/state/<prefix>/journal.ndjson
 ```
 
-The global data root still owns the managed binary and the release cache,
-because they are shared by every project and installing one per project would
-repeat a large download. Everything else follows `storage.root`.
+The global data root still owns the managed binary, the release cache, and the
+port lock, because they are shared by every project in that installation and
+installing one binary per project would repeat a large download. Project state
+follows `storage.root`.
 
-The shared port lock sits in the storage root, not the global data root: port
-selection only needs to be serialised among projects that share one XERJ
-installation's ports, and two projects with separate storage roots cannot
-collide on a node directory.
+The port lock stays at the global data root even when storage is configured
+elsewhere: the binary and its default port scan are global, so two projects
+with different storage roots would otherwise both pick the same free port.
 
 Index prefix, stable per canonical project path:
 
@@ -223,7 +223,7 @@ The node is scoped to one project, not to the user or the server. Everything a
 second process needs to find it lives in a project node directory:
 
 ```
-node dir   <data root>/nodes/<prefix>/            (0700)
+node dir   <storage root>/nodes/<prefix>/         (0700)
 port       <node dir>/port                        (persisted, last used)
 pid        <node dir>/node.pid
 lock       <data root>/nodes/.port-lock           (mkdir is atomic, 60 s stale)
@@ -242,10 +242,10 @@ data dir   <node dir>/data/                       (engine storage)
    `node.pid`, because another project can take the same port after this one
    stops, and adopting it would read that project's corpus and later kill its
    node.
-3. Take the spawn lock at the data root. Port choice and spawn are shared by
-   every project in the data root, so one lock covers them; per-project locks
-   would still let two first starts pick the same free port. The lock is
-   retried for up to the startup timeout and is stale after 60 s.
+3. Take the spawn lock at the global data root. Port choice and spawn are
+   shared by every project using that installation, so one lock covers them;
+   per-project locks would still let two first starts pick the same free port.
+   The lock is retried for up to the startup timeout and is stale after 60 s.
 4. Re-check the persisted port under the lock, then pick a free port triple and
    spawn detached:
    `xerj --insecure --data-dir <data dir> --port <port> --bind 127.0.0.1`,
@@ -302,7 +302,7 @@ On setup, asynchronously:
 
 ```
 xerj autoindex <project root>
-  --url <node> --prefix <prefix> --state-dir <data root>/state/<prefix>
+  --url <node> --prefix <prefix> --state-dir <node dir>/data/state/<prefix>
   --no-graph --json --progress none
 ```
 

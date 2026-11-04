@@ -5,25 +5,33 @@ Updated: 2026-11-03
 ## Where things stand
 
 - Project-scoped node lifecycle shipped (unreleased): one node per project
-  under `<data root>/nodes/<prefix>/`, with a persisted port, pid, spawn lock,
-  log, peer heartbeats and its own engine data dir. Two runtimes on the same
-  node directory attach to the same pid. The node stops when the last recorded
-  session emits `session.deleted`, after `node.idleMs` (default 30 min) with no
-  activity, or when this plugin instance is torn down — each only when no live
+  under `<project>/.xerj/nodes/<prefix>/` by default (or under `storage.root`),
+  with a persisted port, pid, log, peer heartbeats and its own engine data dir.
+  Port selection uses one spawn lock at `<data root>/nodes/.port-lock`, because
+  the managed binary and its default port scan are shared by every project.
+  Two runtimes on the same node directory attach to the same pid. The node
+  stops when the last recorded session emits `session.deleted`, after
+  `node.idleMs` (default 30 min) with no activity, or when this plugin instance
+  is torn down — each only when no live
   peer heartbeat exists. A dead socket re-ensures the node once and retries,
   and status reports a node another process started. Verified live: spawn,
   attach (same pid), idle stop (no answer), restart on the same port with the
-  index intact and the doc still searchable. 226 unit tests pass.
+  index intact and the doc still searchable. 236 unit tests pass.
 - Plugin state now follows the project node: the autoindex journal, watcher
-ownership and brain state all resolve under `<data root>/nodes/<prefix>/`.
-The old layout left unreachable indices (`xop-agents-…`, its edge index) that
-nothing could attribute or delete; clearing the node data reclaimed them. Live
-verification: journal at `<node dir>/data/state/xop-…/journal.ndjson`, 777
-project docs plus the 69-doc catalog after a reindex.
-- A resident watcher killed by a signal used to report `idle` forever, with no
-error and no restart, because every signal exit was treated as our own stop.
-Only a stop this supervisor requested is idle now; a signaled watcher is
-restarted with backoff. Unit test covers a SIGTERM to the resident child.
+  ownership and brain state all resolve under the node dir inside the project
+  storage root. The engine's `autoindex --watch` refuses a state dir inside the
+  watched tree, so project-local storage uses the plugin's own recursive
+  watcher and one-shot index runs with a 30 s poll fallback.
+- Existing projects migrate on setup: data in the old global layout
+  (`<data root>/nodes/<prefix>`, `<data root>/spool/<web prefix>`) is moved
+  into `<project>/.xerj` once, after stopping any node still running from the
+  old tree. Legacy project memory is copied separately into the node data dir
+  when the target is empty. A refused `storage.root` path falls back to `.xerj`
+  and is reported in warnings.
+- A resident watcher killed by a signal used to report `idle` forever, with
+  no error and no restart, because every signal exit was treated as our own
+  stop. Only a stop this supervisor requested is idle now; a signaled watcher
+  is restarted with backoff. Unit test covers a SIGTERM to the resident child.
 - Concurrent projects each run their own node. Starting two projects at once
   takes one spawn lock at the data root (per-project locks still let both pick
   the same free port), and attach requires the listening pid to equal this
@@ -112,9 +120,10 @@ restarted with backoff. Unit test covers a SIGTERM to the resident child.
   search returned it at rank 2 with its source line. An external file at
   `/tmp/opencode/external-note.md` was ingested through `_bulk` and became
   searchable under the external index.
-- The journal lives at `<data root>/state/<prefix>/`, not in `.xerj`:
-  `--watch` refuses a state dir inside the watched tree, because journal writes
-  are filesystem events that would restart the pass forever.
+- The journal lives at `<node dir>/data/state/<prefix>/`, inside the project
+  storage root. The engine's `--watch` refuses a state dir inside the watched
+  tree because journal writes would restart the pass forever, so project-local
+  storage runs one-shot indexes behind the plugin's own watcher.
 - Hidden folders are now indexed. `index.hidden: [".agents"]` walks the folder,
   skips secrets and binaries, and bulks text into `<prefix>-hidden-docs` with
   project-relative paths. Deletions reconcile by id, and a recursive watcher
@@ -182,7 +191,7 @@ restarted with backoff. Unit test covers a SIGTERM to the resident child.
 - The index root is `ctx.location.project.canonical`, not the session directory:
   a session opened in `.agents/` was deriving
   `xop-agents-<hash>` before the fix.
-- `bun test test/unit` passes (176 tests); `tsc --noEmit` is clean.
+- `bun test test/unit` passes (236 tests); `tsc --noEmit` is clean.
 - `bun test test/integration` passes (9 tests) against a real node: corpus
   membership, `.env` and binary exclusion, deletion and rename reconciliation,
   passage lookup, memory round-trip, namespace isolation, node identity and
@@ -243,29 +252,30 @@ test/unit/*.test.ts    pure-function tests
 
 ## Next actions
 
-1. Restart OpenCode to load 0.5.3: project- and location-scoped storage keys,
-   the legacy memory migration, and the secret filters are not in the running
-   module yet. The global config pins 0.5.2 and the cached 0.5.2 epoch holds
-   the 0.5.3 working tree, so the restart loads the fix without a publish.
-   After publishing with `npm publish --access public` (fresh 2FA when the
-   token is stale), change the pin to 0.5.3. Verify after the restart that
-   `memory` reports at least 1 and that `/data/ai/opencode/service.json` no
-   longer appears in any search.
-2. 0.4.5 is `latest` on npm and is the first release whose TUI half loads:
+1. Restart OpenCode to load the in-project storage layout (0.6.0). Setup will
+   move this project's data from the global root into `.xerj`, so the first
+   start after the upgrade is slower; the old node is stopped once so it cannot
+   write into the directory being moved. Then verify that
+   `<project>/.xerj/nodes/<prefix>/data` exists, `memory` reports at least 1,
+   and no legacy `~/.local/share/opencode/xerj/nodes/<prefix>` remains.
+2. Publish with `npm publish --access public` (fresh 2FA when the token is
+   stale). The global config pins the cached version; update the pin after the
+   registry has the new build.
+3. 0.4.5 is `latest` on npm and is the first release whose TUI half loads:
    the entry is prebuilt, the runtime packages are real dependencies, and JSX
    binds to the host through a shim. 0.4.2 on the registry is the broken
    build (optional peers, no `dist`); ignore it.
-3. The shell parser does not follow `xargs`, command substitution, pipelines
+4. The shell parser does not follow `xargs`, command substitution, pipelines
    that transform paths, or `cd` through a pipeline; those reads stay
    unindexed. An argument that merely mentions a file (`echo a.md`) is
    indexed too, by design: reference, not access, is the signal.
-4. Brain expansion is only useful when a docs folder is not also in the hidden
+5. Brain expansion is only useful when a docs folder is not also in the hidden
    corpus; consider skipping hidden indexing for folders that have a brain.
 
 ## Work in progress
 
-Nothing. M0–M6 are implemented and committed; only the publish step and live
-TUI verification remain.
+Nothing. M0–M6 and in-project storage are committed; only the restart,
+publish, and live TUI verification remain.
 
 ## Blocked / unknown
 
@@ -319,6 +329,15 @@ TUI verification remain.
   expected, z-score, and score. Warm-up buckets are not flagged.
 
 ## Log
+
+- 2026-11-04: Per-project XERJ storage moved into `<project>/.xerj` by
+  default. `storage.root` selects another location; a visible directory inside
+  the project is refused because the watcher would index its own writes. The
+  node, engine data, journal, spool and memory now follow that root, while the
+  binary, release cache and shared port lock stay global. Existing projects
+  migrate once on setup. The engine's `--watch` cannot use a state dir inside
+  the watched tree, so project-local storage runs one-shot indexes behind the
+  plugin's own recursive watcher. 236 unit tests pass; version 0.6.0.
 
 - 2026-11-04: Audit of the loaded 0.5.2 instance. The lifetime ledger and log
   ring were shared across locations (`queries: 0` on a 20-RPC session), so both
