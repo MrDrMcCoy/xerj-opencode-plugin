@@ -340,6 +340,21 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-04: Second audit of the loaded instance. The node is healthy
+  (port 9200, pid live, cluster green, 844 docs, generation 35), but the
+  running server still executes the pre-patch module: heartbeats carry no
+  `sessions` field and the ledger stays at `sessions: 0`, so the 076f343
+  `onActivity` fix is on disk in the cached epoch but needs an OpenCode
+  restart to load. Real code bug found and fixed (aa3f9c9): a one-shot
+  autoindex pass that overlaps another pass on the same state dir fails its
+  flock with "already in use by another process" and exits 1, and the
+  supervisor only recognised the resident `--watch` phrasing ("already
+  owns"), so the collision counted a failure and flooded both instances'
+  log rings with `autoindex exited 1` warnings. Contention detection now
+  covers both phrasings; one-shot contention retries quietly after 5 s.
+  Regression test drives a fake engine failing twice then succeeding.
+  329 unit tests pass, tsc clean. Patched epoch re-synced.
+
 - 2026-11-04: Two regressions in the project-local watcher and the upgrade.
   (1) The local watcher was started after the first index pass, so an edit
   during a long initial scan waited for the periodic fallback; ownership is
