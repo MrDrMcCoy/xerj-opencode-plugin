@@ -576,10 +576,13 @@ status snapshot. They are per-process: they reset on restart, and the UI says
 so.
 
 `ctx.storage` is one namespace for the whole server, and the plugin loads once
-per open location, so the lifetime ledger and the log ring include the project
-prefix in their keys (`stats/lifetime:<prefix>`, `log/ring:<prefix>`). Without
-that, two locations — including two projects — overwrite each other's counters
-and warnings.
+per open location, so the lifetime ledger and the log ring key on the project
+prefix plus a hash of the location directory
+(`stats/lifetime:<prefix>:<loc>`, `log/ring:<prefix>:<loc>`). The project part
+keeps other projects out; the location part matters because one server can
+load this plugin twice for one project (the repo and a subdirectory), and those
+two instances would otherwise overwrite each other's counters and warnings.
+Each instance therefore reports its own usage; the panel is per location.
 
 Definitions:
 

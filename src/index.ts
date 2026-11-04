@@ -29,6 +29,7 @@ import {
   nodeDataDir,
   projectNodeDir,
   projectStateDir,
+  scopedStorageKey,
   webPrefix,
   type BrainSpec,
   type DocumentRoot,
@@ -83,9 +84,13 @@ export default Plugin.define({
     // so a session opened in `docs/` does not create a second corpus.
     const projectRoot = ctx.location.project.canonical;
     const prefix = indexPrefix(projectRoot);
-    // Plugin storage is shared by every location in this server, so log
-    // entries and usage counters must carry the project in their key.
-    const logger = createLogger(storage, { key: `log/ring:${prefix}` });
+    // Plugin storage is shared by every location in this server, and one server
+    // can load this plugin twice for one project (the repo and a subdirectory).
+    // Key by project and location: project keeps other projects out, location
+    // keeps the two instances from overwriting each other's counters.
+    const logger = createLogger(storage, {
+      key: scopedStorageKey("log/ring", prefix, ctx.location.directory),
+    });
     for (const warning of warnings) logger.warn(warning);
 
     const overbroad = isOverbroadRoot(projectRoot);
@@ -120,7 +125,7 @@ export default Plugin.define({
 
     const ledger = new Ledger({
       storage,
-      key: `stats/lifetime:${prefix}`,
+      key: scopedStorageKey("stats/lifetime", prefix, ctx.location.directory),
       projectRoot,
       bytesPerToken: config.stats.bytesPerToken,
       maxBaselineBytes: config.stats.maxBaselineBytes,

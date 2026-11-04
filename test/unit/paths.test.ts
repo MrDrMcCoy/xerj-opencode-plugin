@@ -7,6 +7,7 @@ import {
   isOverbroadRoot,
   memoryNamespace,
   pathHash,
+  scopedStorageKey,
   slug,
   webPrefix,
 } from "../../src/paths.ts";
@@ -92,6 +93,24 @@ describe("prefixes", () => {
 
   test("memory namespace is project scoped", () => {
     expect(memoryNamespace(project)).toStartWith("proj-xerj-opencode-plugin-");
+  });
+});
+
+describe("scopedStorageKey", () => {
+  test("separates two locations of one project", () => {
+    const project = "/work/app";
+    const alpha = scopedStorageKey("stats/lifetime", project, "/work/app");
+    const beta = scopedStorageKey("stats/lifetime", project, "/work/app/docs");
+
+    expect(alpha).toStartWith(`stats/lifetime:${project}:`);
+    expect(alpha).not.toBe(beta);
+  });
+
+  test("keeps projects apart even at the same relative location", () => {
+    const alpha = scopedStorageKey("log/ring", "/work/alpha", "/work/alpha");
+    const beta = scopedStorageKey("log/ring", "/work/beta", "/work/beta");
+
+    expect(alpha).not.toBe(beta);
   });
 });
 

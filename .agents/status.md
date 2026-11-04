@@ -13,7 +13,7 @@ Updated: 2026-11-03
   peer heartbeat exists. A dead socket re-ensures the node once and retries,
   and status reports a node another process started. Verified live: spawn,
   attach (same pid), idle stop (no answer), restart on the same port with the
-  index intact and the doc still searchable. 224 unit tests pass.
+  index intact and the doc still searchable. 226 unit tests pass.
 - Plugin state now follows the project node: the autoindex journal, watcher
 ownership and brain state all resolve under `<data root>/nodes/<prefix>/`.
 The old layout left unreachable indices (`xop-agents-…`, its edge index) that
@@ -33,10 +33,12 @@ restarted with backoff. Unit test covers a SIGTERM to the resident child.
   visible only to its own node; a third project pointing its port file at the
   second node refused to adopt it.
 - Plugin storage is one namespace for the whole server, and the plugin loads
-  once per open location. The lifetime ledger and the log ring now carry the
-  project prefix in their keys (`stats/lifetime:<prefix>`, `log/ring:<prefix>`),
-  so two locations cannot overwrite each other's counters or warnings. The
-  running 0.5.2 instance shows the old shared keys: `queries: 0`, `rpcCalls: 20`.
+  once per open location, and one server can load it twice for one project (the
+  repo and a subdirectory). The lifetime ledger and the log ring key on the
+  project prefix plus a hash of the location directory
+  (`stats/lifetime:<prefix>:<loc>`, `log/ring:<prefix>:<loc>`), so neither the
+  project nor the location can overwrite another instance's counters or
+  warnings. Each location's panel reports its own usage.
 - Legacy memory is migrated on setup. The memory index still lives in the old
   global engine data dir (`<data root>/data/.xerj-memory-…`); `migrateMemoryIndex`
   copies it into the project node's data dir when the destination is empty, and
@@ -241,11 +243,14 @@ test/unit/*.test.ts    pure-function tests
 
 ## Next actions
 
-1. Restart OpenCode to load 0.5.3: project-scoped storage keys, the legacy
-   memory migration, and the secret filters are not in the running module yet.
-   Then publish with `npm publish --access public` (fresh 2FA when the token is
-   stale). Verify after the restart that `memory` reports at least 1 and that
-   `/data/ai/opencode/service.json` no longer appears in any search.
+1. Restart OpenCode to load 0.5.3: project- and location-scoped storage keys,
+   the legacy memory migration, and the secret filters are not in the running
+   module yet. The global config pins 0.5.2 and the cached 0.5.2 epoch holds
+   the 0.5.3 working tree, so the restart loads the fix without a publish.
+   After publishing with `npm publish --access public` (fresh 2FA when the
+   token is stale), change the pin to 0.5.3. Verify after the restart that
+   `memory` reports at least 1 and that `/data/ai/opencode/service.json` no
+   longer appears in any search.
 2. 0.4.5 is `latest` on npm and is the first release whose TUI half loads:
    the entry is prebuilt, the runtime packages are real dependencies, and JSX
    binds to the host through a shim. 0.4.2 on the registry is the broken
@@ -317,13 +322,13 @@ TUI verification remain.
 
 - 2026-11-04: Audit of the loaded 0.5.2 instance. The lifetime ledger and log
   ring were shared across locations (`queries: 0` on a 20-RPC session), so both
-  are keyed by project prefix now. Legacy memory was stranded in the old global
-  engine data dir (`memory: 0`), so setup migrates it into the node data dir and
-  restarts a running node once. The external corpus held
+  are keyed by project and location now. Legacy memory was stranded in the old
+  global engine data dir (`memory: 0`), so setup migrates it into the node data
+  dir and restarts a running node once. The external corpus held
   `/data/ai/opencode/service.json`; credential names and directories are now
   refused before reading, redaction covers private keys, `AKIA` keys and
   `password`/`token`/`secret` shapes, hidden bodies are redacted, and the leaked
-  external index was deleted. 224 unit tests and 9 integration tests pass;
+  external index was deleted. 226 unit tests and 9 integration tests pass;
   version 0.5.3.
 
 - 2026-11-04: Concurrent-project isolation confirmed and hardened. Port pick

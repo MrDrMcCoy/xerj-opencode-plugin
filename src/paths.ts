@@ -133,6 +133,19 @@ export function pathHash(directory: string, length = HASH_LENGTH): string {
 }
 
 /**
+ * Storage key for one plugin instance: a project can be loaded more than once
+ * in one server (the repo and a subdirectory), and those instances must not
+ * overwrite each other's counters or warnings.
+ */
+export function scopedStorageKey(
+  kind: string,
+  prefix: string,
+  location: string,
+): string {
+  return `${kind}:${prefix}:${pathHash(location, 6)}`;
+}
+
+/**
  * One prefix per folder. XERJ refuses to index two folders under one prefix,
  * so the path hash is part of the name, not a nicety.
  */
