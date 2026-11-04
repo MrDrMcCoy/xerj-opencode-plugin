@@ -1,7 +1,7 @@
 // Generated-file demotion. The motivating case is a rare-term query ranking
 // `package-lock.json` above the source file that holds the exact match.
 import { describe, expect, test } from "bun:test";
-import { demoteGenerated, isGeneratedPath } from "../../src/search/rank.ts";
+import { demoteGenerated, dropGenerated, isGeneratedPath } from "../../src/search/rank.ts";
 import type { ParsedHit } from "../../src/search/service.ts";
 
 function hit(path: string | null, score: number): ParsedHit {
@@ -75,5 +75,21 @@ describe("demoteGenerated", () => {
     const ranked = demoteGenerated([hit(null, 0.01)], "anything");
 
     expect(ranked).toHaveLength(1);
+  });
+});
+
+describe("dropGenerated", () => {
+  test("removes an unnamed lockfile from the injected block", () => {
+    const hits = [hit("src/search/rank.ts", 0.5), hit("package-lock.json", 0.4)];
+    const kept = dropGenerated(hits, "where is ranking applied");
+    expect(kept.map((entry) => entry.path)).toEqual(["src/search/rank.ts"]);
+  });
+
+  test("keeps a lockfile the query names", () => {
+    expect(dropGenerated([hit("package-lock.json", 0.4)], "package-lock.json entries")).toHaveLength(1);
+  });
+
+  test("keeps authored files untouched", () => {
+    expect(dropGenerated([hit("src/index.ts", 0.9)], "plugin entry")).toHaveLength(1);
   });
 });

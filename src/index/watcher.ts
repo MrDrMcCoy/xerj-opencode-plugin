@@ -50,6 +50,10 @@ const STDERR_TAIL_LINES = 20;
 // The engine refuses a second watcher for the same journal and says so.
 const CONTENTION_MARKER = "already owns";
 const CONTENTION_RETRY_MS = 5_000;
+// A watcher that survives this long is watching, even before its first run
+// document lands: an initial pass over a large corpus takes minutes, and the
+// status would otherwise read "starting" the whole time.
+const WATCH_SETTLE_MS = 3_000;
 
 export class CorpusService {
   readonly layout: CorpusLayout;
@@ -66,6 +70,7 @@ export class CorpusService {
   private stopped = false;
   private spawning = false;
   private lastStderr = "";
+  private spawnedAt = 0;
 
   constructor(private readonly options: CorpusServiceOptions) {
     this.layout = corpusLayout(options.projectRoot, options.prefix, options.dataRoot);
@@ -128,8 +133,13 @@ export class CorpusService {
   }
 
   snapshot(): CorpusSnapshot {
+    const settled =
+      this.state === "starting" &&
+      this.child !== null &&
+      Date.now() - this.spawnedAt >= WATCH_SETTLE_MS;
+
     return {
-      state: this.state,
+      state: settled ? "watching" : this.state,
       lastRun: this.lastRun,
       restarts: this.restarts,
       runs: this.runs,
@@ -165,6 +175,7 @@ export class CorpusService {
     this.child = child;
     this.spawning = false;
     this.lastStderr = "";
+    this.spawnedAt = Date.now();
     if (watch) this.state = "starting";
 
     this.attachOutput(child);

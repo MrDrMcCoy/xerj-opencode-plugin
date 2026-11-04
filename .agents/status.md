@@ -193,8 +193,10 @@ test/unit/*.test.ts    pure-function tests
 
 ## Next actions
 
-1. Nothing blocks release. Both the GitHub release and the npm package are
-   live, and the README's published-package install path is now true.
+1. 0.4.5 is `latest` on npm and is the first release whose TUI half loads:
+   the entry is prebuilt, the runtime packages are real dependencies, and JSX
+   binds to the host through a shim. 0.4.2 on the registry is the broken
+   build (optional peers, no `dist`); ignore it.
 2. Watch for one real compaction to confirm `session.compaction.ended` stores a
    `summary` memory in practice.
 3. The shell parser does not follow `xargs`, command substitution, pipelines
@@ -262,6 +264,11 @@ TUI verification remain.
 
 ## Log
 
+- 2026-11-04: Injection drops generated files (lockfiles, minified assets,
+  build output) unless the query names the file; tool searches still return
+  them after demotion. A watcher that survives 3 s reports `watching` before
+  its first run document lands, so a large first pass no longer reads as
+  `starting`. 190 unit tests pass.
 - 2026-11-04: v0.4.0 pushed, tagged, and released on GitHub; CI green
   including the containerized integration job on podman. Published to npm as
   0.4.0, then 0.4.1 with repository metadata after the account's web 2FA login

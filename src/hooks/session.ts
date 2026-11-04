@@ -155,6 +155,7 @@ async function retrieve(
 
   try {
     return await search.search(text, {
+      surface: "context",
       k: options.config.context.maxPassages,
       maxTokens: options.config.context.maxTokens,
       signal: controller.signal,

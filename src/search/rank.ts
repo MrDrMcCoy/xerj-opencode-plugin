@@ -59,3 +59,23 @@ export function demoteGenerated(
     })
     .sort((left, right) => right.score - left.score);
 }
+
+/**
+ * Drops generated files the query does not name. Injection shares one small
+ * budget across a whole turn, and a lockfile passage matches on dependency
+ * names that have nothing to do with the question, so it can crowd out the
+ * source that answers it. Tool searches keep them: the caller asked directly.
+ */
+export function dropGenerated(
+  hits: ReadonlyArray<ParsedHit>,
+  query: string,
+): ParsedHit[] {
+  const named = query.toLowerCase();
+
+  return hits.filter((hit) => {
+    if (hit.path === null) return true;
+    if (!isGeneratedPath(hit.path)) return true;
+    const basename = hit.path.toLowerCase().split("/").pop() ?? "";
+    return named.includes(basename);
+  });
+}

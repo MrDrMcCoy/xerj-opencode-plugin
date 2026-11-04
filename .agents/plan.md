@@ -415,6 +415,10 @@ files, so do not label it as a file count in the UI.
 9. A hidden document is a whole file, so drop it when a brain section from the
    same path survives. The section keeps its precise line and graph expansion;
    hidden documents still cover folders no brain indexes.
+10. Injection drops generated files (a lockfile, minified asset, or build
+    output) unless the query names the file. Demotion alone only reorders
+    them; a lockfile passage still matches on dependency names and crowds the
+    one shared turn budget. Tool searches keep them, because the caller asked.
 
 ### Context hook
 

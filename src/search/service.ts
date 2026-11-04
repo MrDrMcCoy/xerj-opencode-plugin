@@ -14,7 +14,7 @@ import type { Logger } from "../log.ts";
 import { XerjClient } from "../node/client.ts";
 import type { BrainSpec } from "../paths.ts";
 import type { BrainGraph } from "./brains.ts";
-import { demoteGenerated } from "./rank.ts";
+import { demoteGenerated, dropGenerated } from "./rank.ts";
 
 export interface SearchHit {
   readonly index: string;
@@ -36,7 +36,14 @@ export interface SearchResult {
   readonly narrowingBytes: number;
 }
 
+/**
+ * Where the results go. Injection shares a small budget across a whole turn,
+ * so it is stricter than an explicit tool call about generated files.
+ */
+export type SearchSurface = "context" | "tool";
+
 export interface SearchOptions {
+  readonly surface?: SearchSurface;
   readonly k?: number;
   readonly maxTokens?: number;
   readonly signal?: AbortSignal;
@@ -132,7 +139,8 @@ export class SearchService {
 
     const strategy = semantic ? "hybrid" : "lexical";
     const fused = semantic ? fuse([lexical.hits, semantic.hits], k) : lexical.hits.slice(0, k);
-    const located = demoteGenerated(this.locateBrainPaths(fused), trimmed);
+    const ranked = demoteGenerated(this.locateBrainPaths(fused), trimmed);
+    const located = options.surface === "context" ? dropGenerated(ranked, trimmed) : ranked;
     const resolved = await this.resolveLines(located, trimmed);
     const hits = dropShadowedWholeFiles(
       resolved,
