@@ -23,9 +23,25 @@ Updated: 2026-11-03
 - Prompt-time memory recall is wired next to passage retrieval and deduped per
   session. Like the retrieval injection, it has not been observed in a live
   turn yet.
-- The context hooks (prompt retrieval + system injection) are registered and
-  typechecked, but the prompt-to-context path has not been observed in a live
-  turn yet. That happens on the next user message.
+- The TUI is confirmed live after the restart: `rpcCalls` moved 6 -> 13 with no
+  tool traffic in between, so the sidebar and panel reach the server part.
+  `injectedTurns` reached 1, so the prompt hook retrieved and the context hook
+  spliced a block into a real turn.
+- Automatic memory capture from compaction is implemented: the
+  `session.compaction.ended` event carries `data.text`, so a summary of
+  120-4000 characters is stored as a `summary` memory. Unit tests cover the
+  long, short, and clipped cases. No compaction has fired in this session yet,
+  so the live path is untested.
+- Per-process counters are live: rpc calls, injected turns, node spawns, 429s,
+  and index runs, shown in the panel and the status snapshot.
+- Brain neighbor expansion was measured. On a fixture brain with a `pathcite`
+  edge it found the answer that direct hits missed (0 -> 1). On this repo's
+  `.agents` corpus it added nothing in 5 of 5 queries, because the hidden
+  corpus already indexes those files. Two bugs surfaced: the ego endpoint
+  ignores a comma-joined node list, and a `pathcite` target is a bodyless
+  whole-file record.
+- The context hooks are confirmed in a live turn: `injectedTurns` counted 1
+  without any tool call.
 - M4 is implemented and verified live: `xerj_index` fetched `example.com`
   (663 bytes) into the web spool, the web watcher indexed it, and a later
   search returned it at rank 2 with its source line. An external file at
@@ -148,16 +164,17 @@ test/unit/*.test.ts    pure-function tests
 ## Next actions
 
 1. Review the README against shipped behaviour, then publish only with
-   explicit consent. The scoped npm name is not live yet.
-2. Verify the details panel and the four commands in a real terminal session;
-   the stub host stops where the renderer starts.
-3. Retrieval quality is now demoted, not skipped: lockfiles, minified and build
-   output score at 0.35 unless the query names the file. Verify against the live
-   corpus after a restart.
-4. The shell parser does not follow `xargs`, command substitution, pipelines
+   explicit consent. The scoped npm name is not live yet. Bump to 0.4.0 first:
+   ranking, shell references, hidden corpus, CI, compaction capture, and the
+   brain fixes are all user-visible.
+2. Watch for one real compaction to confirm `session.compaction.ended` stores a
+   `summary` memory in practice.
+3. The shell parser does not follow `xargs`, command substitution, pipelines
    that transform paths, or `cd` through a pipeline; those reads stay
    unindexed. An argument that merely mentions a file (`echo a.md`) is
    indexed too, by design: reference, not access, is the signal.
+4. Brain expansion is only useful when a docs folder is not also in the hidden
+   corpus; consider skipping hidden indexing for folders that have a brain.
 
 ## Work in progress
 
@@ -216,6 +233,13 @@ TUI verification remain.
   expected, z-score, and score. Warm-up buckets are not flagged.
 
 ## Log
+
+- 2026-11-03: Ranking demotes generated files (score x0.35 unless named), the
+  integration harness runs 9 tests against a real node in podman, CI exists
+  (podman -> docker -> bare runner), compaction capture subscribes to
+  `session.compaction.ended`, counters are reported, and brain expansion was
+  measured and fixed (one ego request per seed; bodyless pathcite targets
+  resolve to their first section).
 
 - 2026-11-03: Refined plan written; scope split into M0–M6 with M0–M2 as the
   first vertical slice. Stats and savings defined as measured quantities.

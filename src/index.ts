@@ -41,6 +41,7 @@ import {
   type StatusSnapshot,
 } from "./rpc.ts";
 import { MemoryStore } from "./memory/store.ts";
+import { startCompactionCapture } from "./memory/capture.ts";
 import { RemoteSpool } from "./remote/spool.ts";
 import { shellReadPaths } from "./remote/shell.ts";
 import { BrainGraph } from "./search/brains.ts";
@@ -435,6 +436,15 @@ export default Plugin.define({
         );
         runtime.memory = new MemoryStore(client, memoryNamespace(projectRoot), logger);
         runtime.anomaly = new AnomalyService(client, logger);
+
+        if (config.memory.enabled) {
+          startCompactionCapture({
+            events: ctx.event,
+            memory: runtime.memory,
+            signal: shutdown.signal,
+            logger,
+          });
+        }
 
         if (config.remote.enabled) {
           const spool = new RemoteSpool({

@@ -374,10 +374,13 @@ Verified edge types on this repo's `.agents`: `pathcite`, `sequence`,
 `same_dir` says two files share a folder, which is not evidence. One hop, at
 most two neighbors, 600 characters each.
 
-`GET /_graph/<brain>/ego?node=<id[,id]>&hops=1&direction=both` requires `node`
-(POST is 405). It returns `edges` and `neighbors[{id, hop, via_edge}]` but no
-text, so resolve ids through the brain's docs index with an `ids` query and
-`_source: body`.
+`GET /_graph/<brain>/ego?node=<id>&hops=1&direction=both` requires `node`
+(POST is 405). One node per request: a comma-joined `node=a,b` answers with an
+empty `edges` array, so callers query each seed and merge. It returns `edges`
+and `neighbors[{id, hop, via_edge}]` but no text, so resolve ids through the
+brain's docs index with an `ids` query. A `pathcite` target is the file's
+whole-file record, which has no `body`; fetch its first section record
+(`term ax_path` + `exists body`, sorted by `start_line`) instead.
 
 `GET /_graph/<brain>/overview` returns `nodes_index`, node and edge counts,
 `types`, `detectors`, and `hubs`; `nodes.total` counts section records, not
@@ -456,11 +459,12 @@ Writes:
 - `xerj_remember` (explicit, model-driven), with a kind and optional topic.
 - Retraction on `xerj_forget`.
 
-Automatic capture from compaction is deferred. The `compaction` hook runs
-**before** the summary is generated, so it cannot read the summary; capturing it
-would mean a second model call or a deterministic digest of the transcript.
-Neither earns its cost yet. The corpus block instead tells the model when to
-call `xerj_remember`.
+Automatic capture from compaction uses `session.compaction.ended`, which
+carries the generated summary in `data.text`. `startCompactionCapture`
+subscribes in the background (aborted on shutdown), skips summaries under 120
+characters, clips at 4000, and stores one `summary` memory per text. The
+`compaction` hook itself still cannot be used: it runs before the summary
+exists. The id is the hash of the text, so a repeated event is idempotent.
 
 IDs are `sha256(namespace + text)[0..16]`, so re-remembering the same fact is
 idempotent. Metadata: `kind`, `topic`, `source`, `sessionID`, `created`.
@@ -488,8 +492,10 @@ citations per file (top cited files)
 docs and store size per dataset (project, web, external, memory)
 ```
 
-Index runs, node spawns, 429s, and injection counts are not tracked yet. They
-are cheap to add once something consumes them.
+Counters for index runs, node spawns, 429s, and injection counts are tracked in
+`src/stats/counters.ts`, reported in the panel's usage section and in the
+status snapshot. They are per-process: they reset on restart, and the UI says
+so.
 
 Definitions:
 
@@ -709,9 +715,11 @@ Confirm against a real binary before relying on these.
   `recency_weight` is accepted (a recall with `0.2` returned normally).
 - [x] **7. `/_graph/<brain>/overview` and `ego`.** Overview carries
   `nodes.total`, `edges.total`, `types`, `detectors`, `hubs`. Ego requires
-  `?node=<id[,id]>` (POST is 405) and returns `edges` plus
-  `neighbors[{id, hop, via_edge}]`; neighbors have no text, so fetch them by
-  id from the brain docs index.
+  `?node=<id>` (POST is 405) and one node per call: a comma-joined list returns
+  no edges. It returns `edges` plus `neighbors[{id, hop, via_edge}]`; neighbors
+  have no text, and a `pathcite` target is a bodyless whole-file record, so
+  resolve either through the docs index (an `ids` query, or the target's first
+  section for file records).
 - [x] **11. `_passage` cannot be combined with `hybrid`.** The engine refuses
   it (`search_phase_execution_exception`: fusion has no single winning
   passage). Run the legs separately and fuse in the plugin. `_passage` is also

@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { pickNeighbors } from "../../src/search/brains.ts";
+import { BrainGraph, pickNeighbors } from "../../src/search/brains.ts";
+import type { XerjClient } from "../../src/node/client.ts";
+import type { BrainSpec } from "../../src/paths.ts";
 
 const seed = "seed-id";
 
@@ -53,5 +55,108 @@ describe("pickNeighbors", () => {
     expect(pickNeighbors(ego, [seed], 2)).toHaveLength(2);
     expect(pickNeighbors(null, [seed], 2)).toEqual([]);
     expect(pickNeighbors({ edges: "nope" }, [seed], 2)).toEqual([]);
+  });
+});
+
+const spec: BrainSpec = {
+  name: "brain",
+  label: "docs",
+  directory: "/project/docs",
+  prefix: "xop-brain",
+};
+
+const logger = {
+  debug: () => {},
+  info: () => {},
+  warn: () => {},
+  error: () => {},
+} as never;
+
+/** Minimal client: records requests and answers from a fixed table. */
+function stubClient(answers: {
+  ego?: (path: string) => unknown;
+  search?: (body: Record<string, unknown>) => unknown;
+}): { client: XerjClient; calls: string[] } {
+  const calls: string[] = [];
+  const client = {
+    get: async (path: string) => {
+      calls.push(`get ${path}`);
+      return answers.ego ? answers.ego(path) : { edges: [] };
+    },
+    search: async (_index: string, body: Record<string, unknown>) => {
+      calls.push("search");
+      return answers.search ? answers.search(body) : null;
+    },
+  } as unknown as XerjClient;
+  return { client, calls };
+}
+
+function hit(id: string) {
+  return {
+    index: "xop-brain-docs",
+    id,
+    passage: 0,
+    path: "a.md",
+    line: 1,
+    title: "A",
+    kind: "text",
+    score: 1,
+    text: "seed",
+  };
+}
+
+describe("BrainGraph expansion", () => {
+  test("queries each seed separately, because a comma list returns no edges", async () => {
+    const { client, calls } = stubClient({});
+    const graph = new BrainGraph({ client, brains: [spec], logger });
+
+    await graph.related([hit("one"), hit("two")]);
+
+    const egoCalls = calls.filter((call) => call.startsWith("get "));
+    expect(egoCalls).toHaveLength(2);
+    expect(egoCalls[0]).toContain("node=one");
+    expect(egoCalls[1]).toContain("node=two");
+    expect(egoCalls.some((call) => call.includes("%2C"))).toBe(false);
+  });
+
+  test("falls back to a section when the cited file record has no body", async () => {
+    const { client, calls } = stubClient({
+      ego: () => ({
+        edges: [{ src: "one", dst: "file", type: "pathcite", weight: 1, invalid_at: null }],
+      }),
+      search: (body) => {
+        // The ids query answers with the whole-file record, which has no body.
+        if (JSON.stringify(body).includes('"ids"')) {
+          return {
+            hits: {
+              hits: [
+                { _id: "file", _index: "xop-brain-docs", _source: { ax_path: "b.md" } },
+              ],
+            },
+          };
+        }
+        // The section query answers with the first text-bearing section.
+        return {
+          hits: {
+            hits: [
+              {
+                _id: "section",
+                _index: "xop-brain-docs",
+                _source: { ax_path: "b.md", start_line: 1, body: "answer text" },
+              },
+            ],
+          },
+        };
+      },
+    });
+
+    const graph = new BrainGraph({ client, brains: [spec], logger });
+    const related = await graph.related([hit("one")]);
+
+    expect(related).toHaveLength(1);
+    expect(related[0]?.path).toBe("b.md");
+    expect(related[0]?.kind).toBe("via pathcite");
+    expect(related[0]?.text).toBe("answer text");
+    expect(calls.filter((call) => call === "search")).toHaveLength(2);
   });
 });

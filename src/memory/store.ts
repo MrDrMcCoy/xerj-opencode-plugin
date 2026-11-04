@@ -8,9 +8,22 @@ import { createHash } from "node:crypto";
 import type { Logger } from "../log.ts";
 import { XerjClient, type MemoryHit } from "../node/client.ts";
 
-export type MemoryKind = "fact" | "decision" | "preference" | "fix" | "note";
+export type MemoryKind =
+  | "fact"
+  | "decision"
+  | "preference"
+  | "fix"
+  | "note"
+  | "summary";
 
-const KINDS: ReadonlySet<string> = new Set(["fact", "decision", "preference", "fix", "note"]);
+const KINDS: ReadonlySet<string> = new Set([
+  "fact",
+  "decision",
+  "preference",
+  "fix",
+  "note",
+  "summary",
+]);
 const DEFAULT_KIND: MemoryKind = "fact";
 const RECENCY_WEIGHT = 0.2;
 

@@ -24,6 +24,7 @@ const ALLOWED_TYPES = new Set(["pathcite", "sequence"]);
 const TYPE_PRIORITY: Record<string, number> = { pathcite: 0, sequence: 1 };
 const MAX_NEIGHBORS = 2;
 const MAX_TEXT_CHARS = 600;
+const SOURCE_FIELDS = ["path", "ax_path", "title", "start_line", "kind", "body"];
 
 export class BrainGraph {
   constructor(private readonly options: BrainGraphOptions) {}
@@ -69,18 +70,24 @@ export class BrainGraph {
     limit: number,
     signal?: AbortSignal,
   ): Promise<SearchHit[]> {
-    const query = seeds.map((id) => encodeURIComponent(id)).join(",");
-    const path =
-      `/_graph/${encodeURIComponent(spec.name)}` +
-      `/ego?node=${query}&hops=1&direction=both`;
-    const ego = await this.options.client
-      .get(path, "graph query failed", signal)
-      .catch((error: unknown) => {
-        this.options.logger.debug("brain expansion skipped", String(error));
-        return null;
-      });
+    // The ego endpoint accepts one node per request; a comma-joined list
+    // answers with no edges. Query each seed and merge the edges.
+    const edges: unknown[] = [];
+    for (const seed of seeds) {
+      const path =
+        `/_graph/${encodeURIComponent(spec.name)}` +
+        `/ego?node=${encodeURIComponent(seed)}&hops=1&direction=both`;
+      const ego = await this.options.client
+        .get(path, "graph query failed", signal)
+        .catch((error: unknown) => {
+          this.options.logger.debug("brain expansion skipped", String(error));
+          return null;
+        });
+      if (!isRecord(ego) || !Array.isArray(ego.edges)) continue;
+      edges.push(...ego.edges);
+    }
 
-    const neighbors = pickNeighbors(ego, seeds, limit);
+    const neighbors = pickNeighbors({ edges }, seeds, limit);
     if (neighbors.length === 0) return [];
 
     const response = await this.options.client
@@ -88,7 +95,7 @@ export class BrainGraph {
         `${spec.prefix}-docs`,
         {
           size: neighbors.length,
-          _source: ["path", "ax_path", "title", "start_line", "kind", "body"],
+          _source: SOURCE_FIELDS,
           query: { ids: { values: neighbors.map((neighbor) => neighbor.id) } },
         },
         signal,
@@ -98,7 +105,51 @@ export class BrainGraph {
         return null;
       });
 
-    return parseNeighbors(response, neighbors);
+    const direct = parseNeighbors(response, neighbors);
+
+    // A `pathcite` points at the target file's whole-file record, which has no
+    // `body`; only its section records carry text. Fetch the first section so
+    // the neighbor is usable.
+    const missing = bodylessPaths(response, neighbors, direct);
+    const sections = await this.fetchSections(spec, missing, signal);
+    return [...direct, ...sections].slice(0, limit);
+  }
+
+  private async fetchSections(
+    spec: BrainSpec,
+    missing: ReadonlyArray<{ path: string; type: string }>,
+    signal?: AbortSignal,
+  ): Promise<SearchHit[]> {
+    const found: SearchHit[] = [];
+    for (const entry of missing) {
+      if (found.length >= MAX_NEIGHBORS) break;
+      const response = await this.options.client
+        .search(
+          `${spec.prefix}-docs`,
+          {
+            size: 1,
+            sort: [{ start_line: "asc" }],
+            _source: SOURCE_FIELDS,
+            query: {
+              bool: {
+                must: [
+                  { term: { ax_path: entry.path } },
+                  { exists: { field: "body" } },
+                ],
+              },
+            },
+          },
+          signal,
+        )
+        .catch((error: unknown) => {
+          this.options.logger.debug("brain section fetch skipped", String(error));
+          return null;
+        });
+
+      const hit = firstHit(response, entry.type);
+      if (hit) found.push(hit);
+    }
+    return found;
   }
 }
 
@@ -144,20 +195,64 @@ export function pickNeighbors(
     .map(({ id, type }) => ({ id, type }));
 }
 
+/** Neighbor docs that were fetched but carry no text, with their file path. */
+function bodylessPaths(
+  response: unknown,
+  neighbors: ReadonlyArray<NeighborRef>,
+  parsed: ReadonlyArray<SearchHit>,
+): Array<{ path: string; type: string }> {
+  const found = new Map<string, string>();
+  for (const hit of hitsOf(response)) {
+    if (!isRecord(hit)) continue;
+    const id = stringValue(hit._id) ?? "";
+    if (id.length === 0) continue;
+    const source = isRecord(hit._source) ? hit._source : {};
+    const path = stringValue(source.ax_path) ?? stringValue(source.path);
+    if (path !== null && path.length > 0) found.set(id, path);
+  }
+
+  const done = new Set(parsed.map((hit) => hit.id));
+  const result: Array<{ path: string; type: string }> = [];
+  for (const neighbor of neighbors) {
+    if (done.has(neighbor.id)) continue;
+    const path = found.get(neighbor.id);
+    if (path) result.push({ path, type: neighbor.type });
+  }
+  return result;
+}
+
+function firstHit(response: unknown, type: string): SearchHit | null {
+  for (const raw of hitsOf(response)) {
+    if (!isRecord(raw)) continue;
+    const source = isRecord(raw._source) ? raw._source : {};
+    const text = stringValue(source.body) ?? stringValue(source.code) ?? "";
+    if (text.trim().length === 0) continue;
+
+    return {
+      index: stringValue(raw._index) ?? "",
+      id: stringValue(raw._id) ?? "",
+      passage: 0,
+      path: stringValue(source.ax_path) ?? stringValue(source.path) ?? null,
+      line: numberValue(source.start_line),
+      title: stringValue(source.title),
+      kind: `via ${type}`,
+      score: 0,
+      text: clip(text.trim()),
+    };
+  }
+  return null;
+}
+
 function parseNeighbors(
   response: unknown,
   neighbors: ReadonlyArray<NeighborRef>,
 ): SearchHit[] {
-  if (!isRecord(response)) return [];
-  const hits = response.hits;
-  if (!isRecord(hits) || !Array.isArray(hits.hits)) return [];
-
   const byId = new Map(neighbors.map((neighbor) => [neighbor.id, neighbor.type]));
   const parsed: SearchHit[] = [];
 
-  for (const raw of hits.hits) {
+  for (const raw of hitsOf(response)) {
     if (!isRecord(raw)) continue;
-    const id = typeof raw._id === "string" ? raw._id : "";
+    const id = stringValue(raw._id) ?? "";
     const via = byId.get(id);
     if (!via) continue;
 
@@ -166,7 +261,7 @@ function parseNeighbors(
     if (text.trim().length === 0) continue;
 
     parsed.push({
-      index: typeof raw._index === "string" ? raw._index : "",
+      index: stringValue(raw._index) ?? "",
       id,
       passage: 0,
       path: stringValue(source.ax_path) ?? stringValue(source.path) ?? null,
@@ -179,6 +274,13 @@ function parseNeighbors(
   }
 
   return parsed;
+}
+
+function hitsOf(response: unknown): unknown[] {
+  if (!isRecord(response)) return [];
+  const hits = response.hits;
+  if (!isRecord(hits) || !Array.isArray(hits.hits)) return [];
+  return hits.hits;
 }
 
 function clip(text: string): string {
