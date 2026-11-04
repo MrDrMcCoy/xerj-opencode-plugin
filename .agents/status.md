@@ -128,6 +128,11 @@ Updated: 2026-11-03
 - CI exists at `.github/workflows/ci.yml`: typecheck plus unit on Ubuntu, and an
   integration job that prefers podman, falls back to docker, then to the bare
   runner.
+- Released 2026-11-04: `main` pushed to `github.com:MrDrMcCoy/xerj-opencode-plugin`,
+  annotated tag `v0.4.0`, GitHub release published. CI ran and passed on the
+  push: both jobs green, and the integration job used podman on the hosted
+  runner (`podman info` succeeded), so 9 integration tests ran in
+  `docker.io/oven/bun:1.4.4`.
 - Config discovery verified with `opencode debug config`: the global
   `~/.config/opencode/opencode.jsonc` plus the project's `opencode.json`; a
   project `opencode.jsonc` is read only when no `opencode.json` exists.
@@ -168,10 +173,11 @@ test/unit/*.test.ts    pure-function tests
 
 ## Next actions
 
-1. Deciding whether to publish is the only release step left. The README now
-   documents a local-checkout install (no published package is referenced),
-   the two config scopes with their precedence, and `opencode debug config` as
-   the way to confirm what a project loads.
+1. npm publish is blocked on interactive 2FA. `npm publish --access public`
+   reaches the registry and then fails with `EOTP`; npm prints the auth URL
+   redacted because it is not attached to a TTY. Run it from a terminal, or
+   pass `--otp`. The README already documents the published package name,
+   which is the intended state once this succeeds.
 2. Watch for one real compaction to confirm `session.compaction.ended` stores a
    `summary` memory in practice.
 3. The shell parser does not follow `xargs`, command substitution, pipelines
@@ -239,6 +245,8 @@ TUI verification remain.
 
 ## Log
 
+- 2026-11-04: v0.4.0 pushed and released on GitHub; CI green including the
+  containerized integration job on podman. npm publish needs a TTY for 2FA.
 - 2026-11-03: Ranking demotes generated files (score x0.35 unless named), the
   integration harness runs 9 tests against a real node in podman, CI exists
   (podman -> docker -> bare runner), compaction capture subscribes to
