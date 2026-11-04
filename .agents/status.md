@@ -482,3 +482,13 @@ publish, and live TUI verification remain.
   resident watcher now restarts with backoff instead of reporting `idle`
   forever. Live corpus restored at 777 project docs plus the 69-doc catalog.
   222 unit tests pass.
+
+- 2026-11-04: Audit of the loaded 0.6.0 instance found the session hooks'
+  `onActivity` option never wired in `src/index.ts`, so prompt turns never
+  recorded a session (`sessions: 0`) and any `session.deleted` fired a
+  last-session shutdown while sibling sessions were active; tool calls masked
+  it via `execute.after`. Wired and committed (076f343); unit tests 245 pass,
+  tsc clean. Also observed: the legacy global root still holds this project's
+  old node dir, web spool and memory index (migration leaves the source when
+  the target is non-empty — disk garbage, no behaviour impact), and a stale
+  `autoindex exited 1` lastError from the bootstrap race.
