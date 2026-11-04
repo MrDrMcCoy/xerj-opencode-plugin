@@ -59,6 +59,9 @@ const STOP_GRACE_MS = 3_000;
 const STDERR_TAIL_LINES = 20;
 // The engine refuses a second watcher for the same journal and says so.
 const CONTENTION_MARKER = "already owns";
+// A one-shot pass that overlaps another pass on the same state dir fails its
+// flock instead, with a different message but the same meaning.
+const CONTENTION_IN_USE = "already in use by another process";
 const CONTENTION_RETRY_MS = 5_000;
 // A watcher that survives this long is watching, even before its first run
 // document lands: an initial pass over a large corpus takes minutes, and the
@@ -103,6 +106,14 @@ const LOCAL_WATCH_SKIP = new Set([
  * large for one watch each. Hidden and generated directories are skipped for
  * the same reason the corpus skips them: their contents never reach it.
  */
+/**
+ * Both contention phrasings the engine emits: a resident `--watch` refused with
+ * "already owns", or a one-shot flock refused with "already in use".
+ */
+function isContention(stderr: string): boolean {
+  return stderr.includes(CONTENTION_MARKER) || stderr.includes(CONTENTION_IN_USE);
+}
+
 export function listWatchableDirectories(
   root: string,
   max = MAX_LOCAL_WATCH_DIRS,
@@ -371,7 +382,7 @@ export class CorpusService {
     // server that is being replaced. Ownership frees when that process exits,
     // so wait it out instead of counting a failure or burning the restart
     // budget.
-    if (this.lastStderr.includes(CONTENTION_MARKER)) {
+    if (isContention(this.lastStderr)) {
       this.state = "starting";
       this.lastError = null;
       this.options.logger.debug("autoindex watcher journal is owned elsewhere; retrying");
@@ -411,6 +422,14 @@ export class CorpusService {
     const meaning = exitMeaning(code);
     if (meaning === "ok" || meaning === "junk") {
       this.state = this.localWatch ? "watching" : "idle";
+      return;
+    }
+
+    // A concurrent pass holds the state-dir flock. That resolves on its own,
+    // so retry quietly instead of counting a failure or raising an error.
+    if (isContention(this.lastStderr)) {
+      this.options.logger.debug("autoindex state is busy; retrying");
+      setTimeout(() => void this.runOnce(), CONTENTION_RETRY_MS);
       return;
     }
 

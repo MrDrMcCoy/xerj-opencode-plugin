@@ -86,6 +86,59 @@ afterEach(async () => {
 });
 
 describe("CorpusService watch ownership", () => {
+  test(
+    "a one-shot blocked by another pass is contention, not a failure",
+    async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "xerj-project-"));
+    const state = join(projectRoot, ".xerj", "state");
+    const attempts = join(projectRoot, "attempts");
+    const script = `#!/bin/sh
+n=$(cat ${JSON.stringify(attempts)} 2>/dev/null || echo 0)
+n=$((n+1)); echo $n > ${JSON.stringify(attempts)}
+if [ $n -lt 3 ]; then
+  echo "error: autoindex state ${state} is already in use by another process; wait for it to finish or choose a different --state-dir: Resource temporarily unavailable (os error 11)" >&2
+  exit 1
+fi
+echo '{"doc_kind":"run","generation":1,"records_total":3}'
+`;
+    const warnings: string[] = [];
+    const loud: Logger = {
+      ...logger,
+      warn: (message: string) => warnings.push(message),
+    };
+    const instance = new CorpusService({
+      binaryPath: fakeBinary(script),
+      nodeUrl: "http://127.0.0.1:9200",
+      projectRoot,
+      prefix: "xop-project-12345678",
+      stateRoot: join(projectRoot, ".xerj"),
+      config: {
+        ...DEFAULT_CONFIG,
+        index: { ...DEFAULT_CONFIG.index, watch: false, periodicMs: 60_000 },
+      },
+      storage: storage(),
+      logger: loud,
+    });
+    running.push(instance);
+
+    await instance.start();
+    // The first two passes hit the flock held by a concurrent pass.
+    expect(instance.snapshot().lastError).toBeNull();
+    expect(instance.snapshot().state).not.toBe("error");
+    expect(warnings).toEqual([]);
+
+    // The retried pass lands a run document instead of stalling. Two
+    // contention retries at 5 s each precede the successful third pass.
+    for (let waited = 0; waited < 14_000; waited += 250) {
+      if (instance.snapshot().lastRun) break;
+      await Bun.sleep(250);
+    }
+    expect(instance.snapshot().lastRun?.records).toBe(3);
+    expect(readFileSync(attempts, "utf8").trim()).toBe("3");
+    },
+    20_000,
+  );
+
   test("a second service for one state dir shares the resident watcher", async () => {
     const binary = fakeBinary();
     const stateRoot = mkdtempSync(join(tmpdir(), "xerj-data-"));
