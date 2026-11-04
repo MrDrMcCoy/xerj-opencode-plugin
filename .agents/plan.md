@@ -247,6 +247,13 @@ Watch mode is one process per project. With several projects open that is
 acceptable (each is idle when nothing changes), but `index.watch=false` must
 exist for users who disagree.
 
+The plugin loads once per open location, so one server can hold several
+instances for the same project. A module-level set of state directories grants
+watch ownership inside the process: the first instance spawns the watcher, the
+rest report `shared` and start nothing. Two `--watch` processes cannot share a
+journal, and a loser that keeps retrying reads as `starting` forever while
+indexing is actually fine.
+
 Before the first index, write `.xerjignore` defaults if absent:
 
 ```

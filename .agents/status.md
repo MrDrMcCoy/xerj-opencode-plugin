@@ -264,6 +264,12 @@ TUI verification remain.
 
 ## Log
 
+- 2026-11-04: Two instances of the plugin run in one server, one per open
+  location, and both competed for the same journal. The winner watched; the
+  loser retried against it forever and reported "starting". A process-wide
+  set of state directories now grants ownership, later instances report
+  "shared", and `PLUGIN_VERSION` reads the manifest so it cannot drift again
+  (0.4.6 shipped claiming 0.4.5). 192 unit tests pass.
 - 2026-11-04: Injection drops generated files (lockfiles, minified assets,
   build output) unless the query names the file; tool searches still return
   them after demotion. A watcher that survives 3 s reports `watching` before
