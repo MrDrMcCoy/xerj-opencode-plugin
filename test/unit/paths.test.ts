@@ -4,6 +4,7 @@ import {
   dataRoot,
   externalPrefix,
   indexPrefix,
+  isOverbroadRoot,
   memoryNamespace,
   pathHash,
   slug,
@@ -91,5 +92,18 @@ describe("prefixes", () => {
 
   test("memory namespace is project scoped", () => {
     expect(memoryNamespace(project)).toStartWith("proj-xerj-opencode-plugin-");
+  });
+});
+
+describe("isOverbroadRoot", () => {
+  test("refuses the home directory and filesystem roots", () => {
+    expect(isOverbroadRoot("/home/me", "/home/me", "linux")).toBe(true);
+    expect(isOverbroadRoot("/", "/home/me", "linux")).toBe(true);
+    expect(isOverbroadRoot("/home/me/project", "/home/me", "linux")).toBe(false);
+  });
+
+  test("compares resolved paths, not literals", () => {
+    expect(isOverbroadRoot("/home/me/./", "/home/me", "linux")).toBe(true);
+    expect(isOverbroadRoot("/home/me/../me/project", "/home/me", "linux")).toBe(false);
   });
 });

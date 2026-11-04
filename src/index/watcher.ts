@@ -47,6 +47,9 @@ const BACKOFF_MS = [1_000, 2_000, 5_000, 15_000, 30_000] as const;
 const MAX_RESTARTS = 5;
 const STOP_GRACE_MS = 3_000;
 const STDERR_TAIL_LINES = 20;
+// The engine refuses a second watcher for the same journal and says so.
+const CONTENTION_MARKER = "already owns";
+const CONTENTION_RETRY_MS = 5_000;
 
 export class CorpusService {
   readonly layout: CorpusLayout;
@@ -62,6 +65,7 @@ export class CorpusService {
   private timer: ReturnType<typeof setInterval> | null = null;
   private stopped = false;
   private spawning = false;
+  private lastStderr = "";
 
   constructor(private readonly options: CorpusServiceOptions) {
     this.layout = corpusLayout(options.projectRoot, options.prefix, options.dataRoot);
@@ -160,6 +164,7 @@ export class CorpusService {
 
     this.child = child;
     this.spawning = false;
+    this.lastStderr = "";
     if (watch) this.state = "starting";
 
     this.attachOutput(child);
@@ -204,14 +209,28 @@ export class CorpusService {
     });
 
     child.once("close", () => {
+      this.lastStderr = stderr.join("").slice(-2000);
       if (stderr.length > 0) {
-        this.options.logger.debug("autoindex stderr", stderr.join("").slice(-2000));
+        this.options.logger.debug("autoindex stderr", this.lastStderr);
       }
     });
   }
 
   private handleWatchExit(code: number | null, signal: NodeJS.Signals | null): void {
     const meaning = exitMeaning(code);
+
+    // Another process owns this journal, typically the plugin instance of a
+    // server that is being replaced. Ownership frees when that process exits,
+    // so wait it out instead of counting a failure or burning the restart
+    // budget.
+    if (this.lastStderr.includes(CONTENTION_MARKER)) {
+      this.state = "starting";
+      this.lastError = null;
+      this.options.logger.debug("autoindex watcher journal is owned elsewhere; retrying");
+      this.options.onChange?.();
+      setTimeout(() => this.spawn(true), CONTENTION_RETRY_MS);
+      return;
+    }
 
     // A clean exit from `--watch` is unexpected; it should stay resident.
     if (meaning === "decision") {

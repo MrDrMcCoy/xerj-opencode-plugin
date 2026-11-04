@@ -27,6 +27,7 @@ import {
   environmentFrom,
   externalPrefix,
   indexPrefix,
+  isOverbroadRoot,
   memoryNamespace,
   projectStateDir,
   webPrefix,
@@ -81,6 +82,14 @@ export default Plugin.define({
     // The location may be a subdirectory of the project; index the project root
     // so a session opened in `docs/` does not create a second corpus.
     const projectRoot = ctx.location.project.canonical;
+    const overbroad = isOverbroadRoot(projectRoot);
+    const indexWarnings = [...warnings];
+    if (overbroad) {
+      const refusal =
+        `refusing to index ${projectRoot}: the home directory and filesystem roots are too broad. Open OpenCode inside a project.`;
+      indexWarnings.push(refusal);
+      logger.warn(refusal);
+    }
     const prefix = indexPrefix(projectRoot);
     const brains = brainSpecs(projectRoot, config.index.brain);
     const hiddenRoots = documentRoots(projectRoot, config.index.hidden);
@@ -99,7 +108,7 @@ export default Plugin.define({
       hiddenRoots,
       anomaly: null,
       error: null,
-      warnings: [...warnings],
+      warnings: indexWarnings,
     };
 
     const ledger = new Ledger({
@@ -502,7 +511,7 @@ export default Plugin.define({
               .catch(() => {});
           },
         });
-        await runtime.corpus.start();
+        if (!overbroad) await runtime.corpus.start();
 
         if (runtime.hiddenRoots.length > 0) {
           runtime.hidden = new HiddenIndex({
@@ -521,7 +530,7 @@ export default Plugin.define({
             },
           });
 
-          if (config.index.auto) await runtime.hidden.start();
+          if (config.index.auto && !overbroad) await runtime.hidden.start();
         }
 
         if (runtime.brains.length > 0) {
@@ -544,7 +553,7 @@ export default Plugin.define({
 
           // One-shot: graph indexing cannot run in watch mode. `index.auto`
           // gates startup runs only; an explicit reindex still works.
-          if (config.index.auto) void runtime.brain.runAll();
+          if (config.index.auto && !overbroad) void runtime.brain.runAll();
         }
 
         await registration.events.emit("updated", { updatedAt: Date.now() });

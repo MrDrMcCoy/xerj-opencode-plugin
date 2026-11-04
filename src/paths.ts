@@ -12,7 +12,6 @@ export interface Environment {
   readonly HOME?: string;
 }
 
-/** Picks the variables that matter out of a wider process environment. */
 export function environmentFrom(env: Readonly<Record<string, string | undefined>>): Environment {
   return {
     XDG_DATA_HOME: env.XDG_DATA_HOME,
@@ -20,6 +19,22 @@ export function environmentFrom(env: Readonly<Record<string, string | undefined>
     HOME: env.HOME,
   };
 }
+
+/**
+ * True when a directory is too broad to index: the home directory itself or a
+ * filesystem root. Indexing it walks every cache, download and trash folder and
+ * costs minutes of I/O for results nobody asked for.
+ */
+export function isOverbroadRoot(
+  directory: string,
+  home: string = homedir(),
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  const resolved = resolve(directory);
+  const root = platform === "win32" ? resolve(resolved, sep) : "/";
+  return resolved === root || resolved === resolve(home);
+}
+
 
 const APP_DIR = "opencode/xerj";
 const PREFIX_ROOT = "xop";
