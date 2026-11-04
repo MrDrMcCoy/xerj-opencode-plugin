@@ -8,7 +8,7 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { Config } from "../config.ts";
 import type { Logger } from "../log.ts";
-import { XerjClient } from "../node/client.ts";
+import { XerjClient, type ClientObserver } from "../node/client.ts";
 import type { BrainSpec } from "../paths.ts";
 
 export interface BrainRun {
@@ -33,7 +33,9 @@ export interface BrainIndexerOptions {
   readonly config: Config;
   readonly specs: ReadonlyArray<BrainSpec>;
   readonly logger: Logger;
+  readonly observer?: ClientObserver;
   readonly onChange?: () => void;
+  readonly onRun?: () => void;
 }
 
 const MIN_TIMEOUT_MS = 60_000;
@@ -44,7 +46,7 @@ export class BrainIndexer {
   private running = false;
 
   constructor(private readonly options: BrainIndexerOptions) {
-    this.client = new XerjClient(options.nodeUrl);
+    this.client = new XerjClient(options.nodeUrl, undefined, options.observer);
   }
 
   /** Configured brains, with zeros for the ones that have not run yet. */
@@ -113,6 +115,7 @@ export class BrainIndexer {
       const output = await run(this.options.binaryPath, args, this.timeoutMs());
       const summary = await this.summarize(spec, parseBrainRun(output));
       this.record(spec, { at: Date.now(), ...summary, error: null });
+      this.options.onRun?.();
       this.options.logger.info(`brain ${spec.name} indexed`, summary);
     } catch (error) {
       this.record(spec, {

@@ -18,6 +18,7 @@ export interface SessionHookOptions {
   readonly getSearch: () => SearchService | null;
   readonly getMemory: () => MemoryStore | null;
   readonly summarize: () => Promise<string>;
+  readonly onInject?: () => void;
   readonly recordQuery: (
     sessionID: string,
     paths: ReadonlyArray<string>,
@@ -119,6 +120,9 @@ export async function registerSessionHooks(
     }
     if (entry.block.length > 0) {
       event.system.push({ type: "text", text: entry.block });
+    }
+    if (entry.memory.length > 0 || entry.block.length > 0) {
+      options.onInject?.();
     }
   });
 }

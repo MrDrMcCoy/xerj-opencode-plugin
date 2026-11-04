@@ -46,6 +46,13 @@ const SNAPSHOT: StatusSnapshot = {
   },
   memory: { namespace: "proj-demo", count: 0 },
   brains: [],
+  counters: {
+    rpcCalls: 0,
+    injectedTurns: 0,
+    nodeSpawns: 1,
+    http429: 0,
+    indexRuns: 2,
+  },
   recent: [],
   warnings: [],
   errors: [],

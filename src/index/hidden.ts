@@ -24,6 +24,7 @@ export interface HiddenIndexOptions {
   readonly maxBytes: number;
   readonly logger: Logger;
   readonly onChange?: () => void;
+  readonly onRun?: () => void;
 }
 
 export interface HiddenSnapshot {
@@ -155,6 +156,7 @@ export class HiddenIndex {
       await this.removeStale(new Set(files.map((file) => file.id)));
 
       this.state = { docs: files.length, lastRunAt: Date.now(), error: null };
+      this.options.onRun?.();
       this.options.onChange?.();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

@@ -24,6 +24,8 @@ export interface CorpusSnapshot {
   readonly state: CorpusState;
   readonly lastRun: CorpusRun | null;
   readonly restarts: number;
+  readonly runs: number;
+  readonly failures: number;
   readonly lastError: string | null;
 }
 
@@ -37,6 +39,7 @@ export interface CorpusServiceOptions {
   readonly storage: KeyValueStorage;
   readonly logger: Logger;
   readonly onChange?: () => void;
+  readonly onRun?: (run: CorpusRun) => void;
 }
 
 const STORAGE_KEY = "index/lastRun";
@@ -52,6 +55,8 @@ export class CorpusService {
   private state: CorpusState;
   private lastRun: CorpusRun | null = null;
   private restarts = 0;
+  private runs = 0;
+  private failures = 0;
   private lastError: string | null = null;
   private child: ChildProcess | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -123,6 +128,8 @@ export class CorpusService {
       state: this.state,
       lastRun: this.lastRun,
       restarts: this.restarts,
+      runs: this.runs,
+      failures: this.failures,
       lastError: this.lastError,
     };
   }
@@ -181,7 +188,9 @@ export class CorpusService {
         const run = parseRunDocument(line);
         if (!run) continue;
         this.lastRun = run;
+        this.runs += 1;
         this.restarts = 0;
+        this.options.onRun?.(run);
         this.state = "watching";
         void this.persist(run);
         this.options.onChange?.();
@@ -218,6 +227,7 @@ export class CorpusService {
       return;
     }
 
+    this.failures += 1;
     this.lastError = `autoindex watcher exited (${code ?? "signal"})`;
     this.options.logger.warn(this.lastError);
 
@@ -242,6 +252,7 @@ export class CorpusService {
       return;
     }
 
+    this.failures += 1;
     this.state = "error";
     this.lastError =
       meaning === "decision"
@@ -313,6 +324,7 @@ export class CorpusService {
   }
 
   private fail(error: unknown): void {
+    this.failures += 1;
     this.state = "error";
     this.lastError = error instanceof Error ? error.message : String(error);
     this.options.logger.error("could not start autoindex", this.lastError);

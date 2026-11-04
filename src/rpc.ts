@@ -72,6 +72,14 @@ export interface UsageStatus {
   readonly topFiles: ReadonlyArray<CitedFileStatus>;
 }
 
+export interface CounterStatus {
+  readonly rpcCalls: number;
+  readonly injectedTurns: number;
+  readonly nodeSpawns: number;
+  readonly http429: number;
+  readonly indexRuns: number;
+}
+
 export interface ConfigStatus {
   readonly indexRoot: string;
   readonly brain: ReadonlyArray<string>;
@@ -89,6 +97,7 @@ export interface StatusSnapshot {
   readonly usage: UsageStatus;
   readonly memory: MemoryStatus;
   readonly brains: ReadonlyArray<BrainStatus>;
+  readonly counters: CounterStatus;
   readonly recent: ReadonlyArray<string>;
   readonly warnings: ReadonlyArray<string>;
   readonly errors: ReadonlyArray<string>;
@@ -197,6 +206,13 @@ const definition = {
             error: { type: ["string", "null"] },
           }),
         },
+        counters: object({
+          rpcCalls: { type: "number" },
+          injectedTurns: { type: "number" },
+          nodeSpawns: { type: "number" },
+          http429: { type: "number" },
+          indexRuns: { type: "number" },
+        }),
         recent: { type: "array", items: { type: "string" } },
         warnings: { type: "array", items: { type: "string" } },
         errors: { type: "array", items: { type: "string" } },

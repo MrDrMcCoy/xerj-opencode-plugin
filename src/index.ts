@@ -46,6 +46,7 @@ import { shellReadPaths } from "./remote/shell.ts";
 import { BrainGraph } from "./search/brains.ts";
 import { SearchService } from "./search/service.ts";
 import { Ledger } from "./stats/ledger.ts";
+import { Counters } from "./stats/counters.ts";
 import { AnomalyService } from "./telemetry/anomaly.ts";
 import { buildTools } from "./tools/search.ts";
 
@@ -108,6 +109,11 @@ export default Plugin.define({
       logger,
     });
 
+    const counters = new Counters();
+    const observer = { onResponse: (status: number) => {
+      if (status === 429) counters.note429();
+    } };
+
     const host = await detectRuntime({
       libc: config.binary.libc,
       target: config.binary.target,
@@ -169,6 +175,7 @@ export default Plugin.define({
         },
         memory: { namespace: memoryNs, count: 0 },
         brains: brainStatus(runtime.brain, runtime.brains),
+        counters: counters.snapshot(),
         recent: await recentMessages(logger),
         warnings: runtime.warnings,
         errors: runtime.error ? [runtime.error] : [],
@@ -177,7 +184,7 @@ export default Plugin.define({
       if (!runtime.node) return base;
 
       try {
-        const client = new XerjClient(runtime.node.baseUrl);
+        const client = new XerjClient(runtime.node.baseUrl, undefined, observer);
         const [indices, summary] = await Promise.all([
           client.indices(),
           client.memorySummary(memoryNs).catch(() => null),
@@ -216,8 +223,12 @@ export default Plugin.define({
     };
 
     const registration = await ctx.rpc.register(XerjRpc, {
-      status: async () => snapshot(),
+      status: async () => {
+        counters.noteRpc();
+        return snapshot();
+      },
       reindex: async () => {
+        counters.noteRpc();
         await Promise.all([
           runtime.corpus?.reindex(),
           runtime.web?.reindex(),
@@ -233,11 +244,13 @@ export default Plugin.define({
         };
       },
       remember: async (input) => {
+        counters.noteRpc();
         if (!runtime.memory) throw new Error("XERJ memory is not available yet");
         const args = input as { text: string };
         return runtime.memory.remember({ text: args.text });
       },
       search: async (input) => {
+        counters.noteRpc();
         if (!runtime.search) throw new Error("XERJ search is not available yet");
         const args = input as { query: string };
         const result = await runtime.search.search(args.query);
@@ -361,6 +374,7 @@ export default Plugin.define({
       getSearch: () => runtime.search,
       getMemory: () => runtime.memory,
       summarize,
+      onInject: () => counters.noteInjection(),
       recordQuery: (sessionID, paths, bytes, hits) =>
         ledger.recordQuery(sessionID, paths, bytes, hits),
     });
@@ -402,8 +416,9 @@ export default Plugin.define({
           onPort: (port) => persistPort(root, port),
           logger,
         });
+        if (runtime.node.spawned) counters.noteSpawn();
 
-        const client = new XerjClient(runtime.node.baseUrl);
+        const client = new XerjClient(runtime.node.baseUrl, undefined, observer);
         runtime.search = new SearchService(
           client,
           [
@@ -443,6 +458,7 @@ export default Plugin.define({
             config,
             storage,
             logger,
+            onRun: () => counters.noteIndexRun(),
             onChange: () => {
               runtime.search?.invalidate();
               void registration.events
@@ -468,6 +484,7 @@ export default Plugin.define({
           config,
           storage,
           logger,
+          onRun: () => counters.noteIndexRun(),
           onChange: () => {
             runtime.search?.invalidate();
             void registration.events
@@ -485,6 +502,7 @@ export default Plugin.define({
             roots: runtime.hiddenRoots,
             maxBytes: config.index.hiddenMaxBytes,
             logger,
+            onRun: () => counters.noteIndexRun(),
             onChange: () => {
               runtime.search?.invalidate();
               void registration.events
@@ -504,6 +522,8 @@ export default Plugin.define({
             config,
             specs: runtime.brains,
             logger,
+            observer,
+            onRun: () => counters.noteIndexRun(),
             onChange: () => {
               runtime.search?.invalidate();
               void registration.events

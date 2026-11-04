@@ -59,6 +59,13 @@ function snapshot(overrides: Partial<StatusSnapshot> = {}): StatusSnapshot {
     },
     memory: { namespace: "proj-demo-1a2b3c4d", count: 2 },
     brains: [],
+    counters: {
+      rpcCalls: 42,
+      injectedTurns: 7,
+      nodeSpawns: 1,
+      http429: 0,
+      indexRuns: 9,
+    },
     recent: ["warn: retry"],
     warnings: [],
     errors: [],
@@ -144,6 +151,7 @@ describe("panelSections", () => {
       "Datasets",
       "Memory",
       "Usage",
+      "Counters",
       "Top cited",
       "Health",
     ]);
@@ -151,6 +159,7 @@ describe("panelSections", () => {
     expect(body).toContain("web  1 docs · 14.6 KB");
     expect(body).toContain("2 entries");
     expect(body).toContain("src/a.ts ×3");
+    expect(body).toContain("9 index runs · 7 injections");
     expect(body).toContain("warn: retry");
   });
 

@@ -177,6 +177,16 @@ export function panelSections(snapshot: StatusSnapshot, now: number): PanelSecti
       ],
     },
     {
+      title: "Counters",
+      lines: [
+        `${formatCount(snapshot.counters.indexRuns)} index runs · ` +
+          `${formatCount(snapshot.counters.injectedTurns)} injections`,
+        `${formatCount(snapshot.counters.nodeSpawns)} spawns · ` +
+          `${formatCount(snapshot.counters.http429)} rate-limited · ` +
+          `${formatCount(snapshot.counters.rpcCalls)} rpc calls`,
+      ],
+    },
+    {
       title: "Top cited",
       lines:
         usage.topFiles.length === 0

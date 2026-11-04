@@ -39,10 +39,16 @@ export interface NodeInfo {
 
 const DEFAULT_TIMEOUT_MS = 5_000;
 
+/** Observes responses without changing them; used for 429 accounting. */
+export interface ClientObserver {
+  onResponse?(status: number): void;
+}
+
 export class XerjClient {
   constructor(
     readonly baseUrl: string,
     private readonly timeoutMs = DEFAULT_TIMEOUT_MS,
+    private readonly observer?: ClientObserver,
   ) {}
 
   /** GET / — identifies the node by its cluster name, not by the port. */
@@ -278,6 +284,9 @@ export class XerjClient {
     return fetch(`${this.baseUrl}${path}`, {
       ...init,
       signal: init?.signal ?? AbortSignal.timeout(this.timeoutMs),
+    }).then((response) => {
+      this.observer?.onResponse?.(response.status);
+      return response;
     });
   }
 }
