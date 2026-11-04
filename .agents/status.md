@@ -4,6 +4,16 @@ Updated: 2026-11-03
 
 ## Where things stand
 
+- Project-scoped node lifecycle shipped (unreleased): one node per project
+  under `<data root>/nodes/<prefix>/`, with a persisted port, pid, spawn lock,
+  log, peer heartbeats and its own engine data dir. Two runtimes on the same
+  node directory attach to the same pid. The node stops when the last recorded
+  session emits `session.deleted`, after `node.idleMs` (default 30 min) with no
+  activity, or when this plugin instance is torn down — each only when no live
+  peer heartbeat exists. A dead socket re-ensures the node once and retries,
+  and status reports a node another process started. Verified live: spawn,
+  attach (same pid), idle stop (no answer), restart on the same port with the
+  index intact and the doc still searchable. 206 unit tests pass.
 - M0 is implemented and verified against a real XERJ `v1.0.0-rc.100` binary.
 - M1 is implemented and verified live: the project index is built by a
   supervised `autoindex --watch --no-graph` process. Adding a file moved the
@@ -170,6 +180,8 @@ src/binary/detect.ts   host target detection (Rosetta, Windows ARM64)
 src/binary/manager.ts  download, verify, extract, upgrade
 src/node/client.ts     HTTP client, size parsing
 src/node/supervisor.ts probe, spawn, attach, port selection, stop
+src/node/runtime.ts    per-project node handle, ensure/detect/stop
+src/lifecycle.ts       session and idle tracking, peer heartbeats, shutdown
 src/index/corpus.ts    layout, command line, run-document parsing
 src/index/watcher.ts   supervised watch process + periodic fallback
 src/index/brain.ts     one-shot brain runs, run-document parsing
@@ -193,12 +205,13 @@ test/unit/*.test.ts    pure-function tests
 
 ## Next actions
 
-1. 0.4.5 is `latest` on npm and is the first release whose TUI half loads:
+1. Publish the lifecycle change (0.5.0): one node per project with idle and
+   session-end shutdown. `npm publish --access public` still needs a fresh 2FA
+   factor when the token is stale.
+2. 0.4.5 is `latest` on npm and is the first release whose TUI half loads:
    the entry is prebuilt, the runtime packages are real dependencies, and JSX
    binds to the host through a shim. 0.4.2 on the registry is the broken
    build (optional peers, no `dist`); ignore it.
-2. Watch for one real compaction to confirm `session.compaction.ended` stores a
-   `summary` memory in practice.
 3. The shell parser does not follow `xargs`, command substitution, pipelines
    that transform paths, or `cd` through a pipeline; those reads stay
    unindexed. An argument that merely mentions a file (`echo a.md`) is
@@ -263,6 +276,14 @@ TUI verification remain.
   expected, z-score, and score. Warm-up buckets are not flagged.
 
 ## Log
+
+- 2026-11-04: Project-scoped node lifecycle. One node per project
+  (`<data root>/nodes/<prefix>/`), persisted port and pid, per-project engine
+  data, peer heartbeats, and three shutdown paths (last `session.deleted`,
+  idle timeout, plugin teardown) gated on live peers. Client retries once
+  after a dead socket and status detects a node another process started.
+  Verified live: spawn -> attach (same pid) -> idle stop -> restart with the
+  index intact. 206 unit tests pass.
 
 - 2026-11-04: Two instances of the plugin run in one server, one per open
   location, and both competed for the same journal. The winner watched; the

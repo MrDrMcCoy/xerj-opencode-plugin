@@ -1,5 +1,5 @@
-// Node lifecycle: attach when a XERJ node already answers, otherwise spawn one
-// detached so it outlives the OpenCode server and the index survives restarts.
+// Node lifecycle for one project: attach when that project's node already
+// answers, otherwise spawn one detached so the index survives plugin reloads.
 // Verified on v1.0.0-rc.100: `--port` claims PORT, PORT+1 (native REST) and
 // PORT+2 (gRPC), and startup fails if any is taken.
 
@@ -8,7 +8,12 @@ import { mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { connect } from "node:net";
 import { join } from "node:path";
 import type { Logger } from "../log.ts";
-import { nodeDataDir, nodeLogPath, nodePidPath } from "../paths.ts";
+import {
+  nodeDataDir,
+  nodeLogPath,
+  nodePidPath,
+  nodePortPath,
+} from "../paths.ts";
 
 export type NodeState = "xerj" | "foreign" | "down";
 
@@ -24,7 +29,10 @@ export interface EnsureNodeOptions {
   readonly binaryPath: string;
   /** XERJ release the binary reports; the banner only carries the wire version. */
   readonly binaryVersion: string;
-  readonly root: string;
+  /** This project's node directory; its port, pid and data dir live inside. */
+  readonly nodeDir: string;
+  /** Working directory for the spawned process. */
+  readonly projectRoot: string;
   readonly dataDir?: string | null;
   readonly preferredPort: number;
   readonly persistedPort: number | null;
@@ -32,6 +40,14 @@ export interface EnsureNodeOptions {
   readonly logger: Logger;
   readonly explicitUrl?: string | null;
   readonly startupTimeoutMs?: number;
+}
+
+/** What the pidfile and port file say, without trusting either. */
+export interface NodeDetection {
+  readonly running: boolean;
+  readonly port: number | null;
+  readonly pid: number | null;
+  readonly state: NodeState;
 }
 
 export class NodeError extends Error {
@@ -80,19 +96,27 @@ export async function ensureNode(options: EnsureNodeOptions): Promise<NodeHandle
     };
   }
 
-  const dataDir = options.dataDir ?? nodeDataDir(options.root);
+  const dataDir = options.dataDir ?? nodeDataDir(options.nodeDir);
   await mkdir(dataDir, { recursive: true, mode: 0o700 });
+  // The port, pid, lock and log live here; a first run must create it.
+  await mkdir(options.nodeDir, { recursive: true, mode: 0o700 });
 
+  // Only this project's recorded port is a candidate. Scanning would attach to
+  // a node another project owns, and then one idle shutdown would kill it.
   const candidate = options.persistedPort ?? options.preferredPort;
-  const attached = await attach(candidate, options.binaryVersion);
-  if (attached) return attached;
+  const storedPid = await readNodePid(options.nodeDir);
+  const detected =
+    options.persistedPort === null
+      ? null
+      : await attach(options.persistedPort, options.binaryVersion, storedPid);
+  if (detected) return detected;
 
   const port = await choosePort(candidate);
   if (port === null) {
     throw new NodeError(`no free port for XERJ between ${PORT_SCAN_START} and ${PORT_SCAN_END}`);
   }
 
-  const lock = join(dataDir, ".spawn-lock");
+  const lock = join(options.nodeDir, ".spawn-lock");
   if (!(await acquireLock(lock))) {
     // Another process is spawning; wait for it rather than starting a second node.
     const existing = await waitForNode(port, options.startupTimeoutMs ?? 30_000, options.binaryVersion);
@@ -101,10 +125,19 @@ export async function ensureNode(options: EnsureNodeOptions): Promise<NodeHandle
   }
 
   try {
-    const second = await attach(port, options.binaryVersion);
-    if (second) return second;
+    const second = await attach(port, options.binaryVersion, storedPid);
+    if (second) {
+      await options.onPort?.(port);
+      return second;
+    }
 
-    const pid = await spawnNode(options.binaryPath, dataDir, port, options.root);
+    const pid = await spawnNode(
+      options.binaryPath,
+      dataDir,
+      port,
+      options.projectRoot,
+      options.nodeDir,
+    );
     await options.onPort?.(port);
 
     const node = await waitForNode(port, options.startupTimeoutMs ?? 30_000, options.binaryVersion);
@@ -112,7 +145,7 @@ export async function ensureNode(options: EnsureNodeOptions): Promise<NodeHandle
       throw new NodeError(`xerj did not answer on port ${port} within 30s`);
     }
 
-    await writeFile(nodePidPath(options.root), String(pid), { mode: 0o600 }).catch(() => {});
+    await writeFile(nodePidPath(options.nodeDir), String(pid), { mode: 0o600 }).catch(() => {});
     logger.info("started the xerj node", { port, pid });
     return { ...node, pid, spawned: true };
   } finally {
@@ -120,14 +153,18 @@ export async function ensureNode(options: EnsureNodeOptions): Promise<NodeHandle
   }
 }
 
-async function attach(port: number, binaryVersion: string): Promise<NodeHandle | null> {
+async function attach(
+  port: number,
+  binaryVersion: string,
+  pid: number | null,
+): Promise<NodeHandle | null> {
   const baseUrl = `http://127.0.0.1:${port}`;
   if ((await probeNode(baseUrl)) !== "xerj") return null;
 
   return {
     baseUrl,
     port,
-    pid: null,
+    pid,
     spawned: false,
     version: binaryVersion,
   };
@@ -140,7 +177,7 @@ async function waitForNode(
 ): Promise<NodeHandle | null> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const found = await attach(port, binaryVersion);
+    const found = await attach(port, binaryVersion, null);
     if (found) return found;
     await sleep(HEALTH_POLL_MS);
   }
@@ -189,11 +226,13 @@ async function spawnNode(
   binary: string,
   dataDir: string,
   port: number,
-  root: string,
+  projectRoot: string,
+  nodeDir: string,
 ): Promise<number> {
   await mkdir(dataDir, { recursive: true, mode: 0o700 });
+  await mkdir(nodeDir, { recursive: true, mode: 0o700 });
 
-  const log = await open(nodeLogPath(root), "a", 0o600);
+  const log = await open(nodeLogPath(nodeDir), "a", 0o600);
   const child = spawn(
     binary,
     [
@@ -206,6 +245,7 @@ async function spawnNode(
     ],
     {
       detached: true,
+      cwd: projectRoot,
       stdio: ["ignore", log.fd, log.fd],
       env: { ...process.env, XERJ_DISABLE_FEEDBACK: "true" },
     },
@@ -232,28 +272,76 @@ async function acquireLock(path: string): Promise<boolean> {
   }
 }
 
-export async function readPersistedPort(root: string): Promise<number | null> {
-  const raw = await readFile(join(nodeDataDir(root), "port"), "utf8").catch(() => null);
+export async function readPersistedPort(nodeDir: string): Promise<number | null> {
+  const raw = await readFile(nodePortPath(nodeDir), "utf8").catch(() => null);
   if (raw === null) return null;
   const port = Number(raw.trim());
   return Number.isInteger(port) && port > 0 && port < 65_536 ? port : null;
 }
 
-export async function persistPort(root: string, port: number): Promise<void> {
-  await mkdir(nodeDataDir(root), { recursive: true, mode: 0o700 });
-  await writeFile(join(nodeDataDir(root), "port"), String(port), { mode: 0o600 });
+export async function persistPort(nodeDir: string, port: number): Promise<void> {
+  await mkdir(nodeDir, { recursive: true, mode: 0o700 });
+  await writeFile(nodePortPath(nodeDir), String(port), { mode: 0o600 });
 }
 
-export async function stopNode(root: string): Promise<boolean> {
-  const pid = Number(await readFile(nodePidPath(root), "utf8").catch(() => ""));
-  if (!Number.isInteger(pid) || pid <= 0) return false;
+/** Reads the pidfile without signalling anything. */
+export async function readNodePid(nodeDir: string): Promise<number | null> {
+  const raw = await readFile(nodePidPath(nodeDir), "utf8").catch(() => null);
+  if (raw === null) return null;
+  const pid = Number(raw.trim());
+  return Number.isInteger(pid) && pid > 0 ? pid : null;
+}
+
+/**
+ * Reports whether this project's node is up. The port file and pidfile say what
+ * was started; `GET /` is the only proof it still answers.
+ */
+export async function detectNode(nodeDir: string): Promise<NodeDetection> {
+  const port = await readPersistedPort(nodeDir);
+  const pid = await readNodePid(nodeDir);
+  if (port === null) return { running: false, port: null, pid, state: "down" };
+
+  const state = await probeNode(`http://127.0.0.1:${port}`);
+  return { running: state === "xerj", port, pid, state };
+}
+
+export async function stopNode(nodeDir: string, graceMs = 5_000): Promise<boolean> {
+  const pid = await readNodePid(nodeDir);
+  if (pid === null) return false;
+
+  if (!isAlive(pid)) {
+    await rm(nodePidPath(nodeDir), { force: true }).catch(() => {});
+    return false;
+  }
 
   try {
     process.kill(pid, "SIGTERM");
-    await rm(nodePidPath(root), { force: true });
+  } catch {
+    await rm(nodePidPath(nodeDir), { force: true }).catch(() => {});
+    return false;
+  }
+
+  const deadline = Date.now() + graceMs;
+  while (Date.now() < deadline && isAlive(pid)) {
+    await sleep(100);
+  }
+  if (isAlive(pid)) {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      // Already gone between the check and the signal.
+    }
+  }
+
+  await rm(nodePidPath(nodeDir), { force: true }).catch(() => {});
+  return true;
+}
+
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
     return true;
   } catch {
-    await rm(nodePidPath(root), { force: true }).catch(() => {});
     return false;
   }
 }

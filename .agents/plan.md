@@ -43,8 +43,8 @@ choice.
 | # | Decision | Rationale |
 |---|---|---|
 | D1 | Node runs `--insecure` on `127.0.0.1` only, data dir `0700` | Matches every documented recipe; TLS + key management buys nothing on a single-user loopback socket. Auth-on can be added later if a shared-host case appears. |
-| D2 | One node per user, shared across projects | The engine's data dir is global; one node avoids N× memory and port churn. Projects are separated by index prefix. |
-| D3 | Node is detached and outlives the OpenCode server | Index survives restarts and plugin reloads. A pidfile + health probe makes attach idempotent. |
+| D2 | One node per project, shared by that project's sessions | The project index, its watcher, and its memory belong together; separating projects isolates crashes, ports, and idle shutdown. Two OpenCode processes on one project attach to the same node. |
+| D3 | The node's lifetime follows its project's sessions | It stops when the last session closes, or after `node.idleMs` (30 min) with no activity, and restarts on demand with the index intact. A user-level node would never go idle. |
 | D4 | Native tools, not MCP | Token budgets, citation formatting, and savings accounting need control over the response. |
 | D5 | Index with `autoindex --no-graph` | That path reconciles additions, changes, deletions and renames incrementally. The graph path refuses deletions. |
 | D6 | Second brain is opt-in and separate | `xerj brain <folder>` builds its own edge index. Running it over the whole repo duplicates indexing. |
@@ -66,7 +66,8 @@ Plugin options in `opencode.json(c)`; every value has a default.
     "options": {
       "binary":  { "version": "auto", "path": null, "target": null,
                    "libc": "musl" },
-      "node":    { "url": null, "port": 9200, "dataDir": null },
+      "node":    { "url": null, "port": 9200, "dataDir": null,
+                   "idleMs": 1800000, "shutdownOnIdle": true },
       "index":   { "auto": true, "watch": true, "debounceMs": 800, "periodicMs": 900000,
                    "workers": null, "brain": [], "hidden": [],
                    "hiddenMaxBytes": 262144, "semantic": true,
@@ -107,11 +108,13 @@ grows.
 ## 4. Paths and identity
 
 ```
-data dir      ~/.local/share/opencode/xerj/data        (engine storage, 0700)
-binary        ~/.local/share/opencode/xerj/bin/<ver>-<target>/xerj
-port          <data dir>/port                          (resolved, persisted)
-pid           <data dir>/node.pid
-spool         <data dir>/spool/<prefix>/               (remote documents)
+data root     ~/.local/share/opencode/xerj               (0700)
+binary        <data root>/bin/<ver>-<target>/xerj
+node dir      <data root>/nodes/<prefix>/             (one per project)
+engine data   <node dir>/data/                        (engine storage)
+port          <node dir>/port                          (resolved, persisted)
+pid           <node dir>/node.pid
+spool         <data root>/spool/<prefix>/             (remote documents)
 project       <project>/.xerj/                         (ignore file, caches)
 journal       <data root>/state/<prefix>/journal.ndjson
 ```
@@ -185,19 +188,59 @@ other targets are selected correctly but untested.
 
 ## 6. Node lifecycle
 
-`ensureNode()`:
+The node is scoped to one project, not to the user or the server. Everything a
+second process needs to find it lives in a project node directory:
 
-1. Probe `node.url` or `http://127.0.0.1:<port>/` for the XERJ banner.
-2. If a non-XERJ service answers, advance the port (9200 → 9399) and persist.
-3. If nothing answers, take `<data dir>/.spawn-lock` (`mkdir` is atomic, stale
-   after 60 s), spawn detached:
-   `xerj --insecure --data-dir <data dir> --bind 127.0.0.1`, stdio to
-   `<data dir>/node.log`, then poll health for up to 30 s.
-4. If another process holds the lock, poll instead of spawning.
+```
+node dir   <data root>/nodes/<prefix>/            (0700)
+port       <node dir>/port                        (persisted, last used)
+pid        <node dir>/node.pid
+lock       <node dir>/.spawn-lock                 (mkdir is atomic, 60 s stale)
+log        <node dir>/node.log
+clients    <node dir>/clients/<instance>.json      (peer heartbeats)
+data dir   <node dir>/data/                       (engine storage)
+```
 
-Teardown: the plugin never kills the node. `xerj_stop` (a TUI command) kills
-the PID from the pidfile after confirmation. Indexing and memory outlive
-sessions by design.
+`NodeRuntime.ensure()`:
+
+1. If `node.url` is set, attach to it and never spawn. The idle timer is off
+   in that mode: the plugin does not own that node.
+2. Otherwise take a start lock around the whole lifecycle, so two sessions or
+   two OpenCode processes cannot spawn at once.
+3. Probe the persisted port. If this project's node answers with
+   `cluster_name: "xerj"`, attach. The pid from the pidfile identifies it; a
+   port that answers without this project's pid is not adopted.
+4. If nothing answers, pick a free port triple and spawn detached:
+   `xerj --insecure --data-dir <data dir> --port <port> --bind 127.0.0.1`,
+   stdio to the node log, then poll health for up to 30 s. Persist the port
+   once it answers, so a restart attaches instead of spawning again.
+5. If another process holds the lock, poll for its node instead of spawning.
+
+Detection and resume: `detectNode(nodeDir)` reports `running`, `port`, `pid`
+and the banner state without starting anything. The status snapshot uses it
+when this process holds no handle, so an idle-stopped corpus that another
+OpenCode process has since started reports `running` instead of `stopped`.
+A client request that fails on a dead socket calls `ensure()` once and retries,
+so a stopped node is restarted on demand.
+
+Teardown is session-scoped. Every prompt, tool call and RPC touches the
+lifecycle and records its session id. Three things stop the node:
+
+- the host emits `session.deleted` for the last recorded session of this
+  project, or
+- no session activity for `node.idleMs` (default 30 minutes), or
+- the plugin instance itself is torn down.
+
+Each path checks the peer heartbeats first: an instance writes
+`<node dir>/clients/<instanceId>.json` every 15 s, an entry is stale after 90 s
+or when its pid is gone, and a live peer defers the shutdown to that process's
+own deadline. `node.shutdownOnIdle=false` keeps the node up. Stopping sends
+`SIGTERM`, waits five seconds, then `SIGKILL`s and removes the pidfile. The
+node directory and engine data stay, so the next request restarts the node on
+the same port with the same index.
+
+A process-wide claim on the project's state directory means one plugin instance
+owns the watcher; the others report `shared`.
 
 Verified on `v1.0.0-rc.100`:
 
@@ -210,6 +253,8 @@ Verified on `v1.0.0-rc.100`:
   binary.
 - `xerj --version` prints `xerj v1.0.0-rc.100`, so the installed version is
   parsed from that line.
+- End to end: spawn, attach from a second runtime with the same node directory
+  (same pid), idle stop, restart on the same port with the same index.
 
 ## 7. Indexing
 

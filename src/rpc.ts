@@ -11,6 +11,12 @@ export interface NodeStatus {
   readonly baseUrl: string | null;
   readonly serverVersion: string | null;
   readonly spawned: boolean;
+  /** Lifecycle of this project's node, including an idle stop. */
+  readonly state: "stopped" | "starting" | "running" | "error";
+  readonly pid: number | null;
+  /** When the idle timer will stop the node, or null when disabled. */
+  readonly idleAt: number | null;
+  readonly sessions: number;
   readonly error: string | null;
 }
 
@@ -143,6 +149,10 @@ const definition = {
           baseUrl: { type: ["string", "null"] },
           serverVersion: { type: ["string", "null"] },
           spawned: { type: "boolean" },
+          state: { type: "string", enum: ["stopped", "starting", "running", "error"] },
+          pid: { type: ["number", "null"] },
+          idleAt: { type: ["number", "null"] },
+          sessions: { type: "number" },
           error: { type: ["string", "null"] },
         }),
         binary: object({

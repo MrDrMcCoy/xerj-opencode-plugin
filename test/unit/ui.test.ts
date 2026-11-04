@@ -21,6 +21,10 @@ function snapshot(overrides: Partial<StatusSnapshot> = {}): StatusSnapshot {
       baseUrl: "http://127.0.0.1:9200",
       serverVersion: "1.0.0-rc.100",
       spawned: false,
+      state: "running",
+      pid: 4242,
+      idleAt: NOW + 1_800_000,
+      sessions: 1,
       error: null,
     },
     binary: {

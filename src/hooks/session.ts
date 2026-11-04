@@ -19,6 +19,8 @@ export interface SessionHookOptions {
   readonly getMemory: () => MemoryStore | null;
   readonly summarize: () => Promise<string>;
   readonly onInject?: () => void;
+  /** Resets the idle deadline; called for every prompt and model call. */
+  readonly onActivity?: (sessionID?: string) => void;
   readonly recordQuery: (
     sessionID: string,
     paths: ReadonlyArray<string>,
@@ -69,6 +71,7 @@ export async function registerSessionHooks(
   const summarized = new Set<string>();
 
   await ctx.session.hook("prompt", async (event) => {
+    options.onActivity?.(event.sessionID);
     const text = event.prompt.text.trim();
     if (!shouldRetrieve(text)) return;
 
@@ -95,6 +98,7 @@ export async function registerSessionHooks(
   });
 
   await ctx.session.hook("context", async (event) => {
+    options.onActivity?.(event.sessionID);
     if (!summarized.has(event.sessionID)) {
       summarized.add(event.sessionID);
       try {

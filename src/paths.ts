@@ -72,16 +72,33 @@ export function binaryName(platform: NodeJS.Platform): string {
   return platform === "win32" ? "xerj.exe" : "xerj";
 }
 
-export function nodeDataDir(root: string): string {
-  return join(root, "data");
+/**
+ * One node directory per project. Each project gets its own XERJ process, data
+ * dir and port, so shutting a project down cannot disturb another one.
+ */
+export function projectNodeDir(root: string, prefix: string): string {
+  return join(root, "nodes", prefix);
 }
 
-export function nodeLogPath(root: string): string {
-  return join(root, "data", "node.log");
+export function nodeDataDir(nodeDir: string): string {
+  return join(nodeDir, "data");
 }
 
-export function nodePidPath(root: string): string {
-  return join(root, "data", "node.pid");
+export function nodeLogPath(nodeDir: string): string {
+  return join(nodeDir, "node.log");
+}
+
+export function nodePidPath(nodeDir: string): string {
+  return join(nodeDir, "node.pid");
+}
+
+export function nodePortPath(nodeDir: string): string {
+  return join(nodeDir, "port");
+}
+
+/** Heartbeats from every OpenCode process using this project's node. */
+export function nodeClientsDir(nodeDir: string): string {
+  return join(nodeDir, "clients");
 }
 
 export function releaseCachePath(root: string): string {

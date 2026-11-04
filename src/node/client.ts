@@ -44,12 +44,32 @@ export interface ClientObserver {
   onResponse?(status: number): void;
 }
 
+/**
+ * Keeps the client pointed at a live node. `ensure` returns the current base
+ * URL, starting the node when it is not running; `invalidate` drops a cached
+ * handle after a connection failure so the next call re-probes.
+ */
+export interface ClientResolver {
+  ensure(): Promise<string>;
+  invalidate?(): void;
+}
+
 export class XerjClient {
+  private current: string;
+
   constructor(
     readonly baseUrl: string,
     private readonly timeoutMs = DEFAULT_TIMEOUT_MS,
     private readonly observer?: ClientObserver,
-  ) {}
+    private readonly resolver?: ClientResolver,
+  ) {
+    this.current = baseUrl;
+  }
+
+  /** Replaces the base URL after the node was restarted on another port. */
+  setBaseUrl(baseUrl: string): void {
+    this.current = baseUrl;
+  }
 
   /** GET / — identifies the node by its cluster name, not by the port. */
   async info(): Promise<NodeInfo | null> {
@@ -280,8 +300,34 @@ export class XerjClient {
     return response.json();
   }
 
-  private request(path: string, init?: RequestInit): Promise<Response> {
-    return fetch(`${this.baseUrl}${path}`, {
+  private async request(path: string, init?: RequestInit): Promise<Response> {
+    const base = await this.resolveBase();
+
+    try {
+      return await this.send(base, path, init);
+    } catch (error) {
+      // A stopped node is expected: the idle timer shuts it down. Re-ensure and
+      // retry once, unless the caller cancelled or the failure was not a
+      // transport problem.
+      if (!this.resolver || init?.signal?.aborted || !isTransportError(error)) {
+        throw error;
+      }
+
+      this.resolver.invalidate?.();
+      const retryBase = await this.resolver.ensure();
+      this.current = retryBase;
+      return this.send(retryBase, path, init);
+    }
+  }
+
+  private async resolveBase(): Promise<string> {
+    if (!this.resolver) return this.current;
+    this.current = await this.resolver.ensure();
+    return this.current;
+  }
+
+  private send(base: string, path: string, init?: RequestInit): Promise<Response> {
+    return fetch(`${base}${path}`, {
       ...init,
       signal: init?.signal ?? AbortSignal.timeout(this.timeoutMs),
     }).then((response) => {
@@ -289,6 +335,22 @@ export class XerjClient {
       return response;
     });
   }
+}
+
+/** `fetch` rejects with a TypeError whose cause is the socket error. */
+function isTransportError(error: unknown): boolean {
+  if (!(error instanceof TypeError)) return false;
+  const cause = (error as { cause?: unknown }).cause;
+  const code =
+    typeof cause === "object" && cause !== null
+      ? (cause as { code?: unknown }).code
+      : undefined;
+  return (
+    code === "ECONNREFUSED" ||
+    code === "ECONNRESET" ||
+    code === "EHOSTUNREACH" ||
+    code === "ENETUNREACH"
+  );
 }
 
 /** Parses human byte sizes from `_cat/indices` (`1.2mb`, `42.7kb`, `0b`). */

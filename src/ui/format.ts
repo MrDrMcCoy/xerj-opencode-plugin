@@ -63,6 +63,20 @@ export function formatAge(now: number, at: number | null): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+/** Time until a future deadline: "in 45m", "in 12s". */
+export function formatUntil(now: number, at: number): string {
+  const seconds = Math.max(0, Math.round((at - now) / THOUSAND));
+  if (seconds < 10) return "any moment";
+  if (seconds < 60) return `in ${seconds}s`;
+
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `in ${minutes}m`;
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `in ${hours}h`;
+  return `in ${Math.floor(hours / 24)}d`;
+}
+
 /** Four lines for the sidebar slot. */
 export function sidebarLines(snapshot: StatusSnapshot, now: number): string[] {
   const index = snapshot.index;
@@ -94,10 +108,17 @@ export function panelSections(snapshot: StatusSnapshot, now: number): PanelSecti
       lines: [
         [
           node.phase,
+          node.state,
           node.spawned ? "spawned" : "attached",
           node.baseUrl ?? "no address",
         ].join(" · "),
         node.serverVersion === null ? "server unknown" : `server ${node.serverVersion}`,
+        node.idleAt === null || node.state !== "running"
+          ? `${node.sessions} ${plural(node.sessions, "session", "sessions")}`
+          : [
+              `${node.sessions} ${plural(node.sessions, "session", "sessions")}`,
+              `idle stop ${formatUntil(now, node.idleAt)}`,
+            ].join(" · "),
       ],
     },
     {

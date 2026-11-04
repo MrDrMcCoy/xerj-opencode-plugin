@@ -14,7 +14,7 @@ import { DEFAULT_CONFIG } from "../../src/config.ts";
 import { autoindexArgs, corpusLayout } from "../../src/index/corpus.ts";
 import { createLogger } from "../../src/log.ts";
 import { XerjClient } from "../../src/node/client.ts";
-import { ensureNode, stopNode } from "../../src/node/supervisor.ts";
+import { NodeRuntime } from "../../src/node/runtime.ts";
 
 export interface Harness {
   readonly root: string;
@@ -127,14 +127,18 @@ export async function startHarness(): Promise<Harness> {
     join(homedir(), ".cache", "opencode", "xerj-int");
   await mkdir(cacheRoot, { recursive: true });
   const binaryPath = await resolveBinary(cacheRoot);
-  const node = await ensureNode({
-    binaryPath,
-    binaryVersion: "test",
-    root,
+  const nodeDir = join(root, "node");
+  const runtimeOptions = {
+    nodeDir,
+    projectRoot: project,
     preferredPort: 9700,
-    persistedPort: null,
+    dataDir: join(root, "data"),
+    explicitUrl: null,
     logger,
-  });
+    binary: () => ({ path: binaryPath, version: "test", upgraded: false }),
+  };
+  const nodes = new NodeRuntime(runtimeOptions);
+  const node = await nodes.ensure();
 
   const client = new XerjClient(node.baseUrl);
   const layout = corpusLayout(project, PREFIX, root);
@@ -177,18 +181,14 @@ export async function startHarness(): Promise<Harness> {
     logger,
     index,
     reattach: async () => {
-      const again = await ensureNode({
-        binaryPath,
-        binaryVersion: "test",
-        root,
-        preferredPort: 9700,
-        persistedPort: node.port,
-        logger,
-      });
-      return again.spawned;
+      // A fresh runtime on the same node directory must attach, not spawn.
+      const again = new NodeRuntime(runtimeOptions);
+      const handle = await again.ensure();
+      await again.stop("test");
+      return handle.spawned;
     },
     close: async () => {
-      await stopNode(root);
+      await nodes.stop("test");
       await rm(root, { recursive: true, force: true });
     },
   };

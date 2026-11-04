@@ -13,13 +13,10 @@ import { BrainIndexer, type BrainRun } from "./index/brain.ts";
 import { HiddenIndex } from "./index/hidden.ts";
 import { CorpusService, type CorpusSnapshot } from "./index/watcher.ts";
 import { createLogger, type KeyValueStorage, type Logger } from "./log.ts";
+import { ProjectLifecycle, startSessionTracking } from "./lifecycle.ts";
 import { XerjClient, type IndexSummary } from "./node/client.ts";
-import {
-  ensureNode,
-  persistPort,
-  readPersistedPort,
-  type NodeHandle,
-} from "./node/supervisor.ts";
+import { NodeRuntime } from "./node/runtime.ts";
+import { type NodeHandle } from "./node/supervisor.ts";
 import {
   brainSpecs,
   dataRoot,
@@ -29,6 +26,7 @@ import {
   indexPrefix,
   isOverbroadRoot,
   memoryNamespace,
+  projectNodeDir,
   projectStateDir,
   webPrefix,
   type BrainSpec,
@@ -56,6 +54,8 @@ interface Runtime {
   phase: "starting" | "ready" | "error" | "disabled";
   binary: InstalledBinary | null;
   node: NodeHandle | null;
+  nodes: NodeRuntime | null;
+  lifecycle: ProjectLifecycle | null;
   corpus: CorpusService | null;
   search: SearchService | null;
   memory: MemoryStore | null;
@@ -97,6 +97,8 @@ export default Plugin.define({
       phase: "starting",
       binary: null,
       node: null,
+      nodes: null,
+      lifecycle: null,
       corpus: null,
       search: null,
       memory: null,
@@ -139,9 +141,22 @@ export default Plugin.define({
     }
 
     const memoryNs = memoryNamespace(projectRoot);
+    // One node directory per project, so two projects (or two locations of the
+    // same project) never share a process, a port, or an idle timer.
+    const nodeDir = projectNodeDir(root, prefix);
+
+    const idleSnapshot = (): number | null => {
+      const idle = runtime.lifecycle?.snapshot();
+      return idle?.idleAt ?? null;
+    };
 
     const snapshot = async (): Promise<StatusSnapshot> => {
       const usage = ledger.snapshot();
+      // Only probe the node directory when no live handle exists: a healthy
+      // process never pays for detection, and an idle-stopped one reports
+      // whether another OpenCode process has since started the node.
+      const detection = runtime.node === null ? await runtime.nodes?.detect() : null;
+      const runtimeState = runtime.nodes?.snapshot.state ?? "stopped";
       const base: StatusSnapshot = {
         pluginVersion: PLUGIN_VERSION,
         updatedAt: Date.now(),
@@ -150,6 +165,11 @@ export default Plugin.define({
           baseUrl: runtime.node?.baseUrl ?? null,
           serverVersion: runtime.node?.version ?? null,
           spawned: runtime.node?.spawned ?? false,
+          state:
+            runtimeState === "stopped" && detection?.running ? "running" : runtimeState,
+          pid: runtime.node?.pid ?? detection?.pid ?? null,
+          idleAt: idleSnapshot(),
+          sessions: runtime.lifecycle?.snapshot().sessions ?? 0,
           error: runtime.error,
         },
         binary: {
@@ -235,10 +255,12 @@ export default Plugin.define({
     const registration = await ctx.rpc.register(XerjRpc, {
       status: async () => {
         counters.noteRpc();
+        runtime.lifecycle?.touch();
         return snapshot();
       },
       reindex: async () => {
         counters.noteRpc();
+        runtime.lifecycle?.touch();
         await Promise.all([
           runtime.corpus?.reindex(),
           runtime.web?.reindex(),
@@ -255,12 +277,14 @@ export default Plugin.define({
       },
       remember: async (input) => {
         counters.noteRpc();
+        runtime.lifecycle?.touch();
         if (!runtime.memory) throw new Error("XERJ memory is not available yet");
         const args = input as { text: string };
         return runtime.memory.remember({ text: args.text });
       },
       search: async (input) => {
         counters.noteRpc();
+        runtime.lifecycle?.touch();
         if (!runtime.search) throw new Error("XERJ search is not available yet");
         const args = input as { query: string };
         const result = await runtime.search.search(args.query);
@@ -301,6 +325,7 @@ export default Plugin.define({
 
     await ctx.tool.hook("execute.after", async (event) => {
       if (event.status !== "completed") return;
+      runtime.lifecycle?.touch(event.sessionID);
 
       // Any tool that fetched a URL (webfetch, MCP extract, search) can spool
       // its text. A short result is an error or a list, not a document. The
@@ -391,87 +416,40 @@ export default Plugin.define({
 
     const shutdown = new AbortController();
 
-    const bootstrap = async (): Promise<void> => {
-      try {
-        if (!info && !config.binary.path) return;
+    let client: XerjClient | null = null;
+    let indexerStart: Promise<void> | null = null;
 
-        // Project state is created before the first tool call so a read-only
-        // workspace surfaces here, not mid-session.
-        await ensureProjectState(projectRoot);
+    /** Starts the indexers for a live node; idempotent per node lifetime. */
+    const startIndexers = (handle: NodeHandle): Promise<void> => {
+      if (indexerStart) return indexerStart;
 
-        // An explicit path wins over download and detection: the user already
-        // built or installed a binary, possibly for a platform we do not ship.
-        const binary = config.binary.path
-          ? await externalBinary(config.binary.path, logger)
-          : info
-            ? await ensureBinary({
-                root,
-                requested: config.binary.version,
-                platform: process.platform,
-                info,
-                logger,
-              })
-            : null;
-        if (!binary) return;
-        runtime.binary = binary;
-
-        runtime.node = await ensureNode({
-          binaryPath: binary.path,
-          binaryVersion: binary.version,
-          root,
-          dataDir: config.node.dataDir,
-          preferredPort: config.node.port,
-          persistedPort: await readPersistedPort(root),
-          explicitUrl: config.node.url,
-          onPort: (port) => persistPort(root, port),
-          logger,
-        });
-        if (runtime.node.spawned) counters.noteSpawn();
-
-        const client = new XerjClient(runtime.node.baseUrl, undefined, observer);
-        runtime.search = new SearchService(
-          client,
-          [
+      indexerStart = (async () => {
+        if (runtime.corpus === null && !overbroad) {
+          runtime.corpus = new CorpusService({
+            binaryPath: runtime.binary?.path ?? "",
+            nodeUrl: handle.baseUrl,
+            projectRoot,
             prefix,
-            webPrefix(projectRoot),
-            externalPrefix(projectRoot),
-            ...runtime.brains.map((brain) => brain.prefix),
-          ],
-          logger,
-          projectRoot,
-          new BrainGraph({ client, brains: runtime.brains, logger }),
-          runtime.brains,
-          runtime.hiddenRoots.length > 0 ? `${prefix}-hidden-docs` : null,
-        );
-        runtime.memory = new MemoryStore(client, memoryNamespace(projectRoot), logger);
-        runtime.anomaly = new AnomalyService(client, logger);
-
-        if (config.memory.enabled) {
-          startCompactionCapture({
-            events: ctx.event,
-            memory: runtime.memory,
-            signal: shutdown.signal,
+            dataRoot: root,
+            config,
+            storage,
             logger,
+            onRun: () => counters.noteIndexRun(),
+            onChange: () => {
+              runtime.search?.invalidate();
+              void registration.events
+                .emit("updated", { updatedAt: Date.now() })
+                .catch(() => {});
+            },
           });
+          await runtime.corpus.start();
         }
 
-        if (config.remote.enabled) {
-          const spool = new RemoteSpool({
-            root,
-            projectRoot,
-            prefix: webPrefix(projectRoot),
-            externalPrefix: externalPrefix(projectRoot),
-            maxBytes: config.remote.maxBytes,
-            client,
-            logger,
-          });
-          await spool.init();
-          runtime.spool = spool;
-
+        if (runtime.web === null && runtime.spool && client) {
           runtime.web = new CorpusService({
-            binaryPath: runtime.binary.path,
-            nodeUrl: runtime.node.baseUrl,
-            projectRoot: spool.directory,
+            binaryPath: runtime.binary?.path ?? "",
+            nodeUrl: handle.baseUrl,
+            projectRoot: runtime.spool.directory,
             prefix: webPrefix(projectRoot),
             dataRoot: root,
             config,
@@ -488,32 +466,7 @@ export default Plugin.define({
           await runtime.web.start();
         }
 
-        runtime.phase = "ready";
-        logger.info("xerj is ready", {
-          url: runtime.node.baseUrl,
-          version: runtime.node.version,
-        });
-
-        runtime.corpus = new CorpusService({
-          binaryPath: runtime.binary.path,
-          nodeUrl: runtime.node.baseUrl,
-          projectRoot,
-          prefix,
-          dataRoot: root,
-          config,
-          storage,
-          logger,
-          onRun: () => counters.noteIndexRun(),
-          onChange: () => {
-            runtime.search?.invalidate();
-            void registration.events
-              .emit("updated", { updatedAt: Date.now() })
-              .catch(() => {});
-          },
-        });
-        if (!overbroad) await runtime.corpus.start();
-
-        if (runtime.hiddenRoots.length > 0) {
+        if (runtime.hidden === null && runtime.hiddenRoots.length > 0 && client) {
           runtime.hidden = new HiddenIndex({
             client,
             projectRoot,
@@ -533,10 +486,10 @@ export default Plugin.define({
           if (config.index.auto && !overbroad) await runtime.hidden.start();
         }
 
-        if (runtime.brains.length > 0) {
+        if (runtime.brains.length > 0 && !overbroad) {
           runtime.brain = new BrainIndexer({
-            binaryPath: binary.path,
-            nodeUrl: runtime.node.baseUrl,
+            binaryPath: runtime.binary?.path ?? "",
+            nodeUrl: handle.baseUrl,
             dataRoot: root,
             config,
             specs: runtime.brains,
@@ -553,10 +506,159 @@ export default Plugin.define({
 
           // One-shot: graph indexing cannot run in watch mode. `index.auto`
           // gates startup runs only; an explicit reindex still works.
-          if (config.index.auto && !overbroad) void runtime.brain.runAll();
+          if (config.index.auto) void runtime.brain.runAll();
         }
+      })().finally(() => {
+        indexerStart = null;
+      });
 
-        await registration.events.emit("updated", { updatedAt: Date.now() });
+      return indexerStart;
+    };
+
+    /** Stops every indexer process; the node itself is stopped by the caller. */
+    const stopIndexers = async (): Promise<void> => {
+      indexerStart = null;
+      const corpus = runtime.corpus;
+      const web = runtime.web;
+      const hidden = runtime.hidden;
+      runtime.corpus = null;
+      runtime.web = null;
+      runtime.hidden = null;
+
+      await Promise.all([corpus?.stop(), web?.stop(), hidden?.stop()]);
+    };
+
+    // The node is project-scoped and managed through one runtime: it can be
+    // started, stopped by the idle timer, and restarted by the next request.
+    const nodes = new NodeRuntime({
+      nodeDir,
+      projectRoot,
+      preferredPort: config.node.port,
+      dataDir: config.node.dataDir,
+      explicitUrl: config.node.url,
+      logger,
+      binary: () => runtime.binary,
+      onSpawned: () => counters.noteSpawn(),
+      onStart: (handle) => {
+        runtime.node = handle;
+        client?.setBaseUrl(handle.baseUrl);
+        // A start counts as activity; otherwise an immediate idle check would
+        // shut down a node that was just brought up for a request.
+        runtime.lifecycle?.touch();
+        void startIndexers(handle);
+      },
+    });
+    runtime.nodes = nodes;
+
+    const lifecycle = new ProjectLifecycle({
+      nodeDir,
+      idleMs: config.node.idleMs,
+      enabled: config.node.shutdownOnIdle && !config.node.url,
+      logger,
+      onIdle: async () => {
+        // The timer keeps firing after the node is gone; act only if a node is
+        // actually up, or a stopped project would log an idle stop every tick.
+        if (nodes.snapshot.state !== "running") return;
+
+        await stopIndexers();
+        await nodes.stop("idle");
+        await registration.events
+          .emit("updated", { updatedAt: Date.now() })
+          .catch(() => {});
+      },
+    });
+    runtime.lifecycle = lifecycle;
+    lifecycle.start();
+    startSessionTracking(ctx.event, lifecycle, shutdown.signal, logger);
+
+    const bootstrapRuntime = async (): Promise<void> => {
+      // An explicit path wins over download and detection: the user already
+      // built or installed a binary, possibly for a platform we do not ship.
+      const binary = config.binary.path
+        ? await externalBinary(config.binary.path, logger)
+        : info
+          ? await ensureBinary({
+              root,
+              requested: config.binary.version,
+              platform: process.platform,
+              info,
+              logger,
+            })
+          : null;
+      if (!binary) return;
+      runtime.binary = binary;
+
+      // The client resolves the node on every call, so services can be built
+      // before the node exists and keep working across an idle restart.
+      client = new XerjClient(
+        `http://127.0.0.1:${config.node.port}`,
+        undefined,
+        observer,
+        {
+          ensure: async () => (await nodes.ensure()).baseUrl,
+          invalidate: () => nodes.invalidate(),
+        },
+      );
+      runtime.search = new SearchService(
+        client,
+        [
+          prefix,
+          webPrefix(projectRoot),
+          externalPrefix(projectRoot),
+          ...runtime.brains.map((brain) => brain.prefix),
+        ],
+        logger,
+        projectRoot,
+        new BrainGraph({ client, brains: runtime.brains, logger }),
+        runtime.brains,
+        runtime.hiddenRoots.length > 0 ? `${prefix}-hidden-docs` : null,
+      );
+      runtime.memory = new MemoryStore(client, memoryNamespace(projectRoot), logger);
+      runtime.anomaly = new AnomalyService(client, logger);
+
+      if (config.remote.enabled) {
+        const spool = new RemoteSpool({
+          root,
+          projectRoot,
+          prefix: webPrefix(projectRoot),
+          externalPrefix: externalPrefix(projectRoot),
+          maxBytes: config.remote.maxBytes,
+          client,
+          logger,
+        });
+        await spool.init();
+        runtime.spool = spool;
+      }
+
+      // Subscribe before the node exists: a compaction can arrive while the
+      // node is starting, and the memory write re-ensures it.
+      if (config.memory.enabled && runtime.memory) {
+        startCompactionCapture({
+          events: ctx.event,
+          memory: runtime.memory,
+          signal: shutdown.signal,
+          logger,
+        });
+      }
+
+      runtime.node = await nodes.ensure();
+      await startIndexers(runtime.node);
+
+      runtime.phase = "ready";
+      logger.info("xerj is ready", {
+        url: runtime.node.baseUrl,
+        version: runtime.node.version,
+      });
+    };
+
+    const bootstrap = async (): Promise<void> => {
+      try {
+        if (!info && !config.binary.path) return;
+
+        // Project state is created before the first tool call so a read-only
+        // workspace surfaces here, not mid-session.
+        await ensureProjectState(projectRoot);
+        await bootstrapRuntime();
       } catch (error) {
         runtime.phase = "error";
         runtime.error = error instanceof Error ? error.message : String(error);
@@ -568,23 +670,29 @@ export default Plugin.define({
       }
     };
 
-
     void bootstrap();
 
     return () => {
       shutdown.abort();
-      const corpus = runtime.corpus;
-      const web = runtime.web;
-      const hidden = runtime.hidden;
-      runtime.corpus = null;
-      runtime.web = null;
-      runtime.hidden = null;
 
-      void Promise.all([corpus?.stop(), web?.stop(), hidden?.stop()])
-        .then(() => ledger.flush())
-        .then(() => logger.flush())
-        .then(() => registration.dispose())
-        .catch(() => {});
+      void (async () => {
+        try {
+          await runtime.lifecycle?.stop();
+          await stopIndexers();
+
+          // This process's sessions are over. Stop the node only when no peer
+          // process is still serving the project; otherwise its own idle timer
+          // decides, and stopping here would break its next request.
+          const peers = (await runtime.lifecycle?.peers()) ?? 0;
+          if (peers === 0) await runtime.nodes?.stop("shutdown");
+
+          await ledger.flush();
+          await logger.flush();
+          await registration.dispose();
+        } catch {
+          // Shutdown must never throw into the host.
+        }
+      })();
     };
   },
 });

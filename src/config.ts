@@ -22,6 +22,10 @@ export interface NodeOptions {
   /** Preferred ES-compatible port; the supervisor may advance it. */
   readonly port: number;
   readonly dataDir: string | null;
+  /** Stop this project's node when nothing has used it for this long. */
+  readonly idleMs: number;
+  /** Set false to keep the node running after the last session goes quiet. */
+  readonly shutdownOnIdle: boolean;
 }
 
 export interface IndexOptions {
@@ -87,7 +91,13 @@ export interface LoadedConfig {
 
 export const DEFAULT_CONFIG: Config = {
   binary: { version: "auto", path: null, target: null, libc: "musl" },
-  node: { url: null, port: 9200, dataDir: null },
+  node: {
+    url: null,
+    port: 9200,
+    dataDir: null,
+    idleMs: 1_800_000,
+    shutdownOnIdle: true,
+  },
   index: {
     auto: true,
     watch: true,
@@ -145,6 +155,20 @@ export function loadConfig(
       url: readString(node.url, null) ?? (envUrl ? envUrl : null),
       port: readInteger(node.port, DEFAULT_CONFIG.node.port, 1, 65_535, "node.port", warnings),
       dataDir: readString(node.dataDir, null),
+      idleMs: readInteger(
+        node.idleMs,
+        DEFAULT_CONFIG.node.idleMs,
+        60_000,
+        86_400_000,
+        "node.idleMs",
+        warnings,
+      ),
+      shutdownOnIdle: readBoolean(
+        node.shutdownOnIdle,
+        DEFAULT_CONFIG.node.shutdownOnIdle,
+        "node.shutdownOnIdle",
+        warnings,
+      ),
     },
     index: {
       auto: readBoolean(index.auto, DEFAULT_CONFIG.index.auto, "index.auto", warnings),

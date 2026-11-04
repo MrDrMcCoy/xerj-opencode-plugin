@@ -12,8 +12,7 @@ import { detectRuntime } from "../src/binary/detect.ts";
 import { ensureBinary, probeBinaryVersion } from "../src/binary/manager.ts";
 import { createLogger } from "../src/log.ts";
 import { XerjClient } from "../src/node/client.ts";
-import { ensureNode, stopNode } from "../src/node/supervisor.ts";
-
+import { NodeRuntime } from "../src/node/runtime.ts";
 const memory = new Map<string, unknown>();
 const storage = {
   get: async (key: string) => memory.get(key),
@@ -40,14 +39,17 @@ try {
   const reported = await probeBinaryVersion(binary.path);
   console.log("reported version", reported);
 
-  const node = await ensureNode({
-    binaryPath: binary.path,
-    binaryVersion: binary.version,
-    root,
+  // One project node directory; the runtime attaches on the second run.
+  const nodes = new NodeRuntime({
+    nodeDir: join(root, "node"),
+    projectRoot: root,
     preferredPort: 9500,
-    persistedPort: null,
+    dataDir: null,
+    explicitUrl: null,
     logger,
+    binary: () => binary,
   });
+  const node = await nodes.ensure();
   console.log("node", node);
 
   const client = new XerjClient(node.baseUrl);
@@ -55,22 +57,24 @@ try {
   console.log("health", await client.health());
   console.log("indices", await client.indices());
 
-  const again = await ensureNode({
-    binaryPath: binary.path,
-    binaryVersion: binary.version,
-    root,
+  const again = new NodeRuntime({
+    nodeDir: join(root, "node"),
+    projectRoot: root,
     preferredPort: 9500,
-    persistedPort: node.port,
+    dataDir: null,
+    explicitUrl: null,
     logger,
+    binary: () => binary,
   });
-  console.log("attach existing", again.port, again.spawned);
+  const attached = await again.ensure();
+  console.log("attach existing", attached.port, attached.spawned);
 
-  if (again.port !== node.port || again.spawned) {
-    throw new Error("the second ensureNode did not attach to the first node");
+  if (attached.port !== node.port || attached.spawned) {
+    throw new Error("the second runtime did not attach to the first node");
   }
 
   // The node is detached by design; the smoke run owns this one.
-  await stopNode(root);
+  await nodes.stop("smoke");
 } finally {
   await rm(root, { recursive: true, force: true });
 }
