@@ -25,6 +25,92 @@ const SHORT_FLAG = /^-[A-Za-z]$/;
 
 /** Splits a shell command into simple commands, one token list each. */
 export function shellCommands(command: string): string[][] {
+  return tokenize(substituteCommands(command));
+}
+
+/**
+ * Inlines `$(...)` and backtick substitutions as commands that run before the
+ * outer one. A substitution is a real command, so a file it reads is a
+ * reference; leaving it inside a token would hide it. Single-quoted text is
+ * literal and is copied verbatim.
+ */
+export function substituteCommands(command: string): string {
+  const bodies: string[] = [];
+  let outer = "";
+  let index = 0;
+
+  while (index < command.length) {
+    const char = command[index] ?? "";
+
+    if (char === "'") {
+      const end = command.indexOf("'", index + 1);
+      const stop = end === -1 ? command.length : end + 1;
+      outer += command.slice(index, stop);
+      index = stop;
+      continue;
+    }
+
+    if (char === "$" && command[index + 1] === "(") {
+      const end = matchParen(command, index + 1);
+      bodies.push(command.slice(index + 2, end));
+      outer += " ";
+      index = end + 1;
+      continue;
+    }
+
+    if (char === "`") {
+      const end = matchBacktick(command, index);
+      bodies.push(command.slice(index + 1, end));
+      outer += " ";
+      index = end + 1;
+      continue;
+    }
+
+    outer += char;
+    index += 1;
+  }
+
+  // Substitutions expand before the command they belong to runs.
+  return bodies.length === 0 ? outer : `${bodies.join(" ; ")} ; ${outer}`;
+}
+
+/** Index of the `)` that closes the `(` at `open`, or end of input. */
+function matchParen(command: string, open: number): number {
+  let depth = 0;
+  let quote: "'" | '"' | null = null;
+
+  for (let index = open; index < command.length; index += 1) {
+    const char = command[index] ?? "";
+    if (quote !== null) {
+      if (char === quote) quote = null;
+    } else if (char === "'" || char === '"') {
+      quote = char;
+    } else if (char === "(") {
+      depth += 1;
+    } else if (char === ")") {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+  }
+
+  return command.length;
+}
+
+/** Index of the backtick that closes the one at `open`, or end of input. */
+function matchBacktick(command: string, open: number): number {
+  for (let index = open + 1; index < command.length; index += 1) {
+    const char = command[index] ?? "";
+    if (char === "\\") {
+      index += 1;
+      continue;
+    }
+    if (char === "`") return index;
+  }
+
+  return command.length;
+}
+
+function tokenize(command: string): string[][] {
   const commands: string[][] = [];
   let current: string[] = [];
   let token = "";
@@ -83,6 +169,19 @@ export function shellCommands(command: string): string[][] {
     }
 
     if (char === "\n" || char === ";" || char === "|" || char === "&") {
+      flushCommand();
+      continue;
+    }
+
+    // A subshell starts a new command scope; treat the parens as separators so
+    // `(cd dir && cat a)` resolves against `dir`. A closing paren ends the
+    // current token, which may sit right against it (`cat a)`).
+    if (char === ")") {
+      flushCommand();
+      continue;
+    }
+
+    if (char === "(" && !hasToken) {
       flushCommand();
       continue;
     }
@@ -189,6 +288,24 @@ function candidatesFrom(command: string, base: string): string[] {
         currentCwd = isAbsolute(target)
           ? resolve(target)
           : resolve(currentCwd, target);
+      }
+      continue;
+    }
+
+    // `xargs -a list` reads arguments (paths) from a file, so that file is a
+    // reference. Arguments xargs receives on stdin cannot be known here.
+    if (basename(word) === "xargs") {
+      for (let cursor = index; cursor < tokens.length; cursor += 1) {
+        const argument = tokens[cursor] ?? "";
+        if (argument === "-a" || argument === "--arg-file") {
+          const value = tokens[cursor + 1];
+          if (value !== undefined) {
+            add(value);
+            cursor += 1;
+          }
+        } else if (argument.startsWith("--arg-file=")) {
+          add(argument.slice("--arg-file=".length));
+        }
       }
       continue;
     }

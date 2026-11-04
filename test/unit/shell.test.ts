@@ -94,6 +94,36 @@ describe("shellReadPaths", () => {
     expect(await shellReadPaths("cat absent.md", cwd)).toEqual([]);
   });
 
+  test("indexes files read inside a command substitution", async () => {
+    expect(await shellReadPaths("echo $(cat b.md) a.md", cwd)).toEqual([
+      join(cwd, "b.md"),
+      join(cwd, "a.md"),
+    ]);
+    expect(await shellReadPaths("echo `cat b.md`", cwd)).toEqual([
+      join(cwd, "b.md"),
+    ]);
+  });
+
+  test("does not expand inside single quotes", async () => {
+    expect(await shellReadPaths("echo '$(cat b.md)'", cwd)).toEqual([]);
+  });
+
+  test("indexes the argument file xargs reads from", async () => {
+    expect(await shellReadPaths("xargs -a b.md echo", cwd)).toEqual([
+      join(cwd, "b.md"),
+    ]);
+    expect(await shellReadPaths("xargs --arg-file=b.md echo", cwd)).toEqual([
+      join(cwd, "b.md"),
+    ]);
+  });
+
+  test("follows cd inside a subshell", async () => {
+    await writeFile(join(cwd, "folder", "inner.md"), "i");
+    expect(await shellReadPaths("(cd folder && cat inner.md)", cwd)).toEqual([
+      join(cwd, "folder", "inner.md"),
+    ]);
+  });
+
   test("caps how many files one command can produce", async () => {
     const many = Array.from({ length: 12 }, (_, index) => "a.md").join(" ");
     const paths = await shellReadPaths(`cat ${many}`, cwd);
