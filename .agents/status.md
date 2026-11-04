@@ -340,6 +340,17 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-04: Post-release audit. OpenCode restarted and now runs the
+  patched 0.6.0 epoch: heartbeats carry `sessions` (1 live session), the
+  ledger counted queries and hits again (14 queries, 12 hits, 86% hit
+  rate), and the log rings are clean since the restart — the
+  `autoindex exited 1` contention storm is gone. Node stopped on the old
+  process teardown and restarted cleanly with the index intact. Verified
+  end to end that an edit triggers a pass within seconds; a no-change
+  pass replays the previous run document, so an unchanged `lastRun` is
+  expected, not staleness. CI green on the pushed main (37 s); v0.6.0
+  tagged and released on GitHub.
+
 - 2026-11-04: Second audit of the loaded instance. The node is healthy
   (port 9200, pid live, cluster green, 844 docs, generation 35), but the
   running server still executes the pre-patch module: heartbeats carry no
