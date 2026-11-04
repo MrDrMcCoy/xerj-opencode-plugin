@@ -247,4 +247,4 @@ const definition = {
 
 export const XerjRpc = Rpc.define(definition);
 
-export const PLUGIN_VERSION = "0.4.3";
+export const PLUGIN_VERSION = "0.4.4";
