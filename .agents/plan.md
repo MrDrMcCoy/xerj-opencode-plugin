@@ -377,8 +377,13 @@ same URL replaces its earlier file. A second watcher runs
 `autoindex <spool dir> --prefix xop-web-<hash> --no-graph`; both watchers keep
 separate journal records because the storage key includes the prefix.
 
-Bounded by `remote.maxBytes`; truncated on a character boundary; bearer tokens
-and `sk-`/`ghp_`/`xox` keys are redacted before writing.
+Bounded by `remote.maxBytes`; truncated on a character boundary. Redaction
+covers bearer tokens, `sk-`/`ghp_`/`xox`/`AKIA` keys, private key blocks, and
+key/value config shapes (`password`, `token`, `secret`, `api_key`, and the
+like). Credential files are never ingested: `.env*`, `*.pem`/`*.key`/`*.p12`,
+`service.json`, `credentials.json`, `auth.json`, `id_rsa`, and anything under
+`.ssh`, `.aws`, `.gnupg`, `.kube`, or `.docker`. The name check runs before the
+file is read, and the same filters cover hidden and external ingests.
 
 External files go through `_bulk` into `xop-ext-<hash>-docs` (autoindex refuses
 a single file). The mapping declares `body` as `semantic_text` so passages work;
@@ -536,6 +541,12 @@ exists. The id is the hash of the text, so a repeated event is idempotent.
 IDs are `sha256(namespace + text)[0..16]`, so re-remembering the same fact is
 idempotent. Metadata: `kind`, `topic`, `source`, `sessionID`, `created`.
 
+Memory predates the node-scoped layout at `<data root>/data/`, which was the
+old global engine data dir. `migrateMemoryIndex` copies the project's memory
+index into the project node's data dir on setup when the destination is empty.
+A node that is already running has enumerated its indices, so the migration
+stops it once; the next `ensure()` re-attaches with the copied memory visible.
+
 Reads:
 
 - Prompt-time recall, top 3, `recency_weight: 0.2`, injected under
@@ -563,6 +574,12 @@ Counters for index runs, node spawns, 429s, and injection counts are tracked in
 `src/stats/counters.ts`, reported in the panel's usage section and in the
 status snapshot. They are per-process: they reset on restart, and the UI says
 so.
+
+`ctx.storage` is one namespace for the whole server, and the plugin loads once
+per open location, so the lifetime ledger and the log ring include the project
+prefix in their keys (`stats/lifetime:<prefix>`, `log/ring:<prefix>`). Without
+that, two locations — including two projects — overwrite each other's counters
+and warnings.
 
 Definitions:
 

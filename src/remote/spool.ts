@@ -184,14 +184,37 @@ export function isTextPath(filePath: string): boolean {
   return TEXT_EXTENSIONS.has(extname(filePath).toLowerCase());
 }
 
-const SECRET_FILES = new Set([".env", ".netrc", ".npmrc", ".pypirc"]);
-const SECRET_EXTENSIONS = /\.(pem|key|p12|pfx|crt)$/i;
+const SECRET_FILES = new Set([
+  ".env",
+  ".netrc",
+  ".npmrc",
+  ".pypirc",
+  ".git-credentials",
+  ".htpasswd",
+  ".pgpass",
+  "auth.json",
+  "credentials.json",
+  "secrets.json",
+  "service.json",
+  "token.json",
+  "id_rsa",
+  "id_dsa",
+  "id_ecdsa",
+  "id_ed25519",
+]);
+const SECRET_EXTENSIONS = /\.(pem|key|p12|pfx|crt|cer)$/i;
+/** Directories that hold credentials; nothing inside them is indexed. */
+const SECRET_DIRECTORIES = new Set([".ssh", ".aws", ".gnupg", ".kube", ".docker"]);
 
 /** Secrets are not indexed even when a tool reads them. */
 export function isSecretPath(filePath: string): boolean {
   const name = basename(filePath).toLowerCase();
   if (SECRET_FILES.has(name) || name.startsWith(".env.")) return true;
-  return SECRET_EXTENSIONS.test(name);
+  if (SECRET_EXTENSIONS.test(name)) return true;
+
+  return resolve(filePath)
+    .split(sep)
+    .some((part) => SECRET_DIRECTORIES.has(part.toLowerCase()));
 }
 
 export function digest(value: string): string {
@@ -207,11 +230,24 @@ export function truncate(text: string, maxBytes: number): string {
   return buffer.toString("utf8").replace(/\uFFFD$/, "");
 }
 
-/** Best effort: fetched pages can carry keys in prose or URLs. */
+const SENSITIVE_KEY =
+  "pass(?:word|wd)?|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret|auth|credential";
+
+/** Best effort: fetched pages and external files can carry keys in prose, URLs, or config. */
 export function redact(text: string): string {
   return text
+    .replace(
+      /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
+      "[redacted private key]",
+    )
+    .replace(
+      new RegExp(`((?:["']?(?:${SENSITIVE_KEY})["']?)\\s*[:=]\\s*["'])([^"'\\s]{4,})`, "gi"),
+      "$1[redacted]",
+    )
+    .replace(new RegExp(`^\\s*(${SENSITIVE_KEY})\\s*:\\s*\\S+`, "gim"), "$1: [redacted]")
     .replace(/(Bearer\s+)[A-Za-z0-9._-]{8,}/g, "$1[redacted]")
     .replace(/\bsk-[A-Za-z0-9_-]{16,}/g, "sk-[redacted]")
     .replace(/\bghp_[A-Za-z0-9]{20,}/g, "ghp_[redacted]")
-    .replace(/\bxox[baprs]-[A-Za-z0-9-]{10,}/g, "xox[redacted]");
+    .replace(/\bxox[baprs]-[A-Za-z0-9-]{10,}/g, "xox[redacted]")
+    .replace(/\bAKIA[0-9A-Z]{16}\b/g, "AKIA[redacted]");
 }

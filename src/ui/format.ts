@@ -131,7 +131,7 @@ export function panelSections(snapshot: StatusSnapshot, now: number): PanelSecti
     {
       title: "Index",
       lines: [
-        `${index.state} · ${index.prefix}`,
+        `${indexLabel(index.state)} · ${index.prefix}`,
         [
           `${formatCount(index.docs)} docs`,
           formatBytes(index.bytes),
@@ -231,6 +231,12 @@ function healthLines(snapshot: StatusSnapshot): string[] {
   ];
 
   return lines.length === 0 ? ["no warnings"] : lines.slice(-6);
+}
+
+// `shared` means another plugin instance owns the watcher for this project; the
+// corpus is still healthy, so do not surface the ownership detail as a state.
+function indexLabel(state: string): string {
+  return state === "shared" ? "watching (shared)" : state;
 }
 
 function marker(snapshot: StatusSnapshot): string {

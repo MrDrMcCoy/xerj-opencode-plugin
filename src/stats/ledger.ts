@@ -30,6 +30,8 @@ export interface LedgerSnapshot {
 
 export interface LedgerOptions {
   readonly storage: KeyValueStorage;
+  /** Storage key; scoped per project so one panel shows one project's usage. */
+  readonly key: string;
   readonly projectRoot: string;
   readonly bytesPerToken: number;
   readonly maxBaselineBytes: number;
@@ -56,7 +58,6 @@ interface LifetimeState {
   readonly read: Map<string, number>;
 }
 
-const STORAGE_KEY = "stats/lifetime";
 const MAX_TRACKED_FILES = 5000;
 const FLUSH_DELAY_MS = 2_000;
 
@@ -183,7 +184,7 @@ export class Ledger {
   }
 
   private async loadFromStorage(): Promise<void> {
-    const stored = await this.options.storage.get(STORAGE_KEY).catch(() => undefined);
+    const stored = await this.options.storage.get(this.options.key).catch(() => undefined);
     if (typeof stored !== "object" || stored === null) return;
 
     const record = stored as Record<string, unknown>;
@@ -284,7 +285,7 @@ export class Ledger {
         .map(([path, amount]) => [path, Number.isFinite(amount) ? amount : -1]),
     };
 
-    await this.options.storage.set(STORAGE_KEY, payload as never).catch((error: unknown) => {
+    await this.options.storage.set(this.options.key, payload as never).catch((error: unknown) => {
       this.options.logger.debug("could not persist stats", String(error));
     });
   }

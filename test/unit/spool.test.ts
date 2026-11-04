@@ -4,7 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Logger } from "../../src/log.ts";
 import { NodeRequestError, type XerjClient } from "../../src/node/client.ts";
-import { digest, redact, RemoteSpool, truncate } from "../../src/remote/spool.ts";
+import {
+  digest,
+  isSecretPath,
+  redact,
+  RemoteSpool,
+  truncate,
+} from "../../src/remote/spool.ts";
 
 const root = await mkdtemp(join(tmpdir(), "xerj-spool-"));
 afterAll(async () => rm(root, { recursive: true, force: true }));
@@ -44,8 +50,44 @@ describe("redact", () => {
     expect(masked).toContain("Bearer [redacted]");
   });
 
+  test("masks credentials in config shapes", () => {
+    const text = [
+      '{"password": "hunter2hunter2", "api_key": "abcd1234abcd1234"}',
+      "token: abcdef1234567890",
+      "aws = AKIAABCDEFGHIJKLMNOP",
+    ].join("\n");
+    const masked = redact(text);
+
+    expect(masked).not.toContain("hunter2hunter2");
+    expect(masked).not.toContain("abcd1234abcd1234");
+    expect(masked).not.toContain("abcdef1234567890");
+    expect(masked).not.toContain("AKIAABCDEFGHIJKLMNOP");
+    expect(masked).toContain("[redacted]");
+  });
+
+  test("masks a whole private key block", () => {
+    const key = "-----BEGIN RSA PRIVATE KEY-----\nMIIEow\n-----END RSA PRIVATE KEY-----";
+    expect(redact(`before\n${key}\nafter`)).toBe(
+      "before\n[redacted private key]\nafter",
+    );
+  });
+
   test("leaves ordinary prose alone", () => {
     expect(redact("a normal sentence")).toBe("a normal sentence");
+  });
+});
+
+describe("isSecretPath", () => {
+  test("refuses credential files and directories", () => {
+    expect(isSecretPath("/data/opencode/service.json")).toBe(true);
+    expect(isSecretPath("/home/u/.ssh/id_rsa")).toBe(true);
+    expect(isSecretPath("/home/u/.aws/credentials")).toBe(true);
+    expect(isSecretPath("/repo/.env.local")).toBe(true);
+  });
+
+  test("allows an ordinary source file", () => {
+    expect(isSecretPath("/repo/src/index.ts")).toBe(false);
+    expect(isSecretPath("/repo/docs/architecture.md")).toBe(false);
   });
 });
 

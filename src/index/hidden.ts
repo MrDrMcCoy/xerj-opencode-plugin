@@ -14,7 +14,7 @@ import { basename, join, relative, resolve, sep } from "node:path";
 import type { Logger } from "../log.ts";
 import { NodeRequestError, type XerjClient } from "../node/client.ts";
 import type { DocumentRoot } from "../paths.ts";
-import { isSecretPath, isTextPath } from "../remote/spool.ts";
+import { isSecretPath, isTextPath, redact } from "../remote/spool.ts";
 
 export interface HiddenIndexOptions {
   readonly client: XerjClient;
@@ -242,7 +242,7 @@ export class HiddenIndex {
         continue;
       }
 
-      if (!entry.isFile() || !isTextPath(entry.name) || isSecretPath(entry.name)) {
+      if (!entry.isFile() || !isTextPath(entry.name) || isSecretPath(absolute)) {
         continue;
       }
 
@@ -259,7 +259,7 @@ export class HiddenIndex {
         id: createHash("sha256").update(path).digest("hex").slice(0, 24),
         path,
         absolute,
-        body: raw,
+        body: redact(raw),
         mtime: info.mtimeMs,
       });
     }

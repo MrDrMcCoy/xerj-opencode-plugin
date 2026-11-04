@@ -32,17 +32,20 @@ const CONSOLE_LEVELS: ReadonlySet<LogLevel> = new Set(["warn", "error"]);
 export interface LoggerOptions {
   readonly maxEntries?: number;
   readonly echoToConsole?: boolean;
+  /** Storage key; scope it per project so warnings do not cross projects. */
+  readonly key?: string;
 }
 
 export function createLogger(storage: KeyValueStorage, options: LoggerOptions = {}): Logger {
   const maxEntries = options.maxEntries ?? DEFAULT_MAX_ENTRIES;
   const echo = options.echoToConsole ?? true;
+  const key = options.key ?? LOG_KEY;
   let pending: Promise<void> = Promise.resolve();
   let ring: LogEntry[] = [];
 
   const load = async (): Promise<void> => {
     if (ring.length > 0) return;
-    const stored = await storage.get(LOG_KEY).catch(() => undefined);
+    const stored = await storage.get(key).catch(() => undefined);
     if (Array.isArray(stored)) {
       ring = stored.filter(isEntry).slice(-maxEntries);
     }
@@ -61,7 +64,7 @@ export function createLogger(storage: KeyValueStorage, options: LoggerOptions = 
       .then(load)
       .then(async () => {
         ring = [...ring, entry].slice(-maxEntries);
-        await storage.set(LOG_KEY, ring);
+        await storage.set(key, ring);
       })
       .catch(() => {
         // Logging must never break the caller.

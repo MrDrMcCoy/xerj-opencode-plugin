@@ -167,6 +167,16 @@ describe("panelSections", () => {
     expect(body).toContain("warn: retry");
   });
 
+  test("does not present shared watcher ownership as a state", () => {
+    const sections = panelSections(
+      snapshot({ index: { ...snapshot().index, state: "shared" } }),
+      NOW,
+    );
+    const index = sections.find((section) => section.title === "Index");
+
+    expect(index?.lines[0]).toContain("watching (shared)");
+  });
+
   test("lists configured brains with edges and freshness", () => {
     const sections = panelSections(
       snapshot({

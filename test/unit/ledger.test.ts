@@ -28,9 +28,13 @@ function store(): { data: Map<string, unknown>; storage: { get: (k: string) => P
   };
 }
 
-function ledger(storage: { get: (k: string) => Promise<unknown>; set: (k: string, v: unknown) => Promise<void> }): Ledger {
+function ledger(
+  storage: { get: (k: string) => Promise<unknown>; set: (k: string, v: unknown) => Promise<void> },
+  key = "stats/lifetime:test",
+): Ledger {
   return new Ledger({
     storage,
+    key,
     projectRoot: root,
     bytesPerToken: 4,
     maxBaselineBytes: 1000,
@@ -75,6 +79,21 @@ describe("Ledger", () => {
     const top = accounting.snapshot("s").topFiles;
     expect(top[0]).toEqual({ path: "x.txt", citations: 2, bytes: 10 });
     expect(top[1]).toEqual({ path: "y.txt", citations: 1, bytes: 20 });
+  });
+
+  test("keeps projects separate in one shared storage", async () => {
+    const { storage, data } = store();
+    const alpha = ledger(storage, "stats/lifetime:alpha");
+    const beta = ledger(storage, "stats/lifetime:beta");
+
+    await alpha.recordQuery("s", [], 10, 1);
+    await beta.recordQuery("s", [], 20, 0);
+    await alpha.flush();
+    await beta.flush();
+
+    const saved = (key: string) => data.get(key) as { queries: number; returned: number };
+    expect(saved("stats/lifetime:alpha")).toMatchObject({ queries: 1, returned: 10 });
+    expect(saved("stats/lifetime:beta")).toMatchObject({ queries: 1, returned: 20 });
   });
 
   test("does not double count a file cited twice", async () => {

@@ -42,6 +42,7 @@ import {
 } from "./rpc.ts";
 import { MemoryStore } from "./memory/store.ts";
 import { startCompactionCapture } from "./memory/capture.ts";
+import { migrateMemoryIndex } from "./memory/migrate.ts";
 import { RemoteSpool } from "./remote/spool.ts";
 import { shellReadPaths } from "./remote/shell.ts";
 import { BrainGraph } from "./search/brains.ts";
@@ -76,13 +77,17 @@ export default Plugin.define({
   async setup(ctx) {
     const { config, warnings } = loadConfig(ctx.options, process.env);
     const storage = asStorage(ctx.storage);
-    const logger = createLogger(storage);
-    for (const warning of warnings) logger.warn(warning);
 
     const root = dataRoot(environmentFrom(process.env));
     // The location may be a subdirectory of the project; index the project root
     // so a session opened in `docs/` does not create a second corpus.
     const projectRoot = ctx.location.project.canonical;
+    const prefix = indexPrefix(projectRoot);
+    // Plugin storage is shared by every location in this server, so log
+    // entries and usage counters must carry the project in their key.
+    const logger = createLogger(storage, { key: `log/ring:${prefix}` });
+    for (const warning of warnings) logger.warn(warning);
+
     const overbroad = isOverbroadRoot(projectRoot);
     const indexWarnings = [...warnings];
     if (overbroad) {
@@ -91,7 +96,6 @@ export default Plugin.define({
       indexWarnings.push(refusal);
       logger.warn(refusal);
     }
-    const prefix = indexPrefix(projectRoot);
     const brains = brainSpecs(projectRoot, config.index.brain);
     const hiddenRoots = documentRoots(projectRoot, config.index.hidden);
     const runtime: Runtime = {
@@ -116,6 +120,7 @@ export default Plugin.define({
 
     const ledger = new Ledger({
       storage,
+      key: `stats/lifetime:${prefix}`,
       projectRoot,
       bytesPerToken: config.stats.bytesPerToken,
       maxBaselineBytes: config.stats.maxBaselineBytes,
@@ -148,7 +153,8 @@ export default Plugin.define({
     // Index journals live beside the engine data they describe, so a node with
     // a new data dir always starts from a full pass instead of trusting a
     // journal that describes documents the engine no longer has.
-    const stateRoot = nodeDataDir(nodeDir);
+    const engineDataDir = config.node.dataDir ?? nodeDataDir(nodeDir);
+    const stateRoot = engineDataDir;
 
     const idleSnapshot = (): number | null => {
       const idle = runtime.lifecycle?.snapshot();
@@ -621,7 +627,7 @@ export default Plugin.define({
       runtime.memory = new MemoryStore(client, memoryNamespace(projectRoot), logger);
       runtime.anomaly = new AnomalyService(client, logger);
 
-      if (config.remote.enabled) {
+      if (config.remote.enabled && !overbroad) {
         const spool = new RemoteSpool({
           root,
           projectRoot,
@@ -644,6 +650,32 @@ export default Plugin.define({
           signal: shutdown.signal,
           logger,
         });
+      }
+
+      // A refused root gets no node at startup: nothing will be indexed and the
+      // process would only sit there until its idle timer. An explicit tool call
+      // still spawns one on demand through the client.
+      if (overbroad) {
+        runtime.phase = "ready";
+        logger.info("xerj is idle: the project root is too broad to index", { projectRoot });
+        return;
+      }
+
+      // Memory cannot be rebuilt from the corpus, so carry it over before the
+      // first start on a node data directory that predates the move. A node
+      // that is already up has loaded its index list, so it has to restart once
+      // for the copied index to appear.
+      const migrated = await migrateMemoryIndex(
+        join(root, "data"),
+        engineDataDir,
+        memoryNamespace(projectRoot),
+        logger,
+      ).catch((error: unknown) => {
+        logger.warn("could not migrate project memory", String(error));
+        return false;
+      });
+      if (migrated && (await nodes.detect()).running) {
+        await nodes.stop("memory migration");
       }
 
       runtime.node = await nodes.ensure();
