@@ -39,28 +39,74 @@ cited passages instead of whole files. Nothing leaves the machine.
 Only Linux x86_64 has been exercised end to end. The other release targets are
 selected, downloaded, and probed for execution, but not tested in CI.
 
-## Install
+## Install from a local checkout
+
+There is no published package. A checkout is the install source.
+
+```bash
+git clone https://github.com/xerj-org/xerj-opencode-plugin.git \
+  ~/src/xerj-opencode-plugin
+cd ~/src/xerj-opencode-plugin
+bun install      # dev dependencies; the host supplies @opencode/plugin
+```
+
+Then register the checkout in the project that should use it. An absolute path
+is the reliable form, because a relative `package` resolves against the project
+holding the config, not against this repository:
 
 ```jsonc
-// opencode.json
+// <project>/opencode.json
 {
   "plugins": [
     {
-      "package": "@mrdrmccoy/xerj-opencode-plugin",
+      "package": "/home/you/src/xerj-opencode-plugin",
       "options": {
-        "index": { "brain": [".agents"] }
+        "index": { "hidden": [".agents"] }
       }
     }
   ]
 }
 ```
 
-Until the first npm publish, use `"package": "./"` from a checkout. The
-scoped name above is the publish target, not yet a live package.
+Inside this repository `"package": "./"` does the same thing, since the config
+and the checkout share a directory. There is no build step: the plugin entry
+points are the TypeScript sources, which the host compiles when it loads them.
 
-Restart OpenCode once. The first start downloads XERJ, creates a data root,
-and builds the project index in the background. `xerj_status` reports when it
-is ready.
+Restart OpenCode once after adding the entry. The first start downloads XERJ,
+creates a data root, and builds the project index in the background.
+`xerj_status` reports when it is ready. Watch the plugin load with
+`opencode debug config` (it lists the config files that were read) and with the
+server log.
+
+## Where the config goes
+
+OpenCode reads two config documents and applies them in order:
+
+| Scope | Path | Notes |
+|---|---|---|
+| Global | `~/.config/opencode/opencode.jsonc` | Applies to every project. `$XDG_CONFIG_HOME` replaces `~/.config` when set. |
+| Project | `<project>/opencode.json` | Applies to that project only. |
+
+A directory holds one document: when both `opencode.json` and `opencode.jsonc`
+exist in the project, `opencode.json` wins. In a directory without
+`opencode.json`, `opencode.jsonc` is read instead. Both facts are what
+`opencode debug config` reports, which is the quickest way to check what a
+given project actually loads:
+
+```bash
+opencode debug config        # prints every config source with its path
+opencode debug paths         # prints the global config, data, cache, state dirs
+```
+
+Plugin options belong under the plugin entry, not at the document root:
+
+```jsonc
+{
+  "plugins": [
+    { "package": "/path/to/checkout", "options": { "context": { "enabled": false } } }
+  ]
+}
+```
 
 ## Configuration
 
@@ -183,13 +229,20 @@ restarts. The plugin never kills it on unload.
 
 ```bash
 bun install
-bun test test/unit
-npx tsc --noEmit
-bun scripts/smoke.ts   # download, spawn, attach, stop
+bun test test/unit        # pure functions, no node needed
+bun test test/integration # real node on a scratch data root (~5 s)
+bun scripts/smoke.ts      # download, spawn, attach, stop
+bun run typecheck
 ```
 
-The repo dogfoods its own plugin through `opencode.json` and uses `.agents` as
-the example brain.
+Integration tests need a XERJ binary once; it is cached in
+`~/.cache/opencode/xerj-int` (override with `XERJ_CACHE`, or point `XERJ_BIN`
+at an existing build). CI runs the unit suite on Ubuntu and the integration
+suite inside a container, preferring podman and falling back to docker.
+
+The repo dogfoods its own plugin through `opencode.json`: `.agents` is indexed
+both as a hidden corpus and as the example brain, which exercises the
+duplicate-collapse path in retrieval.
 
 ## License
 

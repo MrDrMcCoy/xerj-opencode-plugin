@@ -128,6 +128,9 @@ Updated: 2026-11-03
 - CI exists at `.github/workflows/ci.yml`: typecheck plus unit on Ubuntu, and an
   integration job that prefers podman, falls back to docker, then to the bare
   runner.
+- Config discovery verified with `opencode debug config`: the global
+  `~/.config/opencode/opencode.jsonc` plus the project's `opencode.json`; a
+  project `opencode.jsonc` is read only when no `opencode.json` exists.
 
 ## Layout
 
@@ -165,10 +168,10 @@ test/unit/*.test.ts    pure-function tests
 
 ## Next actions
 
-1. Review the README against shipped behaviour, then publish only with
-   explicit consent. The scoped npm name is not live yet. Bump to 0.4.0 first:
-   ranking, shell references, hidden corpus, CI, compaction capture, and the
-   brain fixes are all user-visible.
+1. Deciding whether to publish is the only release step left. The README now
+   documents a local-checkout install (no published package is referenced),
+   the two config scopes with their precedence, and `opencode debug config` as
+   the way to confirm what a project loads.
 2. Watch for one real compaction to confirm `session.compaction.ended` stores a
    `summary` memory in practice.
 3. The shell parser does not follow `xargs`, command substitution, pipelines
