@@ -34,6 +34,14 @@ Updated: 2026-11-03
   the request). Short summaries and repeat events were covered by the unit
   tests, and a stubbed event source against the live node confirmed the
   dedupe and the `summary` kind.
+- The npm install's TUI half failed while the server half worked. Cause: the
+  published package shipped `src/tui.tsx`, so the host transformed JSX in
+  development mode and imported `@opentui/solid/jsx-dev-runtime`, which
+  resolved only from the plugin's own `node_modules`; npm skips optional peer
+  dependencies, so the import threw and the sidebar never registered. The TUI
+  entry is now prebuilt (`bun build --production --packages external` into
+  `dist/tui.js`) and imports `@opentui/solid/jsx-runtime`, the specifier the
+  host provides to plugins. `prepack` regenerates it.
 - Per-process counters are live: rpc calls, injected turns, node spawns, 429s,
   and index runs, shown in the panel and the status snapshot.
 - Brain neighbor expansion was measured. On a fixture brain with a `pathcite`

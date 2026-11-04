@@ -38,9 +38,6 @@
     "build:tui": "bun build src/tui.tsx --outdir dist --target bun --packages external --production",
     "prepack": "bun run build:tui"
   },
-  "dependencies": {
-    "@opencode/plugin": "^2.2.5"
-  },
   "devDependencies": {
     "@opencode/theme": "^2.2.5",
     "@opentui/core": "^0.8.0",
@@ -48,22 +45,20 @@
     "@types/bun": "^1.4.3",
     "@types/node": "^22.10.0",
     "solid-js": "^1.9.17",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "@opencode/plugin": "^2.2.5"
   },
   "peerDependencies": {
-    "@opentui/core": ">=0.8.0",
-    "@opentui/solid": ">=0.8.0",
-    "solid-js": ">=1.9.0"
+    "@opencode/plugin": ">=2.2.5"
   },
   "peerDependenciesMeta": {
-    "@opentui/core": {
-      "optional": true
-    },
-    "@opentui/solid": {
-      "optional": true
-    },
-    "solid-js": {
+    "@opencode/plugin": {
       "optional": true
     }
+  },
+  "dependencies": {
+    "@opentui/core": "^0.8.0",
+    "@opentui/solid": "^0.8.0",
+    "solid-js": "^1.9.17"
   }
 }
