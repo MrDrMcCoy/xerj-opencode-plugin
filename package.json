@@ -23,17 +23,20 @@
   "exports": {
     ".": "./src/index.ts",
     "./rpc": "./src/rpc.ts",
-    "./tui": "./src/tui.tsx"
+    "./tui": "./dist/tui.js"
   },
   "files": [
     "src",
+    "dist",
     "tsconfig.json"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "bun test test/unit",
     "test:unit": "bun test test/unit",
-    "test:integration": "bun test test/integration"
+    "test:integration": "bun test test/integration",
+    "build:tui": "bun build src/tui.tsx --outdir dist --target bun --packages external --production",
+    "prepack": "bun run build:tui"
   },
   "dependencies": {
     "@opencode/plugin": "^2.2.5"

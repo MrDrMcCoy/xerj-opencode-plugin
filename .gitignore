@@ -3,3 +3,4 @@ dist/
 .xerj/
 *.log
 .DS_Store
+dist/
