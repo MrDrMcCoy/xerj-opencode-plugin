@@ -442,6 +442,7 @@ export default Plugin.define({
       getSearch: () => runtime.search,
       getMemory: () => runtime.memory,
       summarize,
+      onActivity: (sessionID) => runtime.lifecycle?.touch(sessionID),
       onInject: () => counters.noteInjection(),
       recordQuery: (sessionID, paths, bytes, hits) =>
         ledger.recordQuery(sessionID, paths, bytes, hits),
