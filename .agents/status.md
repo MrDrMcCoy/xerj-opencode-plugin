@@ -19,12 +19,15 @@ Updated: 2026-11-04
   stale counts. A dead socket re-ensures the node once and retries, and status
   reports a node another process started. Verified live: spawn, attach (same
   pid), idle stop (no answer), restart on the same port with the index intact
-  and the doc still searchable. 242 unit tests pass.
+  and the doc still searchable. 245 unit tests pass.
 - Plugin state now follows the project node: the autoindex journal, watcher
   ownership and brain state all resolve under the node dir inside the project
   storage root. The engine's `autoindex --watch` refuses a state dir inside the
   watched tree, so project-local storage uses the plugin's own recursive
-  watcher and one-shot index runs with a 30 s poll fallback.
+  watcher and one-shot index runs with a 30 s poll fallback. Ownership is
+  claimed before the first pass, so an edit made during a long index is still
+  seen; a shared instance polls for ownership and takes over when the owner
+  stops, and a one-shot run no longer releases the local watcher's claim.
 - Existing projects migrate on setup: data in the old global layout
   (`<data root>/nodes/<prefix>`, `<data root>/spool/<web prefix>`) is moved
   into `<project>/.xerj` once, after stopping any node still running from the
@@ -32,7 +35,9 @@ Updated: 2026-11-04
   is now constructed after the move) is replaced rather than treated as
   already-migrated. Legacy project memory is copied separately into the node
   data dir when the target is empty. A refused `storage.root` path falls back
-  to `.xerj` and is reported in warnings.
+  to `.xerj` and is reported in warnings. The peer heartbeat starts after the
+  move: its first write creates the node directory, and a non-empty target
+  would make the migration treat the empty project tree as already populated.
 - A resident watcher killed by a signal used to report `idle` forever, with
   no error and no restart, because every signal exit was treated as our own
   stop. Only a stop this supervisor requested is idle now; a signaled watcher
@@ -335,6 +340,16 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-04: Two regressions in the project-local watcher and the upgrade.
+  (1) The local watcher was started after the first index pass, so an edit
+  during a long initial scan waited for the periodic fallback; ownership is
+  now claimed first, a losing instance polls for the claim and takes over when
+  the owner stops, and a one-shot run no longer releases it. (2) Peer
+  heartbeats started before the migration, and their first write created the
+  node directory, so the migration saw a non-empty target and skipped the move.
+  The heartbeat now starts after the move. A dry run on a copy of this
+  project's 11 MB legacy node directory moved the engine data, journal,
+  memory index and web spool with the index intact. 245 unit tests pass.
 - 2026-11-04: Two faults in the new in-project layout. (1) Every plugin
   instance writes a heartbeat, so with two locations open neither idle timer
   ever stopped the node: each saw a live peer and deferred to it since idle

@@ -174,7 +174,9 @@ Project memory is copied separately into the node data dir when the target is
 empty, because an already-running node enumerated its indices at startup and
 would not see the copied index until it restarted. The spool is constructed
 after the move: its constructor creates the spool directory, and an eagerly
-created empty target would otherwise make the move skip the legacy pages.
+created empty target would otherwise make the move skip the legacy pages. The
+peer heartbeat starts after the move too, for the same reason: its first write
+creates the node directory, which would make a non-empty target.
 
 ## 5. Binary management
 
@@ -334,7 +336,11 @@ anyway. The plan is:
 
 Watch mode is one process per project. With several projects open that is
 acceptable (each is idle when nothing changes), but `index.watch=false` must
-exist for users who disagree. A resident watcher that dies by signal is
+exist for users who disagree. Ownership is claimed before the first pass, so
+an edit that lands during a long initial index is still seen; an instance that
+loses the claim polls for it and takes over when the owner stops. A one-shot
+run shares the ownership key but must not release it.
+A resident watcher that dies by signal is
 restarted with backoff like any other crash; only a stop this supervisor
 requested reports `idle`, because a killed watcher would otherwise leave the
 corpus frozen with no error.

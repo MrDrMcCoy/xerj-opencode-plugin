@@ -602,8 +602,6 @@ export default Plugin.define({
       },
     });
     runtime.lifecycle = lifecycle;
-    lifecycle.start();
-    startSessionTracking(ctx.event, lifecycle, shutdown.signal, logger);
 
     const bootstrapRuntime = async (): Promise<void> => {
       // An explicit path wins over download and detection: the user already
@@ -692,6 +690,12 @@ export default Plugin.define({
           logger.warn("could not migrate project storage", String(error));
         });
       }
+
+      // Start the heartbeat only after the legacy move: its first write creates
+      // the node directory, and a non-empty target would make the migration
+      // treat the empty project tree as already populated.
+      lifecycle.start();
+      startSessionTracking(ctx.event, lifecycle, shutdown.signal, logger);
 
       // Construct the spool after the move: init creates the spool directory,
       // and an eagerly created empty target would make the migration skip the
