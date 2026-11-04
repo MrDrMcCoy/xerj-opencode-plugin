@@ -4,9 +4,21 @@
 // PORT+2 (gRPC), and startup fails if any is taken.
 
 import { spawn } from "node:child_process";
-import { mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import {
+  chmod,
+  mkdir,
+  open,
+  readFile,
+  readdir,
+  readlink,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { connect } from "node:net";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { promisify } from "node:util";
 import type { Logger } from "../log.ts";
 import {
   nodeDataDir,
@@ -62,6 +74,7 @@ const PORT_SCAN_END = 9399;
 const PORT_STRIDE = 3;
 const HEALTH_POLL_MS = 250;
 const SPAWN_LOCK_MS = 60_000;
+const PORT_LOCK_POLL_MS = 100;
 
 /** Identifies a node by `GET /`, so an Elasticsearch on 9200 is not mistaken for XERJ. */
 export async function probeNode(baseUrl: string, timeoutMs = 800): Promise<NodeState> {
@@ -105,51 +118,65 @@ export async function ensureNode(options: EnsureNodeOptions): Promise<NodeHandle
   // a node another project owns, and then one idle shutdown would kill it.
   const candidate = options.persistedPort ?? options.preferredPort;
   const storedPid = await readNodePid(options.nodeDir);
+  // Attaching is only safe when the port is proven to belong to this project's
+  // recorded process. Another project may legitimately hold this port after
+  // our node stopped, and adopting it would read that project's corpus and then
+  // kill its node on our next idle shutdown.
   const detected =
-    options.persistedPort === null
-      ? null
-      : await attach(options.persistedPort, options.binaryVersion, storedPid);
+    options.persistedPort !== null && (await ownsNodeAt(options.persistedPort, storedPid))
+      ? await attach(options.persistedPort, options.binaryVersion, storedPid)
+      : null;
   if (detected) return detected;
 
-  const port = await choosePort(candidate);
-  if (port === null) {
-    throw new NodeError(`no free port for XERJ between ${PORT_SCAN_START} and ${PORT_SCAN_END}`);
-  }
-
-  const lock = join(options.nodeDir, ".spawn-lock");
-  if (!(await acquireLock(lock))) {
-    // Another process is spawning; wait for it rather than starting a second node.
-    const existing = await waitForNode(port, options.startupTimeoutMs ?? 30_000, options.binaryVersion);
-    if (existing) return existing;
-    throw new NodeError("another process is starting the XERJ node and it did not come up");
+  // Port selection and spawn are shared resources across every project in this
+  // data root, so they take one lock there. Per-project locking would still let
+  // two first starts race onto the same free port and share one node.
+  const portLock = join(dirname(options.nodeDir), ".port-lock");
+  if (!(await acquirePortLock(portLock, options.startupTimeoutMs ?? 30_000))) {
+    throw new NodeError("another process is starting a XERJ node and did not let go");
   }
 
   try {
-    const second = await attach(port, options.binaryVersion, storedPid);
+    const storedPidAgain = await readNodePid(options.nodeDir);
+    const adopted =
+      options.persistedPort !== null &&
+      (await ownsNodeAt(options.persistedPort, storedPidAgain))
+        ? await attach(options.persistedPort, options.binaryVersion, storedPidAgain)
+        : null;
+    if (adopted) return adopted;
+
+    const chosen = await choosePort(candidate);
+    if (chosen === null) {
+      throw new NodeError(
+        `no free port for XERJ between ${PORT_SCAN_START} and ${PORT_SCAN_END}`,
+      );
+    }
+
+    const second = await attach(chosen, options.binaryVersion, storedPidAgain);
     if (second) {
-      await options.onPort?.(port);
+      await options.onPort?.(chosen);
       return second;
     }
 
     const pid = await spawnNode(
       options.binaryPath,
       dataDir,
-      port,
+      chosen,
       options.projectRoot,
       options.nodeDir,
     );
-    await options.onPort?.(port);
+    await options.onPort?.(chosen);
 
-    const node = await waitForNode(port, options.startupTimeoutMs ?? 30_000, options.binaryVersion);
+    const node = await waitForNode(chosen, options.startupTimeoutMs ?? 30_000, options.binaryVersion);
     if (!node) {
-      throw new NodeError(`xerj did not answer on port ${port} within 30s`);
+      throw new NodeError(`xerj did not answer on port ${chosen} within 30s`);
     }
 
     await writeFile(nodePidPath(options.nodeDir), String(pid), { mode: 0o600 }).catch(() => {});
-    logger.info("started the xerj node", { port, pid });
+    logger.info("started the xerj node", { port: chosen, pid });
     return { ...node, pid, spawned: true };
   } finally {
-    await rm(lock, { recursive: true, force: true }).catch(() => {});
+    await rm(portLock, { recursive: true, force: true }).catch(() => {});
   }
 }
 
@@ -186,7 +213,11 @@ async function waitForNode(
 
 /** A base port is usable only when PORT, PORT+1 and PORT+2 are all free. */
 async function choosePort(preferred: number): Promise<number | null> {
-  if (preferred >= PORT_SCAN_START && (await portTripleFree(preferred))) return preferred;
+  // An explicitly configured port outside the default range is still honoured
+  // when it is free; the range only bounds automatic scanning.
+  if (preferred >= 1024 && preferred + 2 <= 65_535 && (await portTripleFree(preferred))) {
+    return preferred;
+  }
 
   const start = Math.max(PORT_SCAN_START, Math.ceil(preferred / PORT_STRIDE) * PORT_STRIDE);
   for (let port = start; port + 2 <= PORT_SCAN_END; port += PORT_STRIDE) {
@@ -257,6 +288,16 @@ async function spawnNode(
   return child.pid;
 }
 
+/** Retries the spawn lock so a concurrent project's start is waited out. */
+async function acquirePortLock(path: string, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await acquireLock(path)) return true;
+    await sleep(PORT_LOCK_POLL_MS);
+  }
+  return false;
+}
+
 /** `mkdir` is the atomic primitive; a lock older than a minute is stale. */
 async function acquireLock(path: string): Promise<boolean> {
   try {
@@ -301,8 +342,88 @@ export async function detectNode(nodeDir: string): Promise<NodeDetection> {
   const pid = await readNodePid(nodeDir);
   if (port === null) return { running: false, port: null, pid, state: "down" };
 
+  if (!(await ownsNodeAt(port, pid))) return { running: false, port, pid, state: "down" };
+
   const state = await probeNode(`http://127.0.0.1:${port}`);
   return { running: state === "xerj", port, pid, state };
+}
+
+/**
+ * True when the process listening on `port` is the one in this project's
+ * pidfile. Where the port owner cannot be read, a live recorded pid is the best
+ * available evidence; a mismatched owner is decisive.
+ */
+export async function ownsNodeAt(
+  port: number,
+  storedPid: number | null,
+): Promise<boolean> {
+  if (storedPid === null) return false;
+
+  const owner = await portOwnerPid(port);
+  return owner === null ? isAlive(storedPid) : owner === storedPid;
+}
+
+/**
+ * Best-effort pid of the process listening on a local TCP port. Returns null
+ * when the platform offers no cheap lookup (or the port is not listening), in
+ * which case callers fall back to pid liveness.
+ */
+export async function portOwnerPid(port: number): Promise<number | null> {
+  if (process.platform === "linux") return linuxPortOwner(port);
+  if (process.platform === "darwin") return darwinPortOwner(port);
+  return null;
+}
+
+async function linuxPortOwner(port: number): Promise<number | null> {
+  const inodes = new Set<string>();
+
+  for (const file of ["/proc/net/tcp", "/proc/net/tcp6"]) {
+    const table = await readFile(file, "utf8").catch(() => null);
+    if (table === null) continue;
+
+    for (const row of table.split("\n").slice(1)) {
+      const fields = row.trim().split(/\s+/);
+      if (fields.length < 10) continue;
+      const local = fields[1] ?? "";
+      // "0A" is LISTEN; the local address ends with the port in uppercase hex.
+      if (fields[3] !== "0A" || !local.toUpperCase().endsWith(`:${portHex(port)}`)) continue;
+      inodes.add(fields[9] ?? "");
+    }
+  }
+
+  if (inodes.size === 0) return null;
+
+  const pids = await readdir("/proc").catch(() => [] as string[]);
+  for (const entry of pids) {
+    if (!/^\d+$/.test(entry)) continue;
+    const fds = await readdir(`/proc/${entry}/fd`).catch(() => [] as string[]);
+
+    for (const fd of fds) {
+      const target = await readlink(`/proc/${entry}/fd/${fd}`).catch(() => null);
+      if (target === null || !target.startsWith("socket:[")) continue;
+      if (inodes.has(target.slice(8, -1))) return Number(entry);
+    }
+  }
+
+  return null;
+}
+
+function darwinPortOwner(port: number): Promise<number | null> {
+  return promisify(execFile)("lsof", [
+    "-nP",
+    `-iTCP:${port}`,
+    "-sTCP:LISTEN",
+    "-t",
+  ])
+    .then(({ stdout }) => {
+      const pid = Number(stdout.trim().split("\n")[0]);
+      return Number.isInteger(pid) && pid > 0 ? pid : null;
+    })
+    .catch(() => null);
+}
+
+function portHex(port: number): string {
+  return port.toString(16).toUpperCase().padStart(4, "0");
 }
 
 export async function stopNode(nodeDir: string, graceMs = 5_000): Promise<boolean> {

@@ -195,7 +195,7 @@ second process needs to find it lives in a project node directory:
 node dir   <data root>/nodes/<prefix>/            (0700)
 port       <node dir>/port                        (persisted, last used)
 pid        <node dir>/node.pid
-lock       <node dir>/.spawn-lock                 (mkdir is atomic, 60 s stale)
+lock       <data root>/nodes/.port-lock           (mkdir is atomic, 60 s stale)
 log        <node dir>/node.log
 clients    <node dir>/clients/<instance>.json      (peer heartbeats)
 data dir   <node dir>/data/                       (engine storage)
@@ -205,16 +205,23 @@ data dir   <node dir>/data/                       (engine storage)
 
 1. If `node.url` is set, attach to it and never spawn. The idle timer is off
    in that mode: the plugin does not own that node.
-2. Otherwise take a start lock around the whole lifecycle, so two sessions or
-   two OpenCode processes cannot spawn at once.
-3. Probe the persisted port. If this project's node answers with
-   `cluster_name: "xerj"`, attach. The pid from the pidfile identifies it; a
-   port that answers without this project's pid is not adopted.
-4. If nothing answers, pick a free port triple and spawn detached:
+2. Probe the persisted port. If this project's node answers with
+   `cluster_name: "xerj"`, attach. Ownership, not the banner, decides: the
+   listening socket's pid must equal the pid recorded in this project's
+   `node.pid`, because another project can take the same port after this one
+   stops, and adopting it would read that project's corpus and later kill its
+   node.
+3. Take the spawn lock at the data root. Port choice and spawn are shared by
+   every project in the data root, so one lock covers them; per-project locks
+   would still let two first starts pick the same free port. The lock is
+   retried for up to the startup timeout and is stale after 60 s.
+4. Re-check the persisted port under the lock, then pick a free port triple and
+   spawn detached:
    `xerj --insecure --data-dir <data dir> --port <port> --bind 127.0.0.1`,
-   stdio to the node log, then poll health for up to 30 s. Persist the port
-   once it answers, so a restart attaches instead of spawning again.
-5. If another process holds the lock, poll for its node instead of spawning.
+   stdio to the node log, then poll health for up to 30 s. Persist the port and
+   the pid once it answers, so a restart attaches instead of spawning again. A
+   configured `node.port` is honoured when its triple is free, even outside the
+   default scan range.
 
 Detection and resume: `detectNode(nodeDir)` reports `running`, `port`, `pid`
 and the banner state without starting anything. The status snapshot uses it

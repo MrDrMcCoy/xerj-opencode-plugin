@@ -13,7 +13,15 @@ Updated: 2026-11-03
   peer heartbeat exists. A dead socket re-ensures the node once and retries,
   and status reports a node another process started. Verified live: spawn,
   attach (same pid), idle stop (no answer), restart on the same port with the
-  index intact and the doc still searchable. 206 unit tests pass.
+  index intact and the doc still searchable. 220 unit tests pass.
+- Concurrent projects each run their own node. Starting two projects at once
+  takes one spawn lock at the data root (per-project locks still let both pick
+  the same free port), and attach requires the listening pid to equal this
+  project's recorded pid — a project whose port was taken by another node now
+  starts elsewhere instead of adopting it. Verified live with two simultaneous
+  starts: distinct ports, distinct pids, separate engine data, each corpus
+  visible only to its own node; a third project pointing its port file at the
+  second node refused to adopt it.
 - M0 is implemented and verified against a real XERJ `v1.0.0-rc.100` binary.
 - M1 is implemented and verified live: the project index is built by a
   supervised `autoindex --watch --no-graph` process. Adding a file moved the
@@ -276,6 +284,14 @@ TUI verification remain.
   expected, z-score, and score. Warm-up buckets are not flagged.
 
 ## Log
+
+- 2026-11-04: Concurrent-project isolation confirmed and hardened. Port pick
+  and spawn now share one lock at the data root (two projects starting together
+  otherwise both bind the same free port and one attaches to the other's node),
+  and attach requires the port's listening pid to match this project's recorded
+  pid, so a reused port is never adopted. Verified live with two simultaneous
+  starts plus a stale-port third project; five new unit tests cover socket
+  ownership. 220 unit tests pass.
 
 - 2026-11-04: Project-scoped node lifecycle. One node per project
   (`<data root>/nodes/<prefix>/`), persisted port and pid, per-project engine
