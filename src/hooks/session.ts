@@ -19,6 +19,8 @@ export interface SessionHookOptions {
   readonly getMemory: () => MemoryStore | null;
   readonly summarize: () => Promise<string>;
   readonly onInject?: () => void;
+  /** Reports bytes the plugin placed into context, for the cost ledger. */
+  readonly onCost?: (sessionID: string, bytes: number) => void;
   /** Resets the idle deadline; called for every prompt and model call. */
   readonly onActivity?: (sessionID?: string) => void;
   readonly recordQuery: (
@@ -104,7 +106,9 @@ export async function registerSessionHooks(
       try {
         const summary = await options.summarize();
         if (summary.length > 0) {
-          event.system.push({ type: "text", text: formatCorpusBlock(summary) });
+          const block = formatCorpusBlock(summary);
+          event.system.push({ type: "text", text: block });
+          options.onCost?.(event.sessionID, Buffer.byteLength(block, "utf8"));
         }
       } catch (error) {
         options.logger.debug("could not summarize the corpus", String(error));
@@ -119,15 +123,19 @@ export async function registerSessionHooks(
     injected.add(key);
     prepared.delete(event.sessionID);
 
+    let bytes = 0;
     if (entry.memory.length > 0) {
       event.system.push({ type: "text", text: entry.memory });
+      bytes += Buffer.byteLength(entry.memory, "utf8");
     }
     if (entry.block.length > 0) {
       event.system.push({ type: "text", text: entry.block });
+      bytes += Buffer.byteLength(entry.block, "utf8");
     }
-    if (entry.memory.length > 0 || entry.block.length > 0) {
-      options.onInject?.();
-    }
+    if (bytes === 0) return;
+
+    options.onInject?.();
+    options.onCost?.(event.sessionID, bytes);
   });
 }
 

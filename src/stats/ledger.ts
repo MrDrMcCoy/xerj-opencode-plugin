@@ -25,6 +25,10 @@ export interface LedgerSnapshot {
   readonly bytesRead: number;
   readonly savedBytes: number;
   readonly tokensSaved: number;
+  /** Tokens the plugin itself added to context (injections + corpus summary). */
+  readonly tokensCost: number;
+  /** tokensSaved - tokensCost; negative means the plugin cost more than it saved. */
+  readonly netTokens: number;
   readonly topFiles: ReadonlyArray<CitedFile>;
 }
 
@@ -53,6 +57,7 @@ interface LifetimeState {
   hits: number;
   returned: number;
   bytesRead: number;
+  injected: number;
   readonly cited: Map<string, number>;
   readonly citations: Map<string, number>;
   readonly read: Map<string, number>;
@@ -69,6 +74,7 @@ export class Ledger {
     hits: 0,
     returned: 0,
     bytesRead: 0,
+    injected: 0,
     cited: new Map(),
     citations: new Map(),
     read: new Map(),
@@ -119,6 +125,19 @@ export class Ledger {
     this.scheduleFlush();
   }
 
+  /**
+   * Records bytes the plugin itself placed into the model's context: passage
+   * injections, memory recalls, and the corpus summary. This is the cost side
+   * of the ledger; `tokensSaved` is the benefit side.
+   */
+  async recordInjection(bytes: number): Promise<void> {
+    await this.load();
+    if (!Number.isFinite(bytes) || bytes <= 0) return;
+
+    this.lifetime.injected += bytes;
+    this.scheduleFlush();
+  }
+
   async recordRead(sessionID: string, filePath: string, bytes: number): Promise<void> {
     await this.load();
     const path = this.relative(filePath);
@@ -155,6 +174,8 @@ export class Ledger {
     }
 
     const saved = Math.max(0, baseline - returned);
+    const tokensSaved = Math.round(saved / this.options.bytesPerToken);
+    const tokensCost = Math.round(this.lifetime.injected / this.options.bytesPerToken);
     return {
       queries,
       hits,
@@ -165,7 +186,9 @@ export class Ledger {
       filesRead: read.size,
       bytesRead: this.lifetime.bytesRead,
       savedBytes: saved,
-      tokensSaved: Math.round(saved / this.options.bytesPerToken),
+      tokensSaved,
+      tokensCost,
+      netTokens: tokensSaved - tokensCost,
       topFiles: topCited(citations, cited),
     };
   }
@@ -193,6 +216,7 @@ export class Ledger {
       hits: numberOr(record.hits, 0),
       returned: numberOr(record.returned, 0),
       bytesRead: numberOr(record.bytesRead, 0),
+      injected: numberOr(record.injected, 0),
       cited: fileMap(record.cited),
       citations: countMap(record.citations),
       read: fileMap(record.read),
@@ -277,6 +301,7 @@ export class Ledger {
       hits: this.lifetime.hits,
       returned: this.lifetime.returned,
       bytesRead: this.lifetime.bytesRead,
+      injected: this.lifetime.injected,
       cited: [...this.lifetime.cited].slice(-MAX_TRACKED_FILES),
       citations: [...this.lifetime.citations].slice(-MAX_TRACKED_FILES),
       // Infinity is not JSON; -1 means "the whole file was read".

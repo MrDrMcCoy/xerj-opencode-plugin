@@ -33,12 +33,23 @@ export function formatCount(value: number): string {
 
 export function formatTokens(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return "~0";
-  if (value < THOUSAND) return `~${Math.round(value)}`;
+  return `~${formatTokenAmount(value)}`;
+}
+
+/** Signed variant for the net figure: "~-1.2K" when the plugin costs more than it saves. */
+export function formatSignedTokens(value: number): string {
+  if (!Number.isFinite(value)) return "~0";
+  const sign = value < 0 ? "-" : "~";
+  return `${sign}${formatTokenAmount(Math.abs(value))}`;
+}
+
+function formatTokenAmount(value: number): string {
+  if (value < THOUSAND) return `${Math.round(value)}`;
 
   if (value < THOUSAND * THOUSAND) {
-    return `~${(value / THOUSAND).toFixed(1)}K`;
+    return `${(value / THOUSAND).toFixed(1)}K`;
   }
-  return `~${(value / (THOUSAND * THOUSAND)).toFixed(1)}M`;
+  return `${(value / (THOUSAND * THOUSAND)).toFixed(1)}M`;
 }
 
 export function formatPercent(ratio: number): string {
@@ -195,6 +206,13 @@ export function panelSections(snapshot: StatusSnapshot, now: number): PanelSecti
             `${formatBytes(usage.baselineBytes)} baseline`,
         ].join(" · "),
         `${formatBytes(usage.bytesReturned)} returned · ${formatBytes(usage.bytesRead)} read`,
+        [
+          `${formatTokens(usage.tokensCost)} tok cost · ` +
+            `${formatSignedTokens(usage.netTokens)} net`,
+          usage.netTokens < 0
+            ? "costing more than it saves"
+            : "saving more than it costs",
+        ].join(" · "),
       ],
     },
     {

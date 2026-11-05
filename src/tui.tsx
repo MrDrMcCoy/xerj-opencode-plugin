@@ -100,11 +100,18 @@ export default Plugin.define({
 
     const reindex = async (): Promise<void> => {
       try {
-        const result = (await rpc().reindex({}, at())) as { queued?: boolean };
+        // The RPC awaits the pass, so a result means the index is current.
+        const result = (await rpc().reindex({}, at())) as {
+          queued?: boolean;
+          records?: number | null;
+        };
+        const message = !result.queued
+          ? "XERJ indexing is disabled"
+          : typeof result.records === "number"
+            ? `XERJ reindexed · ${result.records.toLocaleString("en-US")} records`
+            : "XERJ reindex queued";
         context.ui.toast.show({
-          message: result.queued
-            ? "XERJ reindex queued"
-            : "XERJ indexing is disabled",
+          message,
           variant: result.queued ? "success" : "info",
         });
       } catch {

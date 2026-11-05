@@ -421,7 +421,15 @@ export class CorpusService {
   private handleOnceExit(code: number | null): void {
     const meaning = exitMeaning(code);
     if (meaning === "ok" || meaning === "junk") {
-      this.state = this.localWatch ? "watching" : "idle";
+      // The engine replays the previous run document when a pass finds nothing
+      // to do, so its `started` timestamp can be far in the past. Freshness
+      // means "when did we last scan", so stamp the pass completion time.
+      if (this.lastRun) {
+        this.lastRun = { ...this.lastRun, at: Date.now() };
+        void this.persist(this.lastRun);
+      }
+      this.state = this.options.config.index.watch ? "watching" : "idle";
+      this.options.onChange?.();
       return;
     }
 
@@ -454,13 +462,20 @@ export class CorpusService {
     }
 
     this.onceRunning = true;
+    const sharedBeforePass = this.state === "shared";
     if (this.state !== "watching") this.state = "starting";
     const child = this.spawn(false);
     if (child) {
       await new Promise<void>((resolvePromise) => child.once("close", () => resolvePromise()));
     }
     this.onceRunning = false;
-    if (this.lastRun) this.state = this.localWatch ? "watching" : "idle";
+    // The close event ran `handleOnceExit`, which may have set an error.
+    if (this.lastRun && this.lastError === null) {
+      // A shared instance keeps its marker so the takeover loop keeps running.
+      if (!(sharedBeforePass && !this.localWatch)) {
+        this.state = this.options.config.index.watch ? "watching" : "idle";
+      }
+    }
 
     if (this.pendingRun && !this.stopped) {
       this.pendingRun = false;

@@ -67,6 +67,22 @@ describe("Ledger", () => {
     await accounting.flush();
   });
 
+  test("nets injected tokens against tokens saved", async () => {
+    await writeFile(join(root, "c.txt"), "c".repeat(400));
+
+    const { storage } = store();
+    const accounting = ledger(storage, "stats/lifetime:net");
+
+    await accounting.recordQuery("session-n", ["c.txt"], 40, 1);
+    await accounting.recordInjection(200);
+    const snapshot = accounting.snapshot("session-n");
+    expect(snapshot.tokensSaved).toBe(90);
+    expect(snapshot.tokensCost).toBe(50);
+    expect(snapshot.netTokens).toBe(40);
+
+    await accounting.flush();
+  });
+
   test("ranks cited files by how often they were cited", async () => {
     await writeFile(join(root, "x.txt"), "x".repeat(10));
     await writeFile(join(root, "y.txt"), "y".repeat(20));

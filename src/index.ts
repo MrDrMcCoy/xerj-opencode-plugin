@@ -50,6 +50,7 @@ import { RemoteSpool } from "./remote/spool.ts";
 import { shellReadPaths } from "./remote/shell.ts";
 import { BrainGraph } from "./search/brains.ts";
 import { SearchService } from "./search/service.ts";
+import { formatAge } from "./ui/format.ts";
 import { Ledger } from "./stats/ledger.ts";
 import { Counters } from "./stats/counters.ts";
 import { AnomalyService } from "./telemetry/anomaly.ts";
@@ -234,6 +235,8 @@ export default Plugin.define({
           baselineBytes: usage.baselineBytes,
           savedBytes: usage.savedBytes,
           tokensSaved: usage.tokensSaved,
+          tokensCost: usage.tokensCost,
+          netTokens: usage.netTokens,
           topFiles: usage.topFiles,
         },
         memory: { namespace: memoryNs, count: 0 },
@@ -300,12 +303,16 @@ export default Plugin.define({
           runtime.hidden?.reindex(),
         ]);
         void runtime.brain?.runAll();
+        // The pass ran before this returns, so the caller can report real
+        // completion instead of a queue-only toast.
+        const status = corpusStatus(runtime.corpus);
         return {
           queued:
             runtime.corpus !== null ||
             runtime.web !== null ||
             runtime.hidden !== null ||
             runtime.brain !== null,
+          records: status.lastRecords,
         };
       },
       remember: async (input) => {
@@ -444,6 +451,7 @@ export default Plugin.define({
       summarize,
       onActivity: (sessionID) => runtime.lifecycle?.touch(sessionID),
       onInject: () => counters.noteInjection(),
+      onCost: (sessionID, bytes) => void ledger.recordInjection(bytes),
       recordQuery: (sessionID, paths, bytes, hits) =>
         ledger.recordQuery(sessionID, paths, bytes, hits),
     });
@@ -910,12 +918,20 @@ function brainStatus(
   }));
 }
 
+/** Warnings from an earlier process are history, not current health. */
+const PROCESS_START = Date.now();
+
 async function recentMessages(logger: Logger): Promise<string[]> {
   const entries = await logger.entries().catch(() => []);
+  const now = Date.now();
   return entries
-    .filter((entry) => entry.level === "warn" || entry.level === "error")
+    .filter(
+      (entry) =>
+        (entry.level === "warn" || entry.level === "error") &&
+        entry.at >= PROCESS_START,
+    )
     .slice(-4)
-    .map((entry) => `${entry.level}: ${entry.message}`);
+    .map((entry) => `${entry.level}: ${entry.message} (${formatAge(now, entry.at)})`);
 }
 
 function contentBytes(content: unknown): number {

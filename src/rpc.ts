@@ -82,6 +82,10 @@ export interface UsageStatus {
   readonly baselineBytes: number;
   readonly savedBytes: number;
   readonly tokensSaved: number;
+  /** Tokens the plugin itself added to context. */
+  readonly tokensCost: number;
+  /** tokensSaved - tokensCost; negative means the plugin costs more than it saves. */
+  readonly netTokens: number;
   readonly topFiles: ReadonlyArray<CitedFileStatus>;
 }
 
@@ -208,6 +212,8 @@ const definition = {
           baselineBytes: { type: "number" },
           savedBytes: { type: "number" },
           tokensSaved: { type: "number" },
+          tokensCost: { type: "number" },
+          netTokens: { type: "number" },
           topFiles: {
             type: "array",
             items: object({
@@ -246,7 +252,10 @@ const definition = {
     },
     reindex: {
       input: valueSchema({}),
-      output: valueSchema({ queued: { type: "boolean" } }),
+      output: valueSchema({
+        queued: { type: "boolean" },
+        records: { type: ["number", "null"] },
+      }),
     },
     remember: {
       input: valueSchema({ text: { type: "string" } }),

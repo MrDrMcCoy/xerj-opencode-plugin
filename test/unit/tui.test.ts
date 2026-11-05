@@ -52,6 +52,8 @@ const SNAPSHOT: StatusSnapshot = {
     baselineBytes: 512,
     savedBytes: 448,
     tokensSaved: 112,
+    tokensCost: 0,
+    netTokens: 112,
     topFiles: [{ path: "a.md", citations: 1, bytes: 512 }],
   },
   memory: { namespace: "proj-demo", count: 0 },

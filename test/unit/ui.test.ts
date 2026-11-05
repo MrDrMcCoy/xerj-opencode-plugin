@@ -65,6 +65,8 @@ function snapshot(overrides: Partial<StatusSnapshot> = {}): StatusSnapshot {
       baselineBytes: 200_000,
       savedBytes: 180_000,
       tokensSaved: 45_000,
+      tokensCost: 3_000,
+      netTokens: 42_000,
       topFiles: [{ path: "src/a.ts", citations: 3, bytes: 4_000 }],
     },
     memory: { namespace: "proj-demo-1a2b3c4d", count: 2 },
