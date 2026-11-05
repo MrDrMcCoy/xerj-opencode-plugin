@@ -153,7 +153,7 @@ This is the complete set with its defaults, in
         "index":   { "auto": true, "watch": true, "debounceMs": 800,
                      "periodicMs": 900000, "workers": null, "brain": [],
                      "hidden": [], "hiddenMaxBytes": 262144,
-                     "semantic": true, "maxBytes": 2147483648,
+                     "semantic": true, "neural": true, "maxBytes": 2147483648,
                      "maxMinutes": 10 },
         "remote":  { "enabled": true, "maxBytes": 2000000 },
         "context": { "enabled": true, "maxTokens": 1500, "memoryTokens": 400,
@@ -188,6 +188,7 @@ The same entry works with a checkout path instead of the package name; see
 | `index.hidden` | Hidden folders to index as plain documents, e.g. `[".agents"]`. |
 | `index.hiddenMaxBytes` | Per-file ceiling for hidden documents. |
 | `index.semantic` | Include the semantic retrieval leg. |
+| `index.neural` | Embed passages with the node's neural model (`--embed-mode neural`). Set `false` for lexical embeddings. Changing it rebuilds the project index once; neural indexing is roughly ten times slower than lexical. |
 | `remote.enabled` | Spool and index fetched pages. |
 | `context.enabled` | Inject retrieved context; the kill switch. |
 | `context.maxTokens` | Ceiling for injected passages. |
