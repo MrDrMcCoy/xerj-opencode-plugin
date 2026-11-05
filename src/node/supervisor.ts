@@ -29,6 +29,12 @@ import {
 
 export type NodeState = "xerj" | "foreign" | "down";
 
+/** Passed as `--embed-mode`; the node fixes it at startup and never re-embeds. */
+export enum EmbedMode {
+  Neural = "neural",
+  Lexical = "lexical",
+}
+
 export interface NodeHandle {
   readonly baseUrl: string;
   readonly port: number;
@@ -54,6 +60,7 @@ export interface EnsureNodeOptions {
   readonly logger: Logger;
   readonly explicitUrl?: string | null;
   readonly startupTimeoutMs?: number;
+  readonly embedMode?: EmbedMode;
 }
 
 /** What the pidfile and port file say, without trusting either. */
@@ -166,6 +173,7 @@ export async function ensureNode(options: EnsureNodeOptions): Promise<NodeHandle
       chosen,
       options.projectRoot,
       options.nodeDir,
+      options.embedMode ?? EmbedMode.Neural,
     );
     await options.onPort?.(chosen);
 
@@ -261,6 +269,7 @@ async function spawnNode(
   port: number,
   projectRoot: string,
   nodeDir: string,
+  embedMode: EmbedMode,
 ): Promise<number> {
   await mkdir(dataDir, { recursive: true, mode: 0o700 });
   await mkdir(nodeDir, { recursive: true, mode: 0o700 });
@@ -275,6 +284,8 @@ async function spawnNode(
       "--data-dir",
       dataDir,
       "--disable-feedback",
+      "--embed-mode",
+      embedMode,
     ],
     {
       detached: true,

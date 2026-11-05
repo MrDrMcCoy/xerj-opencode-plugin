@@ -40,6 +40,8 @@ export interface IndexOptions {
   readonly hidden: ReadonlyArray<string>;
   readonly hiddenMaxBytes: number;
   readonly semantic: boolean;
+  /** Embed passages with the node's neural model; false serves lexical only. */
+  readonly neural: boolean;
   readonly maxBytes: number;
   /** Upper bound on the measured first-index estimate before asking. */
   readonly maxMinutes: number;
@@ -117,6 +119,7 @@ export const DEFAULT_CONFIG: Config = {
     hidden: [],
     hiddenMaxBytes: 256 * 1024,
     semantic: true,
+    neural: true,
     maxBytes: 2 * 1024 ** 3,
     maxMinutes: 10,
   },
@@ -217,6 +220,7 @@ export function loadConfig(
         "index.semantic",
         warnings,
       ),
+      neural: readBoolean(index.neural, DEFAULT_CONFIG.index.neural, "index.neural", warnings),
       maxBytes: readInteger(
         index.maxBytes,
         DEFAULT_CONFIG.index.maxBytes,

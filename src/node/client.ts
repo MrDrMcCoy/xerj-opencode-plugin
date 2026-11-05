@@ -38,6 +38,7 @@ export interface NodeInfo {
 }
 
 const DEFAULT_TIMEOUT_MS = 5_000;
+const HTTP_NOT_FOUND = 404;
 
 /** Observes responses without changing them; used for 429 accounting. */
 export interface ClientObserver {
@@ -115,6 +116,15 @@ export class XerjClient {
         },
       ];
     });
+  }
+
+  /** Drops one index; a 404 counts as already gone. */
+  async deleteIndex(index: string): Promise<void> {
+    const response = await this.request(`/${encodeURIComponent(index)}`, {
+      method: "DELETE",
+    });
+    if (response.ok || response.status === HTTP_NOT_FOUND) return;
+    throw new NodeRequestError(`could not delete index ${index}`, response.status);
   }
 
   /** Total documents across every index matching `<prefix>-*`. */

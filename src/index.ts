@@ -11,12 +11,14 @@ import { loadConfig } from "./config.ts";
 import { registerSessionHooks } from "./hooks/session.ts";
 import { BrainIndexer, type BrainRun } from "./index/brain.ts";
 import { HiddenIndex } from "./index/hidden.ts";
+import { corpusLayout } from "./index/corpus.ts";
 import { CorpusService, type CorpusSnapshot } from "./index/watcher.ts";
 import { createLogger, type KeyValueStorage, type Logger } from "./log.ts";
 import { ProjectLifecycle, startSessionTracking } from "./lifecycle.ts";
 import { XerjClient, type IndexSummary } from "./node/client.ts";
 import { NodeRuntime } from "./node/runtime.ts";
-import { detectNode, stopNode, type NodeHandle } from "./node/supervisor.ts";
+import { reconcileEmbedMode } from "./node/embed-mode.ts";
+import { detectNode, EmbedMode, stopNode, type NodeHandle } from "./node/supervisor.ts";
 import {
   brainSpecs,
   dataRoot,
@@ -476,6 +478,20 @@ export default Plugin.define({
       if (indexerStart) return indexerStart;
 
       indexerStart = (async () => {
+        // Runs before any pass so a mode change rebuilds from an empty corpus.
+        const rebuilt = await reconcileEmbedMode({
+          client: new XerjClient(handle.baseUrl),
+          nodeDir,
+          stateDir: corpusLayout(projectRoot, prefix, stateRoot).stateDir,
+          mode: config.index.neural ? EmbedMode.Neural : EmbedMode.Lexical,
+        }).catch((error: unknown) => {
+          logger.warn("could not reconcile the embedding mode", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return false;
+        });
+        if (rebuilt) logger.info("rebuilding indices for the embedding mode");
+
         if (runtime.corpus === null && !overbroad) {
           runtime.corpus = new CorpusService({
             binaryPath: runtime.binary?.path ?? "",
@@ -589,6 +605,7 @@ export default Plugin.define({
       dataDir: engineDataDir,
       portLockPath: join(root, "nodes", ".port-lock"),
       explicitUrl: config.node.url,
+      embedMode: config.index.neural ? EmbedMode.Neural : EmbedMode.Lexical,
       logger,
       binary: () => runtime.binary,
       onSpawned: () => counters.noteSpawn(),

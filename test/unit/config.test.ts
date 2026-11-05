@@ -40,6 +40,13 @@ describe("loadConfig", () => {
     expect(warnings.some((entry) => entry.includes("index.auto"))).toBe(true);
   });
 
+  test("enables neural embeddings by default and reads the override", () => {
+    expect(loadConfig(undefined).config.index.neural).toBe(true);
+    const { config, warnings } = loadConfig({ index: { neural: false } });
+    expect(config.index.neural).toBe(false);
+    expect(warnings).toEqual([]);
+  });
+
   test("ignores unknown keys", () => {
     const { config } = loadConfig({ nope: true, node: { port: 9300 } });
     expect(config.node.port).toBe(9300);

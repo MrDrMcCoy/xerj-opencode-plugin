@@ -8,6 +8,7 @@ import type { Logger } from "../log.ts";
 import { nodeDataDir } from "../paths.ts";
 import {
   detectNode,
+  EmbedMode,
   ensureNode,
   NodeError,
   persistPort,
@@ -29,6 +30,7 @@ export interface NodeRuntimeOptions {
   readonly portLockPath: string;
   /** Attach to this URL and never spawn or stop anything. */
   readonly explicitUrl: string | null;
+  readonly embedMode: EmbedMode;
   readonly logger: Logger;
   readonly binary: () => InstalledBinary | null;
   readonly onSpawned?: () => void;
@@ -117,6 +119,7 @@ export class NodeRuntime {
         preferredPort: this.options.preferredPort,
         persistedPort: await readPersistedPort(this.options.nodeDir),
         explicitUrl: this.options.explicitUrl,
+        embedMode: this.options.embedMode,
         onPort: (port) => persistPort(this.options.nodeDir, port),
         logger: this.options.logger,
       });

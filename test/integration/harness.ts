@@ -15,6 +15,7 @@ import { autoindexArgs, corpusLayout } from "../../src/index/corpus.ts";
 import { createLogger } from "../../src/log.ts";
 import { XerjClient } from "../../src/node/client.ts";
 import { NodeRuntime } from "../../src/node/runtime.ts";
+import { EmbedMode } from "../../src/node/supervisor.ts";
 
 export interface Harness {
   readonly root: string;
@@ -135,6 +136,7 @@ export async function startHarness(): Promise<Harness> {
     dataDir: join(root, "data"),
     portLockPath: join(root, "nodes", ".port-lock"),
     explicitUrl: null,
+    embedMode: EmbedMode.Lexical,
     logger,
     binary: () => ({ path: binaryPath, version: "test", upgraded: false }),
   };
