@@ -127,6 +127,8 @@ interface Hooks {
   activity: Array<string | undefined>;
   queries: Array<{ sessionID: string; paths: string[]; bytes: number; hits: number }>;
   injections: number;
+  costs?: number[];
+  prompts?: Array<{ sessionID: string; text: string }>;
 }
 
 async function register(
@@ -141,6 +143,8 @@ async function register(
     activity: [],
     queries: [],
     injections: 0,
+    costs: [],
+    prompts: [],
   };
 
   await registerSessionHooks(hooks.ctx as never, {
@@ -154,6 +158,12 @@ async function register(
     },
     onInject: () => {
       hooks.injections += 1;
+    },
+    onCost: (_sessionID, bytes) => {
+      hooks.costs!.push(bytes);
+    },
+    onPrompt: (sessionID, text) => {
+      hooks.prompts!.push({ sessionID, text });
     },
     recordQuery: async (sessionID, paths, bytes, hits) => {
       hooks.queries.push({ sessionID, paths: [...paths], bytes, hits });
@@ -329,7 +339,14 @@ describe("memory recall", () => {
     const hooks = await register({
       search: fakeSearch({ hits: [], text: "passage", bytes: 10 }, []),
       memory: fakeMemory(
-        [{ id: "mem1", text: "Use RRF.", metadata: { kind: "decision" }, score: 1 }],
+        [
+          {
+            id: "mem1",
+            text: "The watcher stores its journal state under the node dir.",
+            metadata: { kind: "decision" },
+            score: 1,
+          },
+        ],
         calls,
       ),
     });
@@ -345,6 +362,19 @@ describe("memory recall", () => {
     expect(systemTexts(second).some((text) => text.includes("[mem 1]"))).toBe(false);
   });
 
+  test("does not inject a memory unrelated to the prompt", async () => {
+    const hooks = await register({
+      memory: fakeMemory(
+        [{ id: "mem1", text: "Use RRF.", metadata: { kind: "decision" }, score: 1 }],
+        [],
+      ),
+    });
+    await hooks.ctx.handlers.prompt(promptEvent("s1", LONG, "m1"));
+    const event = contextEvent("s1", "m1");
+    await hooks.ctx.handlers.context(event);
+    expect(systemTexts(event).some((text) => text.includes("[mem 1]"))).toBe(false);
+  });
+
   test("respects the configured recall limit", async () => {
     const calls: Array<{ query: string; k: number }> = [];
     const hooks = await register({
@@ -353,5 +383,31 @@ describe("memory recall", () => {
     });
     await hooks.ctx.handlers.prompt(promptEvent("s1", LONG));
     expect(calls[0]?.k).toBe(3);
+  });
+});
+
+describe("cost accounting", () => {
+  test("charges only the overhead beyond passages already counted as returned", async () => {
+    const text = "[1] src/a.ts:3\ncode";
+    const hooks = await register({
+      search: fakeSearch({ hits: [{ path: "src/a.ts" }], text, bytes: Buffer.byteLength(text) }, []),
+    });
+    await hooks.ctx.handlers.prompt(promptEvent("s1", LONG, "m1"));
+    const event = contextEvent("s1", "m1");
+    await hooks.ctx.handlers.context(event);
+
+    const block = systemTexts(event).find((part) => part.includes("<xerj-context>"))!;
+    const summary = systemTexts(event).find((part) => part.includes("<xerj-corpus>"))!;
+    const overhead = Buffer.byteLength(block) - Buffer.byteLength(text);
+    expect(hooks.costs).toEqual([Buffer.byteLength(summary), overhead]);
+  });
+});
+
+describe("prompt reporting", () => {
+  test("reports substantive prompts and skips filler", async () => {
+    const hooks = await register();
+    await hooks.ctx.handlers.prompt(promptEvent("s1", LONG));
+    await hooks.ctx.handlers.prompt(promptEvent("s1", "please continue"));
+    expect(hooks.prompts).toEqual([{ sessionID: "s1", text: LONG }]);
   });
 });

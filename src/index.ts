@@ -44,7 +44,11 @@ import {
   type StatusSnapshot,
 } from "./rpc.ts";
 import { MemoryStore } from "./memory/store.ts";
-import { startCompactionCapture } from "./memory/capture.ts";
+import {
+  SessionPrompts,
+  startCompactionCapture,
+  startTurnCapture,
+} from "./memory/capture.ts";
 import { migrateMemoryIndex, migrateProjectStorage } from "./memory/migrate.ts";
 import { RemoteSpool } from "./remote/spool.ts";
 import { shellReadPaths } from "./remote/shell.ts";
@@ -341,7 +345,8 @@ export default Plugin.define({
       return [
         `Local XERJ index for this project: ${status.index.docs} records (${status.index.state}).`,
         "Use xerj_search for code and documentation questions, and xerj_def for a symbol.",
-        "Prefer a cited passage over reading whole files.",
+        "A cited passage is the file's current text: answer from it, and read the file only to edit it.",
+        "Use xerj_recall before asking the user about earlier decisions.",
       ].join(" ");
     };
 
@@ -443,6 +448,10 @@ export default Plugin.define({
       }
     });
 
+    // Prompts this instance saw; scopes the server-wide event stream to this
+    // project's sessions for memory capture.
+    const prompts = new SessionPrompts();
+
     await registerSessionHooks(ctx, {
       config,
       logger,
@@ -452,6 +461,7 @@ export default Plugin.define({
       onActivity: (sessionID) => runtime.lifecycle?.touch(sessionID),
       onInject: () => counters.noteInjection(),
       onCost: (sessionID, bytes) => void ledger.recordInjection(bytes),
+      onPrompt: (sessionID, text) => prompts.note(sessionID, text),
       recordQuery: (sessionID, paths, bytes, hits) =>
         ledger.recordQuery(sessionID, paths, bytes, hits),
     });
@@ -665,7 +675,17 @@ export default Plugin.define({
           memory: runtime.memory,
           signal: shutdown.signal,
           logger,
+          owns: (sessionID) => prompts.knows(sessionID),
         });
+        if (config.memory.captureTurns) {
+          startTurnCapture({
+            events: ctx.event,
+            memory: runtime.memory,
+            signal: shutdown.signal,
+            logger,
+            prompts,
+          });
+        }
       }
 
       // A refused root gets no node at startup: nothing will be indexed and the
@@ -805,7 +825,13 @@ async function ensureProjectState(projectRoot: string): Promise<void> {
 
 function corpusStatus(corpus: CorpusService | null): Pick<
   StatusSnapshot["index"],
-  "state" | "lastRunAt" | "lastGeneration" | "lastRecords" | "restarts" | "lastError"
+  | "state"
+  | "lastRunAt"
+  | "lastGeneration"
+  | "lastRecords"
+  | "lastFiles"
+  | "restarts"
+  | "lastError"
 > {
   const snapshot: CorpusSnapshot | null = corpus?.snapshot() ?? null;
   return {
@@ -813,6 +839,7 @@ function corpusStatus(corpus: CorpusService | null): Pick<
     lastRunAt: snapshot?.lastRun?.at ?? null,
     lastGeneration: snapshot?.lastRun?.generation ?? null,
     lastRecords: snapshot?.lastRun?.records ?? null,
+    lastFiles: snapshot?.lastRun?.files ?? null,
     restarts: snapshot?.restarts ?? 0,
     lastError: snapshot?.lastError ?? null,
   };

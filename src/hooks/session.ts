@@ -10,7 +10,7 @@ import type { Config } from "../config.ts";
 import type { Logger } from "../log.ts";
 import type { MemoryStore } from "../memory/store.ts";
 import { formatMemories } from "../memory/store.ts";
-import { contentTerms } from "../search/rank.ts";
+import { contentTerms, coversTerms } from "../search/rank.ts";
 import type { SearchService } from "../search/service.ts";
 
 export interface SessionHookOptions {
@@ -20,8 +20,14 @@ export interface SessionHookOptions {
   readonly getMemory: () => MemoryStore | null;
   readonly summarize: () => Promise<string>;
   readonly onInject?: () => void;
-  /** Reports bytes the plugin placed into context, for the cost ledger. */
+  /**
+   * Reports bytes the plugin placed into context beyond the passages already
+   * counted as returned by `recordQuery`, so the ledger never charges a
+   * passage twice: once against savings and once as cost.
+   */
   readonly onCost?: (sessionID: string, bytes: number) => void;
+  /** Reports a prompt worth retrieving for, e.g. to title a captured turn. */
+  readonly onPrompt?: (sessionID: string, text: string) => void;
   /** Resets the idle deadline; called for every prompt and model call. */
   readonly onActivity?: (sessionID?: string) => void;
   readonly recordQuery: (
@@ -35,12 +41,17 @@ export interface SessionHookOptions {
 interface Prepared {
   readonly messageID: string;
   readonly block: string;
+  /** Passage bytes inside `block`, already charged through `recordQuery`. */
+  readonly passageBytes: number;
   readonly memory: string;
   readonly hits: number;
 }
 
 const MIN_QUERY_LENGTH = 12;
 const MIN_CONTENT_TERMS = 2;
+// Memories are phrased in another session's words, so they need a looser
+// match than passages before they are injected.
+const MEMORY_COVERAGE_RATIO = 0.5;
 
 /**
  * Slash commands, one-word replies, and prompts made of filler ("please
@@ -58,6 +69,8 @@ export function formatContextBlock(text: string): string {
   return [
     "<xerj-context>",
     "Retrieved from the local XERJ index. Cite path:line when you use it.",
+    // Reads of cited files cancel the savings; say what the passage already is.
+    "Passages are current file text. Read a file only to edit it or to see past the passage.",
     "",
     text,
     "</xerj-context>",
@@ -83,6 +96,7 @@ export async function registerSessionHooks(
     options.onActivity?.(event.sessionID);
     const text = event.prompt.text.trim();
     if (!shouldRetrieve(text)) return;
+    options.onPrompt?.(event.sessionID, text);
 
     const search = options.getSearch();
     if (!search) return;
@@ -98,6 +112,7 @@ export async function registerSessionHooks(
       prepared.set(event.sessionID, {
         messageID: event.messageID,
         block: result.text.trim().length === 0 ? "" : formatContextBlock(result.text),
+        passageBytes: result.text.trim().length === 0 ? 0 : result.bytes,
         memory,
         hits: result.hits.length,
       });
@@ -130,19 +145,19 @@ export async function registerSessionHooks(
     injected.add(key);
     prepared.delete(event.sessionID);
 
-    let bytes = 0;
+    let overhead = 0;
     if (entry.memory.length > 0) {
       event.system.push({ type: "text", text: entry.memory });
-      bytes += Buffer.byteLength(entry.memory, "utf8");
+      overhead += Buffer.byteLength(entry.memory, "utf8");
     }
     if (entry.block.length > 0) {
       event.system.push({ type: "text", text: entry.block });
-      bytes += Buffer.byteLength(entry.block, "utf8");
+      overhead += Math.max(0, Buffer.byteLength(entry.block, "utf8") - entry.passageBytes);
     }
-    if (bytes === 0) return;
+    if (entry.memory.length === 0 && entry.block.length === 0) return;
 
     options.onInject?.();
-    options.onCost?.(event.sessionID, bytes);
+    if (overhead > 0) options.onCost?.(event.sessionID, overhead);
   });
 }
 
@@ -154,7 +169,12 @@ async function recallMemories(
   const memory = options.getMemory();
   if (!memory) return "";
 
-  const hits = (await memory.recall(text, 3)).filter((hit) => !injected.has(hit.id));
+  const terms = contentTerms(text);
+  const hits = (await memory.recall(text, 3)).filter((hit) => {
+    if (injected.has(hit.id)) return false;
+    const topic = typeof hit.metadata.topic === "string" ? hit.metadata.topic : "";
+    return coversTerms(`${topic}\n${hit.text}`, terms, MEMORY_COVERAGE_RATIO);
+  });
   if (hits.length === 0) return "";
 
   const block = formatMemories(hits, options.config.context.memoryTokens * 4);

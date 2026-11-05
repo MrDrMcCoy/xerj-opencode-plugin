@@ -92,10 +92,14 @@ export function formatUntil(now: number, at: number): string {
 export function sidebarLines(snapshot: StatusSnapshot, now: number): string[] {
   const index = snapshot.index;
   const usage = snapshot.usage;
+  // Files, not records: the headline already counts docs, and a record count
+  // next to it reads as a mismatch because docs include symbol records.
   const records =
-    index.lastRecords === null
+    index.lastRunAt === null
       ? "no runs"
-      : `${formatCount(index.lastRecords)} records`;
+      : index.lastFiles === null
+        ? `${formatCount(index.lastRecords ?? 0)} records`
+        : `${formatCount(index.lastFiles)} files`;
 
   return [
     `XERJ  ${marker(snapshot)} ${headline(snapshot)}`,
@@ -151,7 +155,9 @@ export function panelSections(snapshot: StatusSnapshot, now: number): PanelSecti
         [
           `last run ${formatAge(now, index.lastRunAt)}`,
           `generation ${index.lastGeneration ?? "—"}`,
-          `${index.lastRecords ?? 0} records`,
+          index.lastFiles === null
+            ? `${index.lastRecords ?? 0} records`
+            : `${formatCount(index.lastFiles)} files → ${formatCount(index.lastRecords ?? 0)} records`,
         ].join(" · "),
       ],
     },

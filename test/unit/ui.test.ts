@@ -42,6 +42,7 @@ function snapshot(overrides: Partial<StatusSnapshot> = {}): StatusSnapshot {
       lastRunAt: 1_000_000,
       lastGeneration: 12,
       lastRecords: 437,
+      lastFiles: 40,
       restarts: 0,
       lastError: null,
       datasets: [
@@ -133,7 +134,7 @@ describe("sidebarLines", () => {
     expect(lines[1]).toContain("hit 75%");
     expect(lines[1]).toContain("~45.0K tok saved");
     expect(lines[2]).toContain("2m ago");
-    expect(lines[2]).toContain("437 records");
+    expect(lines[2]).toContain("40 files");
     expect(lines[3]).toContain("/xerj");
   });
 
@@ -208,6 +209,11 @@ describe("panelSections", () => {
     expect(brains?.lines[0]).toContain("1m ago");
   });
 
+  test("shows the last pass as files mapped to records", () => {
+    const index = panelSections(snapshot(), NOW).find((section) => section.title === "Index");
+    expect(index?.lines[2]).toContain("40 files → 437 records");
+  });
+
   test("says when there is nothing to show", () => {
     const sections = panelSections(
       snapshot({
@@ -219,6 +225,7 @@ describe("panelSections", () => {
           datasets: [],
           lastRunAt: null,
           lastRecords: null,
+          lastFiles: null,
         },
         usage: { ...snapshot().usage, topFiles: [], tokensSaved: 0 },
         recent: [],

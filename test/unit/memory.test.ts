@@ -70,6 +70,16 @@ describe("formatMemories", () => {
     expect(block.length).toBeLessThan(420);
   });
 
+  test("clips a memory longer than the budget instead of dropping it", () => {
+    // Compaction summaries run to 4000 characters; the default budget is 1600.
+    const summary = { id: "1", text: "word ".repeat(800), metadata: { kind: "summary" }, score: 1 };
+    const block = formatMemories([summary], 1600);
+
+    expect(block).toContain("[mem 1] (summary) word");
+    expect(block).toContain("…");
+    expect(block.length).toBeLessThan(1800);
+  });
+
   test("returns an empty string when nothing fits", () => {
     expect(
       formatMemories([{ id: "1", text: "long", metadata: {}, score: 1 }], 5),

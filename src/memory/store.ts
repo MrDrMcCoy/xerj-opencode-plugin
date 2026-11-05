@@ -26,6 +26,8 @@ const KINDS: ReadonlySet<string> = new Set([
 ]);
 const DEFAULT_KIND: MemoryKind = "fact";
 const RECENCY_WEIGHT = 0.2;
+// A clipped memory shorter than this carries a header and little else.
+const MIN_CLIPPED_CHARS = 120;
 
 export interface RememberInput {
   readonly text: string;
@@ -105,8 +107,15 @@ export function formatMemories(
     const kind = typeof hit.metadata.kind === "string" ? hit.metadata.kind : "note";
     const header = `[mem ${index + 1}] (${kind})`;
     const text = hit.text.trim().replace(/\s+/g, " ");
-    const line = `${header} ${text}`;
-    if (used + line.length + 1 > budgetChars) break;
+    const room = budgetChars - used - 1;
+    let line = `${header} ${text}`;
+    // A long summary is clipped to the room left rather than dropped: the
+    // budget is smaller than a compaction summary, so dropping it would mean
+    // summaries are never recalled at all.
+    if (line.length > room) {
+      if (room < MIN_CLIPPED_CHARS) break;
+      line = `${line.slice(0, room - 1)}…`;
+    }
     lines.push(line);
     used += line.length + 1;
   }

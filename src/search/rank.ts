@@ -142,15 +142,20 @@ export function dropUncovered(
   query: string,
 ): ParsedHit[] {
   const terms = contentTerms(query);
-  if (terms.length === 0) return [];
-  const required = Math.ceil(terms.length * COVERAGE_RATIO);
+  return hits.filter((hit) => coversTerms(`${hit.path ?? ""}\n${hit.text}`, terms));
+}
 
-  return hits.filter((hit) => {
-    const haystack = `${hit.path ?? ""}\n${hit.text}`.toLowerCase();
-    let covered = 0;
-    for (const term of terms) {
-      if (haystack.includes(term)) covered += 1;
-    }
-    return covered >= required;
-  });
+/** True when `text` carries the required share of `terms`; none never covers. */
+export function coversTerms(
+  text: string,
+  terms: ReadonlyArray<string>,
+  ratio = COVERAGE_RATIO,
+): boolean {
+  if (terms.length === 0) return false;
+  const haystack = text.toLowerCase();
+  let covered = 0;
+  for (const term of terms) {
+    if (haystack.includes(term)) covered += 1;
+  }
+  return covered >= Math.ceil(terms.length * ratio);
 }

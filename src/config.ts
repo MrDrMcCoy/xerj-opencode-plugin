@@ -60,6 +60,8 @@ export interface ContextOptions {
 
 export interface MemoryOptions {
   readonly enabled: boolean;
+  /** Store each substantive turn's final answer as a `summary` memory. */
+  readonly captureTurns: boolean;
 }
 
 export interface StatsOptions {
@@ -126,7 +128,7 @@ export const DEFAULT_CONFIG: Config = {
     maxPassages: 4,
     timeoutMs: 400,
   },
-  memory: { enabled: true },
+  memory: { enabled: true, captureTurns: true },
   stats: { enabled: true, bytesPerToken: 4, maxBaselineBytes: 128 * 1024 },
   telemetry: { anomaly: false },
 };
@@ -280,6 +282,12 @@ export function loadConfig(
     },
     memory: {
       enabled: readBoolean(memory.enabled, DEFAULT_CONFIG.memory.enabled, "memory.enabled", warnings),
+      captureTurns: readBoolean(
+        memory.captureTurns,
+        DEFAULT_CONFIG.memory.captureTurns,
+        "memory.captureTurns",
+        warnings,
+      ),
     },
     stats: {
       enabled: readBoolean(stats.enabled, DEFAULT_CONFIG.stats.enabled, "stats.enabled", warnings),

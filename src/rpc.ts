@@ -68,6 +68,8 @@ export interface IndexStatus {
   readonly lastRunAt: number | null;
   readonly lastGeneration: number | null;
   readonly lastRecords: number | null;
+  /** Files the last pass covered; `docs` also counts symbol records. */
+  readonly lastFiles: number | null;
   readonly restarts: number;
   readonly lastError: string | null;
   readonly datasets: ReadonlyArray<DatasetStatus>;
@@ -185,6 +187,7 @@ const definition = {
           lastRunAt: { type: ["number", "null"] },
           lastGeneration: { type: ["number", "null"] },
           lastRecords: { type: ["number", "null"] },
+          lastFiles: { type: ["number", "null"] },
           restarts: { type: "number" },
           lastError: { type: ["string", "null"] },
           datasets: {

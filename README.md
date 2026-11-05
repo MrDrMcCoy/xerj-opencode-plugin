@@ -158,7 +158,7 @@ This is the complete set with its defaults, in
         "remote":  { "enabled": true, "maxBytes": 2000000 },
         "context": { "enabled": true, "maxTokens": 1500, "memoryTokens": 400,
                      "maxPassages": 4, "timeoutMs": 400 },
-        "memory":  { "enabled": true },
+        "memory":  { "enabled": true, "captureTurns": true },
         "stats":   { "enabled": true, "bytesPerToken": 4,
                      "maxBaselineBytes": 131072 },
         "telemetry": { "anomaly": false }
@@ -193,6 +193,7 @@ The same entry works with a checkout path instead of the package name; see
 | `context.maxTokens` | Ceiling for injected passages. |
 | `context.memoryTokens` | Ceiling for injected memories. |
 | `context.timeoutMs` | Retrieval deadline; miss it and inject nothing. |
+| `memory.captureTurns` | Store each substantive turn's final answer (400+ characters) as a `summary` memory, paired with its prompt. Needs `context.enabled`, which records the prompts. |
 | `stats.maxBaselineBytes` | Cap on the baseline credited per cited file. |
 | `telemetry.anomaly` | Reserved; background telemetry is not implemented. |
 

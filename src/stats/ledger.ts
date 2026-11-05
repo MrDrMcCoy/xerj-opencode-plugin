@@ -7,6 +7,7 @@
 import { stat } from "node:fs/promises";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import type { KeyValueStorage, Logger } from "../log.ts";
+import { isGeneratedPath } from "../search/rank.ts";
 
 export interface CitedFile {
   readonly path: string;
@@ -25,7 +26,10 @@ export interface LedgerSnapshot {
   readonly bytesRead: number;
   readonly savedBytes: number;
   readonly tokensSaved: number;
-  /** Tokens the plugin itself added to context (injections + corpus summary). */
+  /**
+   * Tokens the plugin added to context beyond the passages `bytesReturned`
+   * already subtracts from savings: memory, the corpus summary, and wrappers.
+   */
   readonly tokensCost: number;
   /** tokensSaved - tokensCost; negative means the plugin cost more than it saved. */
   readonly netTokens: number;
@@ -64,6 +68,9 @@ interface LifetimeState {
 }
 
 const MAX_TRACKED_FILES = 5000;
+// Bumped when stored citations stop meaning the same thing. Version 2 starts
+// after the injection relevance gate; earlier counts were mostly noise hits.
+const CITATIONS_VERSION = 2;
 const FLUSH_DELAY_MS = 2_000;
 
 export class Ledger {
@@ -218,7 +225,10 @@ export class Ledger {
       bytesRead: numberOr(record.bytesRead, 0),
       injected: numberOr(record.injected, 0),
       cited: fileMap(record.cited),
-      citations: countMap(record.citations),
+      citations:
+        record.citationsVersion === CITATIONS_VERSION
+          ? countMap(record.citations)
+          : new Map(),
       read: fileMap(record.read),
     };
   }
@@ -303,6 +313,7 @@ export class Ledger {
       bytesRead: this.lifetime.bytesRead,
       injected: this.lifetime.injected,
       cited: [...this.lifetime.cited].slice(-MAX_TRACKED_FILES),
+      citationsVersion: CITATIONS_VERSION,
       citations: [...this.lifetime.citations].slice(-MAX_TRACKED_FILES),
       // Infinity is not JSON; -1 means "the whole file was read".
       read: [...this.lifetime.read]
@@ -355,6 +366,7 @@ function topCited(
   cited: ReadonlyMap<string, number>,
 ): CitedFile[] {
   return [...citations.entries()]
+    .filter(([path]) => !isGeneratedPath(path))
     .map(([path, count]) => ({ path, citations: count, bytes: cited.get(path) ?? 0 }))
     .sort((left, right) => right.citations - left.citations || left.path.localeCompare(right.path))
     .slice(0, TOP_FILES);

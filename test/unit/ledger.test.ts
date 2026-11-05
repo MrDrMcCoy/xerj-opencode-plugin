@@ -172,4 +172,28 @@ describe("Ledger", () => {
     expect(second.snapshot().baselineBytes).toBe(40);
     expect(second.snapshot().topFiles[0]?.path).toBe("d.txt");
   });
+
+  test("drops citations stored before the relevance gate, keeping counters", async () => {
+    const { storage, data } = store();
+    data.set("stats/lifetime:test", {
+      queries: 9,
+      hits: 8,
+      citations: [["LICENSE", 7], ["src/a.ts", 2]],
+    });
+
+    const accounting = ledger(storage);
+    await accounting.recordQuery("s", [], 0, 0);
+    expect(accounting.snapshot().queries).toBe(10);
+    expect(accounting.snapshot().topFiles).toEqual([]);
+  });
+
+  test("leaves generated files out of the top cited list", async () => {
+    await writeFile(join(root, "bun.lock"), "lock");
+    await writeFile(join(root, "e.txt"), "e");
+    const { storage } = store();
+    const accounting = ledger(storage);
+
+    await accounting.recordQuery("s", ["bun.lock", "e.txt"], 0, 1);
+    expect(accounting.snapshot().topFiles.map((file) => file.path)).toEqual(["e.txt"]);
+  });
 });

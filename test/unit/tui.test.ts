@@ -32,6 +32,7 @@ const SNAPSHOT: StatusSnapshot = {
     lastRunAt: 1,
     lastGeneration: 1,
     lastRecords: 3,
+    lastFiles: 1,
     restarts: 0,
     lastError: null,
     datasets: [{ name: "project", docs: 3, bytes: 512 }],
