@@ -2,6 +2,7 @@
 // and registers tools, hooks, and RPC. Nothing here blocks plugin load: a slow
 // download or a missing node must not delay OpenCode startup.
 
+import { existsSync } from "node:fs";
 import { mkdir, stat, writeFile } from "node:fs/promises";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { Plugin } from "@opencode/plugin";
@@ -51,6 +52,7 @@ import {
   startCompactionCapture,
   startTurnCapture,
 } from "./memory/capture.ts";
+import { unindexedDocsHint } from "./index/hint.ts";
 import { recoverMemoryIndex } from "./memory/health.ts";
 import { migrateMemoryIndex, migrateProjectStorage } from "./memory/migrate.ts";
 import { RemoteSpool } from "./remote/spool.ts";
@@ -105,6 +107,16 @@ export default Plugin.define({
 
     const overbroad = isOverbroadRoot(projectRoot);
     const indexWarnings = [...warnings];
+    if (!overbroad) {
+      const docsHint = unindexedDocsHint(
+        (folder) => existsSync(join(projectRoot, folder)),
+        [...config.index.hidden, ...config.index.brain],
+      );
+      if (docsHint !== null) {
+        indexWarnings.push(docsHint);
+        logger.warn(docsHint);
+      }
+    }
     if (overbroad) {
       const refusal =
         `refusing to index ${projectRoot}: the home directory and filesystem roots are too broad. Open OpenCode inside a project.`;
