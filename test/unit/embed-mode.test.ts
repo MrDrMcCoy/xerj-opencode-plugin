@@ -67,7 +67,6 @@ describe("embedding mode reconciliation", () => {
     const { client, deleted } = stubClient([
       "xop-proj-docs",
       "xop-web-docs",
-      ".xerj-memory-proj",
       "autoindex-catalog",
     ]);
 
@@ -82,6 +81,20 @@ describe("embedding mode reconciliation", () => {
     expect(deleted).toEqual(["xop-proj-docs", "xop-web-docs"]);
     await expect(readFile(join(stateDir, "journal.ndjson"), "utf8")).rejects.toThrow();
     expect(await readEmbedMode(nodeDir)).toBe(EmbedMode.Neural);
+  });
+
+  test("a changed mode backs up memory before dropping it", async () => {
+    const memoryName = ".xerj-memory-proj";
+    const memoryDir = join(nodeDir, "data", memoryName);
+    await mkdir(memoryDir, { recursive: true });
+    await writeFile(join(memoryDir, "segment.bin"), "memory-bytes");
+    const { client, deleted } = stubClient([memoryName]);
+
+    await reconcileEmbedMode({ client, nodeDir, stateDir, mode: EmbedMode.Neural });
+
+    expect(deleted).toEqual([memoryName]);
+    const backup = join(nodeDir, "embed-backup", EmbedMode.Lexical, memoryName, "segment.bin");
+    expect(await readFile(backup, "utf8")).toBe("memory-bytes");
   });
 
   test("the new mode is recorded so the next start matches", async () => {

@@ -2,13 +2,20 @@
 // re-embeds existing documents. Recording the mode per node lets a change
 // rebuild the plugin's indices instead of mixing vectors from two models.
 
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { cp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { XerjClient } from "./client.ts";
 import { EmbedMode } from "./supervisor.ts";
 
 /** Indices every plugin-owned corpus shares; this node serves one project only. */
 const PLUGIN_INDEX_PREFIX = "xop-";
+
+/**
+ * Project memory is not rebuildable from the corpus, so a mode change copies
+ * its index directory aside before the index is dropped.
+ */
+const MEMORY_INDEX_PREFIX = ".xerj-memory-";
+const BACKUP_DIR = "embed-backup";
 
 /** A node built before the option existed used the engine's lexical default. */
 const UNRECORDED_MODE = EmbedMode.Lexical;
@@ -39,6 +46,11 @@ export async function reconcileEmbedMode(options: {
 
   const indices = await client.indices();
   for (const { index } of indices) {
+    if (index.startsWith(MEMORY_INDEX_PREFIX)) {
+      await backupMemoryIndex(nodeDir, recorded, index);
+      await client.deleteIndex(index);
+      continue;
+    }
     if (!index.startsWith(PLUGIN_INDEX_PREFIX)) continue;
     await client.deleteIndex(index);
   }
@@ -46,4 +58,18 @@ export async function reconcileEmbedMode(options: {
   await rm(stateDir, { recursive: true, force: true });
   await writeFile(embedModePath(nodeDir), mode, { mode: 0o600 });
   return true;
+}
+
+async function backupMemoryIndex(
+  nodeDir: string,
+  recordedMode: EmbedMode,
+  index: string,
+): Promise<void> {
+  const source = join(nodeDir, "data", index);
+  const exists = await stat(source).then(() => true, () => false);
+  if (!exists) return;
+
+  // A failed copy throws, so the caller keeps the index instead of dropping it.
+  const target = join(nodeDir, BACKUP_DIR, recordedMode, index);
+  await cp(source, target, { recursive: true, force: true });
 }
