@@ -155,9 +155,35 @@ export function coversTerms(
   const haystack = text.toLowerCase();
   let covered = 0;
   for (const term of terms) {
-    if (haystack.includes(term)) covered += 1;
+    if (coversTerm(haystack, term)) covered += 1;
   }
   return covered >= Math.ceil(terms.length * ratio);
+}
+
+// Prompts ask "how are ids generated" while code says "generate". Matching the
+// stem keeps those passages; the word-start anchor stops short stems from
+// matching in the middle of unrelated words.
+function coversTerm(haystack: string, term: string): boolean {
+  if (haystack.includes(term)) return true;
+  const stem = stemOf(term);
+  if (stem === term) return false;
+  // Terms are [a-z0-9_] only, so the stem needs no escaping.
+  return new RegExp(`\\b${stem}`).test(haystack);
+}
+
+const SUFFIXES = ["ing", "ed", "es", "s", "ly"];
+
+/** Shortest stem worth matching; below this a suffix would match noise. */
+const MIN_STEM_LENGTH = 4;
+
+/** The stem of a term, or the term itself when no suffix applies. */
+function stemOf(term: string): string {
+  for (const suffix of SUFFIXES) {
+    if (!term.endsWith(suffix)) continue;
+    const stem = term.slice(0, -suffix.length);
+    if (stem.length >= MIN_STEM_LENGTH) return stem;
+  }
+  return term;
 }
 
 const TEST_DIRS = /(^|\/)(test|tests|__tests__|spec|specs)\//;

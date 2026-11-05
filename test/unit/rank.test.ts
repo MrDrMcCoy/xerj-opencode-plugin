@@ -156,6 +156,23 @@ describe("dropUncovered", () => {
   test("keeps nothing when the prompt has no content terms", () => {
     expect(dropUncovered([passage("a.md", "yes do it")], "yes, do it")).toEqual([]);
   });
+
+  test("a word form counts as the prompt's term", () => {
+    // Prompts ask "how are ids generated"; code says "generate".
+    const code = passage("src/memory/store.ts", "export function generateId(text: string) {");
+    expect(dropUncovered([code], "how are memory ids generated")).toHaveLength(1);
+  });
+
+  test("an inflected verb counts as the prompt's term", () => {
+    // Prompts ask "which names are refused"; code says "refuse".
+    const code = passage("src/remote/spool.ts", "// Refuse credential files before reading them.");
+    expect(dropUncovered([code], "which credential names are refused before reading")).toHaveLength(1);
+  });
+
+  test("a short word does not match by its stem", () => {
+    const code = passage("a.md", "the cat sat");
+    expect(dropUncovered([code], "cats" )).toEqual([]);
+  });
 });
 
 describe("isTestPath", () => {
