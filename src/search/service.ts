@@ -58,6 +58,12 @@ export interface SearchOptions {
    * session's context do not need to be injected again.
    */
   readonly exclude?: (hit: SearchHit) => boolean;
+  /**
+   * Lets the semantic leg's top hits through the word-coverage gate. A prompt
+   * says "folder" where the code says "directory"; a neural embedder finds that
+   * without sharing the word. Only set when the index was built for it.
+   */
+  readonly trustSemantic?: boolean;
 }
 
 export interface ParsedHit extends SearchHit {
@@ -69,6 +75,8 @@ const MAX_K = 50;
 const CANDIDATE_FACTOR = 2;
 const MAPPING_TTL_MS = 60_000;
 const RRF_K = 60;
+/** Semantic-leg hits allowed past the word-coverage gate. */
+const TRUSTED_SEMANTIC_HITS = 3;
 const MAX_RESOLVED_FILE_BYTES = 512 * 1024;
 const SOURCE_FIELDS = [
   "ax_path",
@@ -157,9 +165,13 @@ export class SearchService {
       ? fuse([lexical.hits, semantic.hits], pool)
       : lexical.hits.slice(0, pool);
     const ranked = demoteGenerated(this.locateBrainPaths(fused), trimmed);
+    const trusted =
+      options.trustSemantic === true && semantic !== null
+        ? new Set(semantic.hits.slice(0, TRUSTED_SEMANTIC_HITS).map((hit) => hit.id))
+        : new Set<string>();
     const located =
       options.surface === "context"
-        ? preferSources(dropUncovered(dropGenerated(ranked, trimmed), trimmed), trimmed)
+        ? preferSources(dropUncovered(dropGenerated(ranked, trimmed), trimmed, trusted), trimmed)
         : ranked;
     const resolved = dropDuplicateLocations(await this.resolveLines(located, trimmed));
     const candidates = dropShadowedWholeFiles(resolved, this.hiddenIndex, this.brainSpecs);

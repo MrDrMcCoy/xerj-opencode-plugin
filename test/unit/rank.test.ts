@@ -169,6 +169,19 @@ describe("dropUncovered", () => {
     expect(dropUncovered([code], "which credential names are refused before reading")).toHaveLength(1);
   });
 
+  test("an allowed hit passes on one shared word", () => {
+    // "folder" is "directory" in the code; the semantic leg supplies the match.
+    const code = passage("src/index/brain.ts", "// Walks the brain directory and writes edges.");
+    const query = "how is a brain graph built from a folder";
+    expect(dropUncovered([code], query)).toEqual([]);
+    expect(dropUncovered([code], query, new Set([code.id]))).toHaveLength(1);
+  });
+
+  test("an allowed hit with no shared word is still dropped", () => {
+    const noise = passage("bun.lock", "registry tarball integrity sha512");
+    expect(dropUncovered([noise], "continue", new Set([noise.id]))).toEqual([]);
+  });
+
   test("a short word does not match by its stem", () => {
     const code = passage("a.md", "the cat sat");
     expect(dropUncovered([code], "cats" )).toEqual([]);

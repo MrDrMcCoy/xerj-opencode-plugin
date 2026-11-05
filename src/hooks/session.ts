@@ -225,6 +225,7 @@ async function retrieve(
       maxTokens: options.config.context.maxTokens,
       signal: controller.signal,
       exclude,
+      trustSemantic: options.config.index.neural,
     });
   } finally {
     clearTimeout(timer);

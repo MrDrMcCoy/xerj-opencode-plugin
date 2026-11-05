@@ -140,9 +140,23 @@ export function contentTerms(query: string): string[] {
 export function dropUncovered(
   hits: ReadonlyArray<ParsedHit>,
   query: string,
+  /** Records whose relevance another signal already established. */
+  allowedIds: ReadonlySet<string> = new Set(),
 ): ParsedHit[] {
   const terms = contentTerms(query);
-  return hits.filter((hit) => coversTerms(`${hit.path ?? ""}\n${hit.text}`, terms));
+  return hits.filter((hit) => {
+    const text = `${hit.path ?? ""}\n${hit.text}`;
+    if (coversTerms(text, terms)) return true;
+    // A trusted record still has to share one word with the prompt: synonyms
+    // should bridge the gap, not replace the subject entirely.
+    return allowedIds.has(hit.id) && coversAnyTerm(text, terms);
+  });
+}
+
+/** True when `text` carries at least one of `terms`. */
+export function coversAnyTerm(text: string, terms: ReadonlyArray<string>): boolean {
+  const haystack = text.toLowerCase();
+  return terms.some((term) => coversTerm(haystack, term));
 }
 
 /** True when `text` carries the required share of `terms`; none never covers. */
