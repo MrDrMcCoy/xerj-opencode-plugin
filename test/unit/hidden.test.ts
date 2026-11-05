@@ -82,11 +82,22 @@ describe("HiddenIndex", () => {
     const actions = bulks.flatMap((bulk) => bulk.actions);
     const paths = actions.map((action) => action.source.path).sort();
 
+    const plan = actions.find((action) => action.source.path === ".agents/plan.md");
+
     expect(bulks[0]?.index).toBe("xop-demo-1234-hidden-docs");
     expect(paths).toEqual([".agents/nested/note.md", ".agents/plan.md"]);
-    expect(actions[0]?.source.hidden).toBe(true);
-    expect(actions[0]?.source.body).toContain("Hidden body");
+    expect(plan?.source.hidden).toBe(true);
+    expect(plan?.source.body).toContain("Hidden body");
     expect(index.snapshot().docs).toBe(2);
+  });
+
+  test("uploads documents in path order regardless of directory order", async () => {
+    const { bulks, index } = await fixture();
+    await index.reindex();
+
+    const uploaded = bulks.flatMap((bulk) => bulk.actions).map((action) => action.source.path);
+
+    expect(uploaded).toEqual([...uploaded].sort());
   });
 
   test("tolerates an index that already exists", async () => {

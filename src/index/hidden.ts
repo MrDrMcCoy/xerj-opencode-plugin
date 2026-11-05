@@ -231,7 +231,12 @@ export class HiddenIndex {
       () => [],
     );
 
-    for (const entry of entries) {
+    // Directory order is filesystem-defined; sort it so uploads and ids do not vary by host.
+    const ordered = [...entries].sort((a, b) =>
+      a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
+    );
+
+    for (const entry of ordered) {
       if (files.length >= MAX_FILES) return;
 
       const absolute = join(directory, entry.name);
