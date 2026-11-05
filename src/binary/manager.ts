@@ -20,7 +20,13 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { Logger } from "../log.ts";
 import { binaryPath, releaseCachePath } from "../paths.ts";
-import { highestVersion, normalizeVersion, parseVersion, shouldUpgrade } from "../semver.ts";
+import {
+  highestVersion,
+  meetsTrackingFloor,
+  normalizeVersion,
+  parseVersion,
+  shouldUpgrade,
+} from "../semver.ts";
 import type { PlatformInfo } from "../platform.ts";
 import {
   archiveRoot,
@@ -57,6 +63,8 @@ export interface EnsureBinaryOptions {
 }
 
 const COMMAND_TIMEOUT_MS = 60_000;
+const RELEASE_LIST_TIMEOUT_MS = 10_000;
+const RELEASES_API_URL = "https://api.github.com/repos/xerj-org/xerj/releases?per_page=100";
 
 export async function ensureBinary(options: EnsureBinaryOptions): Promise<InstalledBinary> {
   const { root, requested, platform, info, logger } = options;
@@ -154,14 +162,8 @@ async function resolveLatest(
   if (cached && cacheIsFresh(cached, now())) return cached.version;
 
   try {
-    const response = await fetch(latestReleaseUrl(), {
-      redirect: "follow",
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-    const version = versionFromLatestUrl(response.url);
-    if (!version) throw new Error("release redirect did not carry a version");
+    const version = await newestTrackedRelease();
+    if (!version) throw new Error("no release at or above the tracking floor");
 
     const next: ReleaseCache = { checkedAt: now(), version };
     await mkdir(root, { recursive: true, mode: 0o700 });
@@ -170,6 +172,36 @@ async function resolveLatest(
   } catch (error) {
     logger.warn("could not check the latest xerj release", String(error));
     return cached?.version ?? null;
+  }
+}
+
+/** Newest release at or above the tracking floor. Prereleases are not
+ * marked latest by GitHub, so the full list is read; the redirect is the
+ * fallback when the API is unreachable or rate limited. */
+async function newestTrackedRelease(): Promise<string | null> {
+  try {
+    const response = await fetch(RELEASES_API_URL, {
+      headers: { accept: "application/vnd.github+json" },
+      signal: AbortSignal.timeout(RELEASE_LIST_TIMEOUT_MS),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+    const releases = (await response.json()) as ReadonlyArray<{
+      tag_name?: unknown;
+      draft?: unknown;
+    }>;
+    const versions = releases
+      .filter((release) => release.draft !== true)
+      .map((release) => String(release.tag_name ?? "").replace(/^v/, ""))
+      .filter(meetsTrackingFloor);
+    return highestVersion(versions);
+  } catch {
+    const response = await fetch(latestReleaseUrl(), {
+      redirect: "follow",
+      signal: AbortSignal.timeout(RELEASE_LIST_TIMEOUT_MS),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return versionFromLatestUrl(response.url);
   }
 }
 

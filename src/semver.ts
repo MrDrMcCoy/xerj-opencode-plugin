@@ -96,8 +96,18 @@ export function shouldUpgrade(installed: string, remote: string): boolean {
   const current = parseVersion(installed);
   const next = parseVersion(remote);
   if (!current || !next) return false;
-  if (next.major !== current.major) return false;
   return compareVersions(next, current) > 0;
+}
+
+/** Lowest release `auto` will track. Earlier prereleases are not offered. */
+export const TRACKING_FLOOR = "1.0.0-rc.1";
+
+/** True when a release is at or above the tracking floor. */
+export function meetsTrackingFloor(version: string): boolean {
+  const candidate = parseVersion(version);
+  const floor = parseVersion(TRACKING_FLOOR);
+  if (!candidate || !floor) return false;
+  return compareVersions(candidate, floor) >= 0;
 }
 
 /** Returns the highest version in a list, ignoring invalid entries. */

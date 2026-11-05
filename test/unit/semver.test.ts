@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   compareVersionStrings,
   highestVersion,
+  meetsTrackingFloor,
   normalizeVersion,
   parseVersion,
   shouldUpgrade,
@@ -42,15 +43,23 @@ describe("prerelease ordering", () => {
 });
 
 describe("shouldUpgrade", () => {
-  test("takes any newer release in the same major", () => {
+  test("takes any newer release, including a new major", () => {
     expect(shouldUpgrade("1.0.0-rc.99", "1.0.0-rc.100")).toBe(true);
     expect(shouldUpgrade("1.0.0-rc.100", "1.0.1")).toBe(true);
+    expect(shouldUpgrade("1.0.0", "2.0.0")).toBe(true);
   });
 
-  test("never downgrades or crosses a major", () => {
+  test("never downgrades", () => {
     expect(shouldUpgrade("1.0.0-rc.100", "1.0.0-rc.99")).toBe(false);
-    expect(shouldUpgrade("1.0.0", "2.0.0")).toBe(false);
-    expect(shouldUpgrade("0.9.0", "1.0.0")).toBe(false);
+    expect(shouldUpgrade("2.0.0", "1.9.0")).toBe(false);
+  });
+
+  test("tracks only releases at or above the tracking floor", () => {
+    expect(meetsTrackingFloor("1.0.0-rc.1")).toBe(true);
+    expect(meetsTrackingFloor("1.0.0-rc.101")).toBe(true);
+    expect(meetsTrackingFloor("1.0.0-rc.0")).toBe(false);
+    expect(meetsTrackingFloor("0.9.0")).toBe(false);
+    expect(meetsTrackingFloor("not-a-version")).toBe(false);
   });
 
   test("ignores invalid input", () => {

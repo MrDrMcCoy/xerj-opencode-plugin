@@ -6,7 +6,8 @@ import type { Libc } from "./platform.ts";
 // string instead of a number is worse than one that starts with defaults.
 
 export interface BinaryOptions {
-  /** "auto" tracks the latest release; anything else pins a version. */
+  /** "auto" tracks the newest release at or above the tracking floor,
+   * across majors; anything else pins that exact version. */
   readonly version: string;
   /** Explicit binary path; skips download and upgrade entirely. */
   readonly path: string | null;
