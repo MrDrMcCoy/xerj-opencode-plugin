@@ -340,6 +340,14 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-05: `binary.version: "auto"` now tracks the newest non-draft
+  release at or above 1.0.0-rc.1 across majors, read from the GitHub
+  releases list (redirect fallback). Pins still install exactly that
+  version. Commit 665b7a1; 363 unit tests pass. The cached 0.6.2 epoch is
+  synced and `release-cache.json` was removed, so the next OpenCode start
+  installs rc.101 and rebuilds the project index in neural mode (rc.101
+  changes its data format; reset accepted by the user).
+
 - 2026-11-05: Improvement pass on the loaded 0.6.2 (committed as 0.6.3,
   synced into the cached 0.6.2 epoch, not tagged or published). Memory
   never grew: compaction is rare under Magic Context, and the one summary
