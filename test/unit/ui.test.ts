@@ -78,6 +78,7 @@ function snapshot(overrides: Partial<StatusSnapshot> = {}): StatusSnapshot {
       nodeSpawns: 1,
       http429: 0,
       indexRuns: 9,
+      noiseSkips: 3,
     },
     recent: ["warn: retry"],
     warnings: [],

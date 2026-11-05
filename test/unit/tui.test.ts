@@ -65,6 +65,7 @@ const SNAPSHOT: StatusSnapshot = {
     nodeSpawns: 1,
     http429: 0,
     indexRuns: 2,
+    noiseSkips: 1,
   },
   recent: [],
   warnings: [],

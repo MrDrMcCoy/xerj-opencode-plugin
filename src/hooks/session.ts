@@ -28,6 +28,8 @@ export interface SessionHookOptions {
   readonly onCost?: (sessionID: string, bytes: number) => void;
   /** Reports a prompt worth retrieving for, e.g. to title a captured turn. */
   readonly onPrompt?: (sessionID: string, text: string) => void;
+  /** Reports a prompt whose passages the relevance gate dropped entirely. */
+  readonly onNoiseSkip?: () => void;
   /** Resets the idle deadline; called for every prompt and model call. */
   readonly onActivity?: (sessionID?: string) => void;
   readonly recordQuery: (
@@ -108,7 +110,10 @@ export async function registerSessionHooks(
 
       const memory = await recallMemories(text, options, injectedMemories);
 
-      if (result.hits.length === 0 && memory.length === 0) return;
+      if (result.hits.length === 0 && memory.length === 0) {
+        options.onNoiseSkip?.();
+        return;
+      }
       prepared.set(event.sessionID, {
         messageID: event.messageID,
         block: result.text.trim().length === 0 ? "" : formatContextBlock(result.text),

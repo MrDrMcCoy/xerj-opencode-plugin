@@ -8,6 +8,8 @@ export interface CounterSnapshot {
   readonly nodeSpawns: number;
   readonly http429: number;
   readonly indexRuns: number;
+  /** Prompts whose passages the relevance gate dropped, so nothing injected. */
+  readonly noiseSkips: number;
 }
 
 /** Counts events without changing them; callers never branch on a counter. */
@@ -17,6 +19,7 @@ export class Counters {
   private spawns = 0;
   private limited = 0;
   private indexed = 0;
+  private skipped = 0;
 
   /** A TUI poll or any other RPC call reached the server part. */
   noteRpc(): void {
@@ -43,6 +46,14 @@ export class Counters {
     this.indexed += 1;
   }
 
+  /**
+   * Retrieval ran and the relevance gate kept nothing, so the turn injected
+   * no context. Counted apart from a miss: the query never had a chance.
+   */
+  noteNoiseSkip(): void {
+    this.skipped += 1;
+  }
+
   snapshot(): CounterSnapshot {
     return {
       rpcCalls: this.rpc,
@@ -50,6 +61,7 @@ export class Counters {
       nodeSpawns: this.spawns,
       http429: this.limited,
       indexRuns: this.indexed,
+      noiseSkips: this.skipped,
     };
   }
 }

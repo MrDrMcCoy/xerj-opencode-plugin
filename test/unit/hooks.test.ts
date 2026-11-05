@@ -129,6 +129,7 @@ interface Hooks {
   injections: number;
   costs?: number[];
   prompts?: Array<{ sessionID: string; text: string }>;
+  noiseSkips: number;
 }
 
 async function register(
@@ -145,6 +146,7 @@ async function register(
     injections: 0,
     costs: [],
     prompts: [],
+    noiseSkips: 0,
   };
 
   await registerSessionHooks(hooks.ctx as never, {
@@ -164,6 +166,9 @@ async function register(
     },
     onPrompt: (sessionID, text) => {
       hooks.prompts!.push({ sessionID, text });
+    },
+    onNoiseSkip: () => {
+      hooks.noiseSkips += 1;
     },
     recordQuery: async (sessionID, paths, bytes, hits) => {
       hooks.queries.push({ sessionID, paths: [...paths], bytes, hits });
@@ -255,6 +260,21 @@ describe("prompt hook", () => {
     expect(hooks.injections).toBe(0);
   });
 
+  test("counts a prompt whose passages the gate dropped as noise", async () => {
+    const hooks = await register({ search: fakeSearch({ hits: [], text: "", bytes: 0 }, []) });
+    await hooks.ctx.handlers.prompt(promptEvent("s1", LONG));
+    expect(hooks.noiseSkips).toBe(1);
+    expect(hooks.injections).toBe(0);
+  });
+
+  test("does not count a real hit as noise", async () => {
+    const hooks = await register({
+      search: fakeSearch({ hits: [{ path: "src/a.ts" }], text: "[1] src/a.ts:1", bytes: 40 }, []),
+    });
+    await hooks.ctx.handlers.prompt(promptEvent("s1", LONG));
+    expect(hooks.noiseSkips).toBe(0);
+  });
+
   test("survives a search failure and still summarises the corpus", async () => {
     const hooks = await register({ search: fakeSearch(null, []) });
     await hooks.ctx.handlers.prompt(promptEvent("s1", LONG));
@@ -306,7 +326,13 @@ describe("context hook", () => {
 
   test("recovers the corpus summary after a failed first session", async () => {
     let fail = true;
-    const hooks: Hooks = { ctx: fakeCtx(), activity: [], queries: [], injections: 0 };
+    const hooks: Hooks = {
+      ctx: fakeCtx(),
+      activity: [],
+      queries: [],
+      injections: 0,
+      noiseSkips: 0,
+    };
     await registerSessionHooks(hooks.ctx as never, {
       config: DEFAULT_CONFIG,
       logger,

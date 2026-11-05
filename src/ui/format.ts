@@ -229,6 +229,8 @@ export function panelSections(snapshot: StatusSnapshot, now: number): PanelSecti
         `${formatCount(snapshot.counters.nodeSpawns)} spawns · ` +
           `${formatCount(snapshot.counters.http429)} rate-limited · ` +
           `${formatCount(snapshot.counters.rpcCalls)} rpc calls`,
+        `${formatCount(snapshot.counters.noiseSkips)} prompts skipped as noise ` +
+          "(gate kept nothing, so the turn injected no context)",
       ],
     },
     {

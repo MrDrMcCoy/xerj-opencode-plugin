@@ -97,6 +97,7 @@ export interface CounterStatus {
   readonly nodeSpawns: number;
   readonly http429: number;
   readonly indexRuns: number;
+  readonly noiseSkips: number;
 }
 
 export interface ConfigStatus {
@@ -247,6 +248,7 @@ const definition = {
           nodeSpawns: { type: "number" },
           http429: { type: "number" },
           indexRuns: { type: "number" },
+          noiseSkips: { type: "number" },
         }),
         recent: { type: "array", items: { type: "string" } },
         warnings: { type: "array", items: { type: "string" } },
