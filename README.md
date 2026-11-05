@@ -157,7 +157,7 @@ This is the complete set with its defaults, in
                      "maxMinutes": 10 },
         "remote":  { "enabled": true, "maxBytes": 2000000 },
         "context": { "enabled": true, "maxTokens": 1500, "memoryTokens": 400,
-                     "maxPassages": 4, "timeoutMs": 400 },
+                     "maxPassages": 6, "timeoutMs": 400 },
         "memory":  { "enabled": true, "captureTurns": true },
         "stats":   { "enabled": true, "bytesPerToken": 4,
                      "maxBaselineBytes": 131072 },

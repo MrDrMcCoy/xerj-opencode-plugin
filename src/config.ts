@@ -129,7 +129,7 @@ export const DEFAULT_CONFIG: Config = {
     enabled: true,
     maxTokens: 1500,
     memoryTokens: 400,
-    maxPassages: 4,
+    maxPassages: 6,
     timeoutMs: 400,
   },
   memory: { enabled: true, captureTurns: true },
