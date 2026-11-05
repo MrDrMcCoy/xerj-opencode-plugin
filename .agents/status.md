@@ -340,6 +340,28 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-05: Audit of the loaded 0.6.3 on rc.101 found the memory index
+  refusing to open. The neural reconcile dropped only `xop-*` indices, so
+  the memory index kept its lexical vectors and the engine answered
+  "holds vectors produced by embedding backend lexical" — every remember
+  and recall returned nothing while the panel looked healthy. A mode
+  change now backs up the memory index to `embed-backup/<old mode>/`
+  before dropping it, recall and capture failures log at `warn`, and
+  startup repairs an unhealthy memory index into
+  `embed-backup/unreadable/`. The live index was backed up by hand and
+  rebuilt; remember/recall/forget round-trip on the node.
+
+  Retrieval measured against the 20-prompt labeled set on the live neural
+  index: the context surface found the expected file in 16 prompts at
+  6 passages and 0.5 coverage, up from 13 at the old 4 passages and 0.6.
+  Terms now also match their stem, so "generated" matches "generate".
+  Ten directive-style prompts injected the same bytes at both ratios.
+  `context.maxPassages` defaults to 6. Prompt storage: harness markers
+  (`mc:…`) are skipped and a repeated prompt replaces its earlier memory.
+  The panel now counts prompts the gate skipped as noise, which explains
+  a hit rate that counts directive prompts as misses. 376 unit tests and
+  9 integration tests pass; typecheck clean.
+
 - 2026-11-05: `binary.version: "auto"` now tracks the newest non-draft
   release at or above 1.0.0-rc.1 across majors, read from the GitHub
   releases list (redirect fallback). Pins still install exactly that
