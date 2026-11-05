@@ -51,6 +51,7 @@ import {
   startCompactionCapture,
   startTurnCapture,
 } from "./memory/capture.ts";
+import { recoverMemoryIndex } from "./memory/health.ts";
 import { migrateMemoryIndex, migrateProjectStorage } from "./memory/migrate.ts";
 import { RemoteSpool } from "./remote/spool.ts";
 import { shellReadPaths } from "./remote/shell.ts";
@@ -778,6 +779,21 @@ export default Plugin.define({
       }
 
       runtime.node = await nodes.ensure();
+
+      // A memory index built by a different embedder is refused by the node and
+      // reports unhealthy rather than failing loudly. Repair it before the first
+      // recall so a broken store cannot pass as an empty one.
+      if (config.memory.enabled) {
+        await recoverMemoryIndex({
+          client,
+          nodeDir,
+          namespace: memoryNamespace(projectRoot),
+          logger,
+        }).catch((error: unknown) => {
+          logger.warn("could not check the memory index", String(error));
+        });
+      }
+
       await startIndexers(runtime.node);
 
       runtime.phase = "ready";
