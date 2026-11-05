@@ -72,7 +72,7 @@ export class MemoryStore {
         recency_weight: RECENCY_WEIGHT,
       });
     } catch (error) {
-      this.logger.debug("memory recall failed", String(error));
+      this.logger.warn("memory recall failed", String(error));
       return [];
     }
   }

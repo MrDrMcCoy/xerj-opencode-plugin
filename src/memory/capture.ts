@@ -167,7 +167,7 @@ async function remember(
   await options.memory
     .remember({ ...input, kind: "summary" })
     .catch((error: unknown) => {
-      options.logger.debug("memory capture failed", String(error));
+      options.logger.warn("memory capture failed", String(error));
     });
 }
 
