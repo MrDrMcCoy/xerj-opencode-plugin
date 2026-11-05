@@ -53,6 +53,20 @@ interface Prepared {
 
 const MIN_QUERY_LENGTH = 12;
 const MIN_CONTENT_TERMS = 2;
+// Tracking is per session and bounded: a long-lived server must not grow.
+const MAX_TRACKED_SESSIONS = 200;
+const MAX_LOCATIONS_PER_SESSION = 512;
+
+/** Inserts as the newest entry and evicts the oldest session past the cap. */
+function forgetOldest<K, V>(map: Map<K, V>, key: K, value: V): void {
+  map.delete(key);
+  map.set(key, value);
+  while (map.size > MAX_TRACKED_SESSIONS) {
+    const oldest = map.keys().next().value;
+    if (oldest === undefined) return;
+    map.delete(oldest);
+  }
+}
 // Memories are phrased in another session's words, so they need a looser
 // match than passages before they are injected.
 const MEMORY_COVERAGE_RATIO = 0.5;
@@ -91,13 +105,15 @@ export async function registerSessionHooks(
 ): Promise<void> {
   if (!options.config.context.enabled) return;
 
+  // Every per-session record is bounded: a server can run for days and see
+  // thousands of sessions, so nothing here may grow without limit.
   const prepared = new Map<string, Prepared>();
-  const injected = new Set<string>();
-  const injectedMemories = new Set<string>();
+  const lastInjected = new Map<string, string>();
+  const memoriesShown = new Map<string, Set<string>>();
   // Locations already in this session's context; injecting them again spends
   // budget on text the model can already see.
   const seen = new Map<string, Set<string>>();
-  const summarized = new Set<string>();
+  const summarized = new Map<string, true>();
 
   await ctx.session.hook("prompt", async (event) => {
     options.onActivity?.(event.sessionID);
@@ -116,13 +132,15 @@ export async function registerSessionHooks(
       const paths = result.hits.flatMap((hit) => (hit.path ? [hit.path] : []));
       await options.recordQuery(event.sessionID, paths, result.bytes, result.hits.length);
 
-      const memory = await recallMemories(text, options, injectedMemories);
+      const shown = memoriesShown.get(event.sessionID) ?? new Set<string>();
+      const memory = await recallMemories(text, options, shown);
+      if (memory.length > 0) forgetOldest(memoriesShown, event.sessionID, shown);
 
       if (result.hits.length === 0 && memory.length === 0) {
         options.onNoiseSkip?.();
         return;
       }
-      prepared.set(event.sessionID, {
+      forgetOldest(prepared, event.sessionID, {
         messageID: event.messageID,
         block: result.text.trim().length === 0 ? "" : formatContextBlock(result.text),
         passageBytes: result.text.trim().length === 0 ? 0 : result.bytes,
@@ -138,7 +156,7 @@ export async function registerSessionHooks(
   await ctx.session.hook("context", async (event) => {
     options.onActivity?.(event.sessionID);
     if (!summarized.has(event.sessionID)) {
-      summarized.add(event.sessionID);
+      forgetOldest(summarized, event.sessionID, true);
       try {
         const summary = await options.summarize();
         if (summary.length > 0) {
@@ -154,9 +172,8 @@ export async function registerSessionHooks(
     const entry = prepared.get(event.sessionID);
     if (!entry) return;
 
-    const key = `${event.sessionID}:${entry.messageID}`;
-    if (injected.has(key)) return;
-    injected.add(key);
+    if (lastInjected.get(event.sessionID) === entry.messageID) return;
+    forgetOldest(lastInjected, event.sessionID, entry.messageID);
     prepared.delete(event.sessionID);
 
     let overhead = 0;
@@ -172,8 +189,16 @@ export async function registerSessionHooks(
 
     if (entry.block.length > 0) {
       const locations = seen.get(event.sessionID) ?? new Set<string>();
-      for (const key of entry.locations) locations.add(key);
-      seen.set(event.sessionID, locations);
+      for (const key of entry.locations) {
+        locations.add(key);
+        // A long session at the cap would stop deduping rather than grow; the
+        // oldest key leaves first.
+        if (locations.size > MAX_LOCATIONS_PER_SESSION) {
+          const oldest = locations.values().next().value;
+          if (oldest !== undefined) locations.delete(oldest);
+        }
+      }
+      forgetOldest(seen, event.sessionID, locations);
     }
 
     options.onInject?.();
@@ -184,14 +209,15 @@ export async function registerSessionHooks(
 async function recallMemories(
   text: string,
   options: SessionHookOptions,
-  injected: Set<string>,
+  /** Memory ids this session already received. */
+  shown: Set<string>,
 ): Promise<string> {
   const memory = options.getMemory();
   if (!memory) return "";
 
   const terms = contentTerms(text);
   const hits = (await memory.recall(text, 3)).filter((hit) => {
-    if (injected.has(hit.id)) return false;
+    if (shown.has(hit.id)) return false;
     const topic = typeof hit.metadata.topic === "string" ? hit.metadata.topic : "";
     return coversTerms(`${topic}\n${hit.text}`, terms, MEMORY_COVERAGE_RATIO);
   });
@@ -200,7 +226,7 @@ async function recallMemories(
   const block = formatMemories(hits, options.config.context.memoryTokens * 4);
   if (block.length === 0) return "";
 
-  for (const hit of hits) injected.add(hit.id);
+  for (const hit of hits) shown.add(hit.id);
   return block;
 }
 

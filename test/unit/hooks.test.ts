@@ -368,6 +368,26 @@ describe("context hook", () => {
     expect(hooks.injections).toBe(1);
   });
 
+  test("forgets the oldest session once the tracking cap is reached", async () => {
+    const hooks = await register({
+      search: fakeSearch({ hits: [{ path: "src/a.ts" }], text: "passage text", bytes: 10 }, []),
+    });
+    await hooks.ctx.handlers.prompt(promptEvent("s0", LONG, "m1"));
+    await hooks.ctx.handlers.context(contextEvent("s0", "m1"));
+    expect(hooks.injections).toBe(1);
+
+    for (let i = 1; i <= 210; i += 1) {
+      const id = `s${i}`;
+      await hooks.ctx.handlers.prompt(promptEvent(id, LONG, "m1"));
+      await hooks.ctx.handlers.context(contextEvent(id, "m1"));
+    }
+
+    // The first session aged out, so its passage counts as new again.
+    await hooks.ctx.handlers.prompt(promptEvent("s0", LONG, "m2"));
+    await hooks.ctx.handlers.context(contextEvent("s0", "m2"));
+    expect(hooks.injections).toBe(212);
+  });
+
   test("summarises the corpus once per session", async () => {
     const hooks = await register();
     const events = [contextEvent("s1"), contextEvent("s1"), contextEvent("s1")];
