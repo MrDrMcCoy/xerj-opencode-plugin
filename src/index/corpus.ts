@@ -62,10 +62,12 @@ export interface AutoindexOptions {
   readonly nodeUrl: string;
   readonly config: Config;
   readonly watch: boolean;
+  /** Rebuild the resume plan in place; ids stay stable for unchanged bytes. */
+  readonly fresh?: boolean;
 }
 
 export function autoindexArgs(options: AutoindexOptions): ReadonlyArray<string> {
-  const { layout, nodeUrl, config, watch } = options;
+  const { layout, nodeUrl, config, watch, fresh = false } = options;
   const args = [
     "autoindex",
     layout.projectRoot,
@@ -84,6 +86,8 @@ export function autoindexArgs(options: AutoindexOptions): ReadonlyArray<string> 
   if (watch) {
     args.push("--watch", "--debounce", String(config.index.debounceMs));
   }
+
+  if (fresh) args.push("--fresh");
 
   if (config.index.workers !== null) {
     args.push("--workers", String(config.index.workers));

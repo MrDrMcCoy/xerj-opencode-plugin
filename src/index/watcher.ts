@@ -63,6 +63,9 @@ const CONTENTION_MARKER = "already owns";
 // flock instead, with a different message but the same meaning.
 const CONTENTION_IN_USE = "already in use by another process";
 const CONTENTION_RETRY_MS = 5_000;
+// The journal records the node URL it was built against. After the node moves
+// to another port every pass is refused until the plan is rebuilt in place.
+const JOURNAL_REBIND_MARKER = "current run has";
 // A watcher that survives this long is watching, even before its first run
 // document lands: an initial pass over a large corpus takes minutes, and the
 // status would otherwise read "starting" the whole time.
@@ -114,6 +117,11 @@ function isContention(stderr: string): boolean {
   return stderr.includes(CONTENTION_MARKER) || stderr.includes(CONTENTION_IN_USE);
 }
 
+/** The journal belongs to another root, URL or prefix and wants `--fresh`. */
+function isJournalRebind(stderr: string): boolean {
+  return stderr.includes("journal at") && stderr.includes(JOURNAL_REBIND_MARKER);
+}
+
 export function listWatchableDirectories(
   root: string,
   max = MAX_LOCAL_WATCH_DIRS,
@@ -156,6 +164,9 @@ export class CorpusService {
   private readonly watchers = new Map<string, FSWatcher>();
   private rescanTimer: ReturnType<typeof setTimeout> | null = null;
   private localWatch = false;
+  // Set once by a refused pass; the next spawn adds `--fresh` and clears it.
+  private freshNext = false;
+  private lastSpawnFresh = false;
   private ownsLocalWatch = false;
   private polling = false;
   private onceRunning = false;
@@ -290,11 +301,15 @@ export class CorpusService {
     this.spawning = true;
     if (watch) RESIDENT_WATCHERS.add(watcherKey);
 
+    const fresh = this.freshNext;
+    this.freshNext = false;
+    this.lastSpawnFresh = fresh;
     const args = autoindexArgs({
       layout: this.layout,
       nodeUrl: this.options.nodeUrl,
       config: this.options.config,
       watch,
+      fresh,
     });
 
     let child: ChildProcess;
@@ -391,6 +406,12 @@ export class CorpusService {
       return;
     }
 
+    if (this.rebindJournal()) {
+      this.state = "starting";
+      this.spawn(true);
+      return;
+    }
+
     // A clean exit from `--watch` is unexpected; it should stay resident.
     if (meaning === "decision") {
       this.state = "idle";
@@ -418,6 +439,19 @@ export class CorpusService {
     setTimeout(() => this.spawn(true), delay);
   }
 
+  /**
+   * Arms a `--fresh` pass when the engine refused the journal because it was
+   * built against another node URL (the node moved ports). Once per refusal:
+   * a pass that is refused even with `--fresh` is a real failure.
+   */
+  private rebindJournal(): boolean {
+    if (!isJournalRebind(this.lastStderr) || this.lastSpawnFresh) return false;
+    this.freshNext = true;
+    this.lastError = null;
+    this.options.logger.info("autoindex journal is bound to another node; rebuilding the plan");
+    return true;
+  }
+
   private handleOnceExit(code: number | null): void {
     const meaning = exitMeaning(code);
     if (meaning === "ok" || meaning === "junk") {
@@ -438,6 +472,11 @@ export class CorpusService {
     if (isContention(this.lastStderr)) {
       this.options.logger.debug("autoindex state is busy; retrying");
       setTimeout(() => void this.runOnce(), CONTENTION_RETRY_MS);
+      return;
+    }
+
+    if (this.rebindJournal()) {
+      this.pendingRun = true;
       return;
     }
 

@@ -139,6 +139,52 @@ echo '{"doc_kind":"run","generation":1,"records_total":3}'
     20_000,
   );
 
+  test(
+    "a journal bound to another node URL is rebuilt with --fresh",
+    async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "xerj-project-"));
+    const argsLog = join(projectRoot, "args");
+    const script = `#!/bin/sh
+echo "$@" >> ${JSON.stringify(argsLog)}
+case " $* " in *" --fresh "*) ;; *)
+  echo "error: journal at /x/journal.ndjson was created for root=/p url=http://127.0.0.1:9200 prefix=xop; current run has root=/p url=http://127.0.0.1:9240 prefix=xop" >&2
+  exit 1;;
+esac
+echo '{"doc_kind":"run","generation":1,"records_total":5}'
+`;
+    const warnings: string[] = [];
+    const loud: Logger = { ...logger, warn: (message: string) => warnings.push(message) };
+    const instance = new CorpusService({
+      binaryPath: fakeBinary(script),
+      nodeUrl: "http://127.0.0.1:9240",
+      projectRoot,
+      prefix: "xop-project-12345678",
+      stateRoot: join(projectRoot, ".xerj"),
+      config: {
+        ...DEFAULT_CONFIG,
+        index: { ...DEFAULT_CONFIG.index, watch: false, periodicMs: 60_000 },
+      },
+      storage: storage(),
+      logger: loud,
+    });
+    running.push(instance);
+
+    await instance.start();
+    for (let waited = 0; waited < 5_000; waited += 100) {
+      if (instance.snapshot().lastRun) break;
+      await Bun.sleep(100);
+    }
+    expect(instance.snapshot().lastRun?.records).toBe(5);
+    expect(instance.snapshot().lastError).toBeNull();
+    expect(warnings).toEqual([]);
+    const runs = readFileSync(argsLog, "utf8").trim().split("\n");
+    expect(runs).toHaveLength(2);
+    expect(runs[0]).not.toContain("--fresh");
+    expect(runs[1]).toContain("--fresh");
+    },
+    10_000,
+  );
+
   test("a second service for one state dir shares the resident watcher", async () => {
     const binary = fakeBinary();
     const stateRoot = mkdtempSync(join(tmpdir(), "xerj-data-"));
