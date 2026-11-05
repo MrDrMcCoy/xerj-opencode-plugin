@@ -340,6 +340,25 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-05: Improvement pass on the loaded 0.6.2 (committed as 0.6.3,
+  synced into the cached 0.6.2 epoch, not tagged or published). Memory
+  never grew: compaction is rare under Magic Context, and the one summary
+  could never be recalled because `formatMemories` dropped lines longer
+  than its budget. Long memories are clipped now, each turn whose final
+  answer is 400+ chars is stored with its prompt (`memory.captureTurns`),
+  capture is limited to sessions this instance prompted (the event stream
+  is server-wide), and recalled memories must cover half the prompt's
+  terms. Cost no longer double-charges passages already in
+  `bytesReturned`. Pre-gate citations are dropped once (citations
+  version 2) and generated files never list as top cited. Status gains
+  `lastFiles`; the sidebar shows files instead of a record count that
+  looked like a mismatch with docs. Ranking: tests sort after sources on
+  the context surface, legs fetch 2k so demotion can promote, and
+  duplicate `path:line` hits are dropped. The injection wrapper tells
+  the model a passage is current file text. 355 unit tests pass. Not yet
+  observed live: `session.text.ended`/`session.execution.succeeded`
+  delivery to the turn capture (schema-verified only).
+
 - 2026-11-05: Hit-rate and token-cost pass. Measured the two legs on the
   live corpus: the lexical embedder scores every passage between 0.6 and
   0.8 and RRF has no absolute scale, so directives such as "push to github,
