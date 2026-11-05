@@ -299,8 +299,10 @@ describe("generated files", () => {
         },
       ],
     });
+    // Naming the lockfile keeps it; `src/a.ts` now fails the coverage gate
+    // because its passage shares no term with that query.
     const kept = await service(named).search("package-lock.json hash", { surface: "context" });
-    expect(kept.hits).toHaveLength(2);
+    expect(kept.hits.map((entry) => entry.path)).toEqual(["package-lock.json"]);
 
     const tools = fakeClient({
       searchResults: [

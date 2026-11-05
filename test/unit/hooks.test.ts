@@ -20,6 +20,11 @@ describe("shouldRetrieve", () => {
     expect(shouldRetrieve("yes, do it")).toBe(false);
   });
 
+  test("skips long prompts made of filler", () => {
+    expect(shouldRetrieve("please continue with that, thanks")).toBe(false);
+    expect(shouldRetrieve("ok go ahead and do the same again")).toBe(false);
+  });
+
   test("accepts a real question", () => {
     expect(shouldRetrieve("where is the watch process started?")).toBe(true);
   });

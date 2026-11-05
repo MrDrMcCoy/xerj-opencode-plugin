@@ -14,7 +14,7 @@ import type { Logger } from "../log.ts";
 import { XerjClient } from "../node/client.ts";
 import type { BrainSpec } from "../paths.ts";
 import type { BrainGraph } from "./brains.ts";
-import { demoteGenerated, dropGenerated } from "./rank.ts";
+import { demoteGenerated, dropGenerated, dropUncovered } from "./rank.ts";
 
 export interface SearchHit {
   readonly index: string;
@@ -140,7 +140,10 @@ export class SearchService {
     const strategy = semantic ? "hybrid" : "lexical";
     const fused = semantic ? fuse([lexical.hits, semantic.hits], k) : lexical.hits.slice(0, k);
     const ranked = demoteGenerated(this.locateBrainPaths(fused), trimmed);
-    const located = options.surface === "context" ? dropGenerated(ranked, trimmed) : ranked;
+    const located =
+      options.surface === "context"
+        ? dropUncovered(dropGenerated(ranked, trimmed), trimmed)
+        : ranked;
     const resolved = await this.resolveLines(located, trimmed);
     const hits = dropShadowedWholeFiles(
       resolved,

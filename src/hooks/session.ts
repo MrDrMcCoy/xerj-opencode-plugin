@@ -10,6 +10,7 @@ import type { Config } from "../config.ts";
 import type { Logger } from "../log.ts";
 import type { MemoryStore } from "../memory/store.ts";
 import { formatMemories } from "../memory/store.ts";
+import { contentTerms } from "../search/rank.ts";
 import type { SearchService } from "../search/service.ts";
 
 export interface SessionHookOptions {
@@ -39,12 +40,18 @@ interface Prepared {
 }
 
 const MIN_QUERY_LENGTH = 12;
+const MIN_CONTENT_TERMS = 2;
 
-/** Slash commands and one-word replies are not worth a retrieval pass. */
+/**
+ * Slash commands, one-word replies, and prompts made of filler ("please
+ * continue") are not worth a retrieval pass: they match nothing specific and
+ * would inject whatever scores highest on common words.
+ */
 export function shouldRetrieve(text: string): boolean {
   const trimmed = text.trim();
   if (trimmed.startsWith("/")) return false;
-  return trimmed.length >= MIN_QUERY_LENGTH;
+  if (trimmed.length < MIN_QUERY_LENGTH) return false;
+  return contentTerms(trimmed).length >= MIN_CONTENT_TERMS;
 }
 
 export function formatContextBlock(text: string): string {
