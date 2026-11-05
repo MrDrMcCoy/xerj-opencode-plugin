@@ -45,6 +45,12 @@ export interface TurnCaptureOptions {
   readonly maxChars?: number;
 }
 
+/**
+ * The host folds its own bookkeeping prompts into compaction summaries and
+ * turn prompts. They carry no project knowledge, so they are not stored.
+ */
+const INTERNAL_MARKER = /^mc:/;
+
 const DEFAULT_MIN_CHARS = 120;
 const DEFAULT_MAX_CHARS = 4000;
 const SUMMARY_TOPIC = "session summary";
@@ -90,7 +96,7 @@ export function startCompactionCapture(options: CompactionCaptureOptions): void 
 
     const data = isRecord(raw.data) ? raw.data : {};
     const text = typeof data.text === "string" ? data.text.trim() : "";
-    if (text.length < minChars) return;
+    if (text.length < minChars || INTERNAL_MARKER.test(text)) return;
 
     const sessionID = typeof data.sessionID === "string" ? data.sessionID : undefined;
     if (options.owns && (sessionID === undefined || !options.owns(sessionID))) return;
@@ -111,6 +117,9 @@ export function startTurnCapture(options: TurnCaptureOptions): void {
   const minChars = options.minChars ?? TURN_MIN_CHARS;
   const maxChars = options.maxChars ?? TURN_MAX_CHARS;
   const answers = new Map<string, string>();
+  // One memory per prompt: a later answer replaces the earlier one instead of
+  // stacking a near-duplicate, so memory stays small enough to stay useful.
+  const stored = new Map<string, string>();
 
   const types: CaptureEvent[] = ["session.text.ended", "session.execution.succeeded"];
   listen(options, types, "turn capture", async (raw) => {
@@ -129,13 +138,22 @@ export function startTurnCapture(options: TurnCaptureOptions): void {
     answers.delete(sessionID);
     const prompt = options.prompts.latest(sessionID);
     if (answer === undefined || prompt === undefined) return;
-    if (answer.length < minChars) return;
+    if (answer.length < minChars || INTERNAL_MARKER.test(prompt)) return;
 
-    await remember(options, {
+    const topic = clip(prompt, TOPIC_MAX_CHARS);
+    const key = `${sessionID}\u0000${topic}`;
+    const previous = stored.get(key);
+    const id = await remember(options, {
       text: `Q: ${clip(prompt, PROMPT_MAX_CHARS)}\nA: ${clip(answer, maxChars)}`,
-      topic: clip(prompt, TOPIC_MAX_CHARS),
+      topic,
       sessionID,
     });
+    if (id === undefined) return;
+    stored.set(key, id);
+
+    if (previous !== undefined && previous !== id) {
+      await options.memory.forget(previous).catch(() => false);
+    }
   });
 }
 
@@ -163,11 +181,13 @@ function listen(
 async function remember(
   options: { memory: MemoryStore; logger: Logger },
   input: { text: string; topic: string; sessionID?: string },
-): Promise<void> {
-  await options.memory
+): Promise<string | undefined> {
+  return await options.memory
     .remember({ ...input, kind: "summary" })
+    .then((result) => result.id)
     .catch((error: unknown) => {
       options.logger.warn("memory capture failed", String(error));
+      return undefined;
     });
 }
 

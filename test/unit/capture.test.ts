@@ -19,15 +19,21 @@ const logger = {
 function stubStore(): {
   store: MemoryStore;
   seen: Array<{ text: string; kind?: string; topic?: string }>;
+  forgotten: string[];
 } {
   const seen: Array<{ text: string; kind?: string; topic?: string }> = [];
+  const forgotten: string[] = [];
   const store = {
     remember: async (input: { text: string; kind?: string; topic?: string }) => {
       seen.push(input);
-      return { id: "id", created: true };
+      return { id: `id-${seen.length}`, created: true };
+    },
+    forget: async (id: string) => {
+      forgotten.push(id);
+      return true;
     },
   } as unknown as MemoryStore;
-  return { store, seen };
+  return { store, seen, forgotten };
 }
 
 /** Emits the given events, then waits for a shutdown signal to settle. */
@@ -143,6 +149,27 @@ describe("compaction capture scope", () => {
 
     expect(seen).toHaveLength(1);
   });
+
+  test("skips a summary that is an internal harness marker", async () => {
+    const { store, seen } = stubStore();
+    const controller = new AbortController();
+    const prompts = new SessionPrompts();
+    prompts.note("ses_mine", "how is the watcher started");
+
+    startCompactionCapture({
+      events: stubEvents([
+        { type: "session.compaction.ended", data: { sessionID: "ses_mine", text: `mc:hidden:abc ${longText}` } },
+      ]),
+      memory: store,
+      signal: controller.signal,
+      logger,
+      owns: (sessionID) => prompts.knows(sessionID),
+    });
+    await settle();
+    controller.abort();
+
+    expect(seen).toEqual([]);
+  });
 });
 
 describe("turn capture", () => {
@@ -192,6 +219,45 @@ describe("turn capture", () => {
     stop();
 
     expect(seen).toEqual([]);
+  });
+
+  test("skips a turn whose prompt is an internal harness marker", async () => {
+    const prompts = new SessionPrompts();
+    prompts.note("ses_1", "mc:hidden:32f86de8:927f719f");
+    const { seen, stop } = run(
+      [
+        { type: "session.text.ended", data: { sessionID: "ses_1", text: answer } },
+        { type: "session.execution.succeeded", data: { sessionID: "ses_1" } },
+      ],
+      prompts,
+    );
+    await settle();
+    stop();
+
+    expect(seen).toEqual([]);
+  });
+
+  test("replaces the earlier memory when a prompt is answered twice", async () => {
+    const prompts = new SessionPrompts();
+    prompts.note("ses_1", "how does the watcher claim ownership");
+    const { store, forgotten } = stubStore();
+    const controller = new AbortController();
+    startTurnCapture({
+      events: stubEvents([
+        { type: "session.text.ended", data: { sessionID: "ses_1", text: answer } },
+        { type: "session.execution.succeeded", data: { sessionID: "ses_1" } },
+        { type: "session.text.ended", data: { sessionID: "ses_1", text: `${answer}And more.` } },
+        { type: "session.execution.succeeded", data: { sessionID: "ses_1" } },
+      ]),
+      memory: store,
+      signal: controller.signal,
+      logger,
+      prompts,
+    });
+    await settle();
+    controller.abort();
+
+    expect(forgotten).toEqual(["id-1"]);
   });
 
   test("clips the stored answer", async () => {
