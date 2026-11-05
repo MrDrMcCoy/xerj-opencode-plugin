@@ -188,6 +188,27 @@ describe("search legs", () => {
     expect(result.hits[0]!.score).toBeCloseTo(result.hits[1]!.score);
   });
 
+  test("an excluded hit never reaches the result or the budget", async () => {
+    const client = fakeClient({
+      searchResults: [
+        { hits: { hits: [hit({ id: "a" }), hit({ id: "b", text: "second passage text" })] } },
+        { hits: { hits: [] } },
+      ],
+    });
+    const excluded: string[] = [];
+    const result = await service(client).search("watcher journal", {
+      surface: "tool",
+      exclude: (entry) => {
+        excluded.push(entry.id);
+        return entry.id === "a";
+      },
+    });
+
+    expect(excluded).toContain("a");
+    expect(result.hits.map((entry) => entry.id)).toEqual(["b"]);
+    expect(result.text).not.toContain("first passage");
+  });
+
   test("sums the narrowing bytes of both legs", async () => {
     const client = fakeClient({
       searchResults: [

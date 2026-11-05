@@ -89,20 +89,36 @@ function fakeSearch(
     search: async (query: string, options: Record<string, unknown> = {}) => {
       calls.push({ query, options });
       if (result === null) throw new Error("node is down");
+      const hits = result.hits.map((hit, index) => ({
+        index: "i",
+        id: String(index),
+        passage: 0,
+        path: hit.path,
+        line: 1,
+        title: null,
+        kind: null,
+        score: 1,
+        text: "passage",
+      }));
+      // Mirror the service: an excluded hit is never rendered.
+      const exclude = options.exclude as ((hit: unknown) => boolean) | undefined;
+      const kept = exclude ? hits.filter((hit) => !exclude(hit)) : hits;
+      if (kept.length === hits.length) {
+        return {
+          hits,
+          text: result.text,
+          bytes: result.bytes,
+          strategy: "hybrid" as const,
+          narrowingBytes: 0,
+        };
+      }
+      const text = kept
+        .map((hit, index) => `[${index + 1}] ${hit.path ?? hit.index}:${hit.line}`)
+        .join("\n\n");
       return {
-        hits: result.hits.map((hit, index) => ({
-          index: "i",
-          id: String(index),
-          passage: 0,
-          path: hit.path,
-          line: 1,
-          title: null,
-          kind: null,
-          score: 1,
-          text: "passage",
-        })),
-        text: result.text,
-        bytes: result.bytes,
+        hits: kept,
+        text,
+        bytes: Buffer.byteLength(text, "utf8"),
         strategy: "hybrid" as const,
         narrowingBytes: 0,
       };
@@ -235,6 +251,42 @@ describe("prompt hook", () => {
     expect(hooks.injections).toBe(1);
   });
 
+  test("a new passage still injects after an earlier one", async () => {
+    let turn = 0;
+    const search = {
+      search: async () => {
+        turn += 1;
+        const path = turn === 1 ? "src/a.ts" : "src/b.ts";
+        const text = `[1] ${path}:1\ncode`;
+        return {
+          hits: [
+            {
+              index: "i",
+              id: String(turn),
+              passage: 0,
+              path,
+              line: 1,
+              title: null,
+              kind: null,
+              score: 1,
+              text: "passage",
+            },
+          ],
+          text,
+          bytes: Buffer.byteLength(text, "utf8"),
+          strategy: "hybrid" as const,
+          narrowingBytes: 0,
+        };
+      },
+    } as unknown as SearchService;
+    const hooks = await register({ search });
+    await hooks.ctx.handlers.prompt(promptEvent("s1", LONG, "m1"));
+    await hooks.ctx.handlers.context(contextEvent("s1", "m1"));
+    await hooks.ctx.handlers.prompt(promptEvent("s1", LONG, "m2"));
+    await hooks.ctx.handlers.context(contextEvent("s1", "m2"));
+    expect(hooks.injections).toBe(2);
+  });
+
   test("asks the search for the context surface and budget", async () => {
     const calls: SearchCall[] = [];
     const hooks = await register({
@@ -302,7 +354,7 @@ describe("context hook", () => {
     expect(hooks.injections).toBe(1);
   });
 
-  test("injects again for a new message", async () => {
+  test("does not repeat a passage already in the session's context", async () => {
     const hooks = await register({
       search: fakeSearch({ hits: [{ path: "src/a.ts" }], text: "passage text", bytes: 10 }, []),
     });
@@ -312,8 +364,8 @@ describe("context hook", () => {
     await hooks.ctx.handlers.prompt(promptEvent("s1", LONG, "m2"));
     const second = contextEvent("s1", "m2");
     await hooks.ctx.handlers.context(second);
-    expect(systemTexts(second).filter((text) => text.includes("<xerj-context>"))).toHaveLength(1);
-    expect(hooks.injections).toBe(2);
+    expect(systemTexts(second).filter((text) => text.includes("<xerj-context>"))).toHaveLength(0);
+    expect(hooks.injections).toBe(1);
   });
 
   test("summarises the corpus once per session", async () => {

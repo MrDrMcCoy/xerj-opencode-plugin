@@ -11,7 +11,7 @@ import type { Logger } from "../log.ts";
 import type { MemoryStore } from "../memory/store.ts";
 import { formatMemories } from "../memory/store.ts";
 import { contentTerms, coversTerms } from "../search/rank.ts";
-import type { SearchService } from "../search/service.ts";
+import type { SearchHit, SearchService } from "../search/service.ts";
 
 export interface SessionHookOptions {
   readonly config: Config;
@@ -47,6 +47,8 @@ interface Prepared {
   readonly passageBytes: number;
   readonly memory: string;
   readonly hits: number;
+  /** `path:line` keys of the passages in this block, for session dedupe. */
+  readonly locations: ReadonlyArray<string>;
 }
 
 const MIN_QUERY_LENGTH = 12;
@@ -92,6 +94,9 @@ export async function registerSessionHooks(
   const prepared = new Map<string, Prepared>();
   const injected = new Set<string>();
   const injectedMemories = new Set<string>();
+  // Locations already in this session's context; injecting them again spends
+  // budget on text the model can already see.
+  const seen = new Map<string, Set<string>>();
   const summarized = new Set<string>();
 
   await ctx.session.hook("prompt", async (event) => {
@@ -104,7 +109,10 @@ export async function registerSessionHooks(
     if (!search) return;
 
     try {
-      const result = await retrieve(search, text, options);
+      const already = seen.get(event.sessionID);
+      const result = await retrieve(search, text, options, (hit) =>
+        already?.has(locationKey(hit)) ?? false,
+      );
       const paths = result.hits.flatMap((hit) => (hit.path ? [hit.path] : []));
       await options.recordQuery(event.sessionID, paths, result.bytes, result.hits.length);
 
@@ -120,6 +128,7 @@ export async function registerSessionHooks(
         passageBytes: result.text.trim().length === 0 ? 0 : result.bytes,
         memory,
         hits: result.hits.length,
+        locations: result.hits.map(locationKey),
       });
     } catch (error) {
       options.logger.debug("prompt retrieval skipped", String(error));
@@ -161,6 +170,12 @@ export async function registerSessionHooks(
     }
     if (entry.memory.length === 0 && entry.block.length === 0) return;
 
+    if (entry.block.length > 0) {
+      const locations = seen.get(event.sessionID) ?? new Set<string>();
+      for (const key of entry.locations) locations.add(key);
+      seen.set(event.sessionID, locations);
+    }
+
     options.onInject?.();
     if (overhead > 0) options.onCost?.(event.sessionID, overhead);
   });
@@ -189,10 +204,16 @@ async function recallMemories(
   return block;
 }
 
+/** A passage's identity for session dedupe: same file and same line. */
+function locationKey(hit: { path: string | null; line: number | null; index: string }): string {
+  return `${hit.path ?? hit.index}:${hit.line ?? 0}`;
+}
+
 async function retrieve(
   search: SearchService,
   text: string,
   options: SessionHookOptions,
+  exclude: (hit: SearchHit) => boolean,
 ): Promise<Awaited<ReturnType<SearchService["search"]>>> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.config.context.timeoutMs);
@@ -203,6 +224,7 @@ async function retrieve(
       k: options.config.context.maxPassages,
       maxTokens: options.config.context.maxTokens,
       signal: controller.signal,
+      exclude,
     });
   } finally {
     clearTimeout(timer);

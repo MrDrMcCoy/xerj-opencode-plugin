@@ -53,6 +53,11 @@ export interface SearchOptions {
   readonly k?: number;
   readonly maxTokens?: number;
   readonly signal?: AbortSignal;
+  /**
+   * Drops hits the caller has already placed in context. Passages already in a
+   * session's context do not need to be injected again.
+   */
+  readonly exclude?: (hit: SearchHit) => boolean;
 }
 
 export interface ParsedHit extends SearchHit {
@@ -157,11 +162,9 @@ export class SearchService {
         ? preferSources(dropUncovered(dropGenerated(ranked, trimmed), trimmed), trimmed)
         : ranked;
     const resolved = dropDuplicateLocations(await this.resolveLines(located, trimmed));
-    const hits = dropShadowedWholeFiles(
-      resolved,
-      this.hiddenIndex,
-      this.brainSpecs,
-    ).slice(0, k);
+    const candidates = dropShadowedWholeFiles(resolved, this.hiddenIndex, this.brainSpecs);
+    const exclude = options.exclude;
+    const hits = (exclude ? candidates.filter((hit) => !exclude(hit)) : candidates).slice(0, k);
     const related = this.brains ? await this.brains.related(hits, options.signal) : [];
     const narrowing = lexical.narrowing + (semantic?.narrowing ?? 0);
 
