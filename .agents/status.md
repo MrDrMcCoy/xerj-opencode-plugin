@@ -340,6 +340,20 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-05: Hit-rate and token-cost pass. Measured the two legs on the
+  live corpus: the lexical embedder scores every passage between 0.6 and
+  0.8 and RRF has no absolute scale, so directives such as "push to github,
+  i will handle npm" injected lockfile and LICENSE passages at full budget
+  and still counted as hits. The context surface now keeps a passage only
+  when its text or path carries 60% of the prompt's content terms
+  (`contentTerms`/`dropUncovered` in `src/search/rank.ts`), prompts with
+  fewer than two content terms skip retrieval, and license boilerplate is
+  treated as generated. On nine probe prompts the noise queries inject
+  nothing and the real questions keep their passages. Also committed the
+  `--fresh` recovery for a journal bound to another node URL (the live
+  `autoindex exited 1` state); a manual one-shot pass now exits 0 at
+  generation 9. 339 unit tests pass.
+
 - 2026-11-04: Post-release audit. OpenCode restarted and now runs the
   patched 0.6.0 epoch: heartbeats carry `sessions` (1 live session), the
   ledger counted queries and hits again (14 queries, 12 hits, 86% hit
