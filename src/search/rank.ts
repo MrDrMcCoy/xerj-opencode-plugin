@@ -159,3 +159,46 @@ export function coversTerms(
   }
   return covered >= Math.ceil(terms.length * ratio);
 }
+
+const TEST_DIRS = /(^|\/)(test|tests|__tests__|spec|specs)\//;
+const TEST_NAMES = /(\.(test|spec)\.[a-z0-9]+$)|(_test\.[a-z0-9]+$)/;
+const TEST_QUERY = /\b(test|tests|testing|spec|specs|fixture|fixtures)\b/;
+
+/** True when the path is a test file or lives under a test directory. */
+export function isTestPath(path: string): boolean {
+  const normalized = path.split(sep).join("/").toLowerCase();
+  return TEST_DIRS.test(normalized) || TEST_NAMES.test(normalized);
+}
+
+/**
+ * Moves test files after authored sources for injection. Tests quote the
+ * phrases they check, so they match a prompt word for word and take the first
+ * share of the budget, while the source is what answers the question. A query
+ * about tests keeps the fused order.
+ */
+export function preferSources(
+  hits: ReadonlyArray<ParsedHit>,
+  query: string,
+): ParsedHit[] {
+  if (TEST_QUERY.test(query.toLowerCase())) return [...hits];
+  const isTest = (hit: ParsedHit) => hit.path !== null && isTestPath(hit.path);
+  return [...hits.filter((hit) => !isTest(hit)), ...hits.filter(isTest)];
+}
+
+/**
+ * Keeps one hit per resolved `path:line`. A whole-file record and its section
+ * record can resolve to the same line and would spend two budget shares on
+ * one passage. Hits without a line stay: they cannot be compared.
+ */
+export function dropDuplicateLocations<
+  Hit extends { readonly path: string | null; readonly line: number | null },
+>(hits: ReadonlyArray<Hit>): Hit[] {
+  const seen = new Set<string>();
+  return hits.filter((hit) => {
+    if (hit.path === null || hit.line === null) return true;
+    const key = `${hit.path}:${hit.line}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}

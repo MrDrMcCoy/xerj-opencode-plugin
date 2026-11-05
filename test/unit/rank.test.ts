@@ -5,8 +5,11 @@ import {
   contentTerms,
   demoteGenerated,
   dropGenerated,
+  dropDuplicateLocations,
   dropUncovered,
   isGeneratedPath,
+  isTestPath,
+  preferSources,
 } from "../../src/search/rank.ts";
 import type { ParsedHit } from "../../src/search/service.ts";
 
@@ -152,5 +155,53 @@ describe("dropUncovered", () => {
 
   test("keeps nothing when the prompt has no content terms", () => {
     expect(dropUncovered([passage("a.md", "yes do it")], "yes, do it")).toEqual([]);
+  });
+});
+
+describe("isTestPath", () => {
+  test("recognizes test directories and suffixes", () => {
+    expect(isTestPath("test/unit/rank.test.ts")).toBe(true);
+    expect(isTestPath("src/__tests__/a.js")).toBe(true);
+    expect(isTestPath("pkg/server_test.go")).toBe(true);
+    expect(isTestPath("app/a.spec.tsx")).toBe(true);
+    expect(isTestPath("src/search/rank.ts")).toBe(false);
+    expect(isTestPath("docs/testing.md")).toBe(false);
+  });
+});
+
+describe("preferSources", () => {
+  test("moves tests after sources, keeping order within each group", () => {
+    const hits = [hit("test/unit/a.test.ts", 3), hit("src/a.ts", 2), hit("README.md", 1)];
+    expect(preferSources(hits, "how does a work").map((entry) => entry.path)).toEqual([
+      "src/a.ts",
+      "README.md",
+      "test/unit/a.test.ts",
+    ]);
+  });
+
+  test("keeps tests first when the query asks about tests", () => {
+    const hits = [hit("test/unit/a.test.ts", 3), hit("src/a.ts", 2)];
+    expect(preferSources(hits, "which test covers a").map((entry) => entry.path)).toEqual([
+      "test/unit/a.test.ts",
+      "src/a.ts",
+    ]);
+  });
+});
+
+describe("dropDuplicateLocations", () => {
+  test("keeps the first hit for each path and line", () => {
+    const at = (path: string, line: number | null, id: string): ParsedHit => ({
+      ...hit(path, 1),
+      id,
+      line,
+    });
+    const kept = dropDuplicateLocations([
+      at("src/a.ts", 3, "file"),
+      at("src/a.ts", 3, "section"),
+      at("src/a.ts", 9, "other"),
+      at("src/b.ts", null, "x"),
+      at("src/b.ts", null, "y"),
+    ]);
+    expect(kept.map((entry) => entry.id)).toEqual(["file", "other", "x", "y"]);
   });
 });

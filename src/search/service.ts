@@ -14,7 +14,13 @@ import type { Logger } from "../log.ts";
 import { XerjClient } from "../node/client.ts";
 import type { BrainSpec } from "../paths.ts";
 import type { BrainGraph } from "./brains.ts";
-import { demoteGenerated, dropGenerated, dropUncovered } from "./rank.ts";
+import {
+  demoteGenerated,
+  dropDuplicateLocations,
+  dropGenerated,
+  dropUncovered,
+  preferSources,
+} from "./rank.ts";
 
 export interface SearchHit {
   readonly index: string;
@@ -55,6 +61,7 @@ export interface ParsedHit extends SearchHit {
 }
 
 const MAX_K = 50;
+const CANDIDATE_FACTOR = 2;
 const MAPPING_TTL_MS = 60_000;
 const RRF_K = 60;
 const MAX_RESOLVED_FILE_BYTES = 512 * 1024;
@@ -113,7 +120,10 @@ export class SearchService {
     const fields = pickTextFields(indices);
     const semanticCapable = names.some((name) => indices[name]?.body === "semantic_text");
 
-    const base = { size: k, _source: SOURCE_FIELDS, fields: ["_passage"] };
+    // Fetch a wider pool than k: demotion and the context filters can only
+    // replace a weak hit when there is something below it to promote.
+    const pool = Math.min(MAX_K, k * CANDIDATE_FACTOR);
+    const base = { size: pool, _source: SOURCE_FIELDS, fields: ["_passage"] };
 
     // A single-field `match` is what makes the engine attach `_passage`;
     // `multi_match` returns hits without it, which silently drops the text.
@@ -129,7 +139,7 @@ export class SearchService {
       try {
         semantic = await this.leg(
           pattern,
-          { ...base, query: { semantic: { field: "body", query: trimmed, k } } },
+          { ...base, query: { semantic: { field: "body", query: trimmed, k: pool } } },
           options.signal,
         );
       } catch (error) {
@@ -138,18 +148,20 @@ export class SearchService {
     }
 
     const strategy = semantic ? "hybrid" : "lexical";
-    const fused = semantic ? fuse([lexical.hits, semantic.hits], k) : lexical.hits.slice(0, k);
+    const fused = semantic
+      ? fuse([lexical.hits, semantic.hits], pool)
+      : lexical.hits.slice(0, pool);
     const ranked = demoteGenerated(this.locateBrainPaths(fused), trimmed);
     const located =
       options.surface === "context"
-        ? dropUncovered(dropGenerated(ranked, trimmed), trimmed)
+        ? preferSources(dropUncovered(dropGenerated(ranked, trimmed), trimmed), trimmed)
         : ranked;
-    const resolved = await this.resolveLines(located, trimmed);
+    const resolved = dropDuplicateLocations(await this.resolveLines(located, trimmed));
     const hits = dropShadowedWholeFiles(
       resolved,
       this.hiddenIndex,
       this.brainSpecs,
-    );
+    ).slice(0, k);
     const related = this.brains ? await this.brains.related(hits, options.signal) : [];
     const narrowing = lexical.narrowing + (semantic?.narrowing ?? 0);
 
