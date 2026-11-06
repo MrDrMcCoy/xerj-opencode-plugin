@@ -340,6 +340,20 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-05: The Elasticsearch reference was a sliver, not the API. Ten
+  documents was the page budget, and the crawl from `index.html` spent it on
+  chapter summaries while following every same-origin link, which pulled in
+  company blog posts. Fixed three ways: the crawl starts at `rest-apis.html`,
+  takes the chapter indexes it links, and crawls each chapter separately with a
+  share of the budget; `crawlDocs` gained `urlPrefix` so links outside the docs
+  branch are never followed; and `prjdocs.builtinRefreshDays` (7) keeps the
+  minute-long crawl to a weekly refresh, holding the existing pages in the
+  manifest while it waits. Live: 632 API pages in 38 s including
+  `indices-create-index`, `docs-bulk`, `cat`, and `query-dsl-term-query`; the
+  corpus went from 1500 mixed blog and guide documents to 632 API pages, 869
+  stale ones pruned. New defaults: `builtinElasticsearchPages` 2500,
+  `builtinXerjPages` 200, `builtinRefreshDays` 7. 739 unit tests pass.
+
 - 2026-11-05: `/xerj-prjdocs` always includes XERJ's own docs and the matching
   Elasticsearch reference (0.7.0). `src/prjdocs/builtin.ts` lists every `.md`
   under `docs/` in `xerj-org/xerj` through the GitHub tree API (one request),
