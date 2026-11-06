@@ -14,6 +14,9 @@ import { ensureBinary } from "../../src/binary/manager.ts";
 import { DEFAULT_CONFIG } from "../../src/config.ts";
 import { createLogger } from "../../src/log.ts";
 import plugin from "../../src/index.ts";
+import { MemoryStore } from "../../src/memory/store.ts";
+import { pruneMemory } from "../../src/memory/retain.ts";
+import { XerjClient } from "../../src/node/client.ts";
 
 const memory = new Map<string, unknown>();
 const logger = createLogger(
@@ -23,6 +26,15 @@ const logger = createLogger(
   },
   { echoToConsole: false },
 );
+
+const quietLogger = {
+  debug: () => {},
+  info: () => {},
+  warn: () => {},
+  error: () => {},
+  entries: async () => [],
+  flush: async () => {},
+} as never;
 
 async function resolveBinary(root: string): Promise<string | null> {
   const pinned = process.env.XERJ_BIN;
@@ -266,6 +278,28 @@ describe("plugin setup end to end", () => {
         text: "the end-to-end test stores this fact",
       })) as { id?: string };
       expect(typeof remembered.id).toBe("string");
+
+      // Retention runs against the live store: a size cap removes summaries
+      // through the memory API, and a deliberate memory survives it.
+      const ready = await host.status();
+      const baseUrl = (ready.node as { baseUrl: string }).baseUrl;
+      const namespace = (ready.memory as { namespace: string }).namespace;
+      const store = new MemoryStore(new XerjClient(baseUrl), namespace, quietLogger);
+
+      await store.remember({ text: "summary one from a past turn", kind: "summary" });
+      await store.remember({ text: "summary two from a past turn", kind: "summary" });
+      await store.remember({ text: "a decision to keep", kind: "decision" });
+
+      const pruned = await pruneMemory({
+        memory: store,
+        limits: { days: 0, maxCount: 0, maxBytes: 8 },
+        logger: quietLogger,
+      });
+      expect(pruned).toBeGreaterThanOrEqual(2);
+
+      const left = await store.list(50);
+      expect(left.every((entry) => entry.kind !== "summary")).toBe(true);
+      expect(left.some((entry) => entry.kind === "decision")).toBe(true);
 
       // A reindex reports the records it covered.
       const reindexed = (await host.call("reindex")) as { queued: boolean };
