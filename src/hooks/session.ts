@@ -32,6 +32,8 @@ export interface SessionHookOptions {
   readonly onNoiseSkip?: () => void;
   /** Resets the idle deadline; called for every prompt and model call. */
   readonly onActivity?: (sessionID?: string) => void;
+  /** Stops the compaction watch when the plugin shuts down. */
+  readonly signal?: AbortSignal;
   readonly recordQuery: (
     sessionID: string,
     paths: ReadonlyArray<string>,
@@ -204,6 +206,58 @@ export async function registerSessionHooks(
     options.onInject?.();
     if (overhead > 0) options.onCost?.(event.sessionID, overhead);
   });
+
+  // The host compacts history on its own. What it drops is gone from the
+  // window, so a passage injected before the compaction has to be allowed
+  // back in; otherwise the plugin goes quiet exactly when room is tightest.
+  void watchCompaction(ctx, options, seen, memoriesShown);
+}
+
+/** The event stream shape this file needs; the host provides more. */
+interface EventStream {
+  subscribe(options?: {
+    readonly types?: ReadonlyArray<string>;
+    readonly signal?: AbortSignal;
+  }): AsyncIterable<unknown>;
+}
+
+/**
+ * Forgets what a session was told before a compaction. Nothing else changes:
+ * the prompt hook stays the only place that decides to inject.
+ */
+async function watchCompaction(
+  ctx: Plugin.Context,
+  options: SessionHookOptions,
+  seen: Map<string, Set<string>>,
+  memoriesShown: Map<string, Set<string>>,
+): Promise<void> {
+  const events = (ctx as { event?: EventStream }).event;
+  if (events === undefined || typeof events.subscribe !== "function") return;
+
+  try {
+    for await (const raw of events.subscribe({
+      types: ["session.compaction.ended"],
+      signal: options.signal,
+    })) {
+      const sessionID = sessionOf(raw);
+      if (sessionID === null) continue;
+      seen.delete(sessionID);
+      memoriesShown.delete(sessionID);
+      options.logger.debug("cleared injection dedupe after a compaction", sessionID);
+    }
+  } catch (error) {
+    // An aborted or failed watch must not take the hooks down with it.
+    options.logger.debug("compaction watch stopped", String(error));
+  }
+}
+
+/** The session a compaction event belongs to, when it names one. */
+function sessionOf(raw: unknown): string | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const data = (raw as { data?: unknown }).data;
+  if (typeof data !== "object" || data === null) return null;
+  const sessionID = (data as { sessionID?: unknown }).sessionID;
+  return typeof sessionID === "string" ? sessionID : null;
 }
 
 async function recallMemories(

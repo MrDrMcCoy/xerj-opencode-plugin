@@ -680,6 +680,7 @@ export default Plugin.define({
     // Prompts this instance saw; scopes the server-wide event stream to this
     // project's sessions for memory capture.
     const prompts = new SessionPrompts();
+    const shutdown = new AbortController();
 
     await registerSessionHooks(ctx, {
       config,
@@ -692,11 +693,10 @@ export default Plugin.define({
       onNoiseSkip: () => counters.noteNoiseSkip(),
       onCost: (_sessionID, bytes) => void ledger.recordInjection(bytes),
       onPrompt: (sessionID, text) => prompts.note(sessionID, text),
+      signal: shutdown.signal,
       recordQuery: (sessionID, paths, bytes, hits) =>
         ledger.recordQuery(sessionID, paths, bytes, hits),
     });
-
-    const shutdown = new AbortController();
 
     let client: XerjClient | null = null;
     let indexerStart: Promise<void> | null = null;

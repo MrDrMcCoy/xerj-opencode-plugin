@@ -50,21 +50,51 @@ type HookName = "prompt" | "context";
 
 interface FakeCtx {
   handlers: Record<HookName, Handler>;
+  /** Delivers one host event to whatever subscribed. */
+  push(type: string, data: unknown): void;
   session: {
     hook(name: string, handler: Handler): Promise<void>;
+  };
+  event: {
+    subscribe(options?: unknown): AsyncIterable<unknown>;
   };
 }
 
 function fakeCtx(): FakeCtx {
   const handlers: Record<string, Handler> = {};
+  const queue: Array<unknown> = [];
+  let notify: (() => void) | null = null;
+
+  async function* stream(): AsyncIterable<unknown> {
+    for (;;) {
+      if (queue.length === 0) {
+        await new Promise<void>((resolve) => {
+          notify = resolve;
+        });
+      }
+      notify = null;
+      while (queue.length > 0) yield queue.shift();
+    }
+  }
+
   return {
     handlers,
+    push: (type, data) => {
+      queue.push({ type, data });
+      notify?.();
+    },
     session: {
       hook: async (name, handler) => {
         handlers[name] = handler;
       },
     },
+    event: { subscribe: () => stream() },
   };
+}
+
+/** Waits for the detached compaction watch to consume a queued event. */
+async function settle(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 10));
 }
 
 const logger: Logger = {
@@ -507,5 +537,66 @@ describe("prompt reporting", () => {
     await hooks.ctx.handlers.prompt(promptEvent("s1", LONG));
     await hooks.ctx.handlers.prompt(promptEvent("s1", "please continue"));
     expect(hooks.prompts).toEqual([{ sessionID: "s1", text: LONG }]);
+  });
+});
+
+describe("compaction and injection dedupe", () => {
+  function passage(): { hits: Array<{ path: string }>; text: string; bytes: number } {
+    return { hits: [{ path: "src/a.ts" }], text: "[1] src/a.ts:1\ncode", bytes: 10 };
+  }
+
+  function excluded(call: SearchCall | undefined): boolean {
+    const exclude = call?.options.exclude as ((hit: unknown) => boolean) | undefined;
+    return exclude === undefined
+      ? false
+      : exclude({ path: "src/a.ts", line: 1, index: "i" });
+  }
+
+  test("a passage is deduped until the host compacts", async () => {
+    const calls: SearchCall[] = [];
+    const hooks = await register({ search: fakeSearch(passage(), calls) });
+
+    await hooks.ctx.handlers.prompt(promptEvent("s1", LONG, "m1"));
+    await hooks.ctx.handlers.context(contextEvent("s1", "m1"));
+    expect(hooks.injections).toBe(1);
+
+    // Second turn: the same location is already in context.
+    await hooks.ctx.handlers.prompt(promptEvent("s1", LONG, "m2"));
+    expect(excluded(calls[1])).toBe(true);
+
+    // The host compacts, so the passage may be gone from the window.
+    hooks.ctx.push("session.compaction.ended", { sessionID: "s1" });
+    await settle();
+
+    await hooks.ctx.handlers.prompt(promptEvent("s1", LONG, "m3"));
+    expect(excluded(calls[2])).toBe(false);
+  });
+
+  test("another session's compaction leaves this one deduped", async () => {
+    const calls: SearchCall[] = [];
+    const hooks = await register({ search: fakeSearch(passage(), calls) });
+
+    await hooks.ctx.handlers.prompt(promptEvent("s1", LONG, "m1"));
+    await hooks.ctx.handlers.context(contextEvent("s1", "m1"));
+
+    hooks.ctx.push("session.compaction.ended", { sessionID: "s2" });
+    await settle();
+
+    await hooks.ctx.handlers.prompt(promptEvent("s1", LONG, "m2"));
+    expect(excluded(calls[1])).toBe(true);
+  });
+
+  test("an event without a session id changes nothing", async () => {
+    const calls: SearchCall[] = [];
+    const hooks = await register({ search: fakeSearch(passage(), calls) });
+
+    await hooks.ctx.handlers.prompt(promptEvent("s1", LONG, "m1"));
+    await hooks.ctx.handlers.context(contextEvent("s1", "m1"));
+
+    hooks.ctx.push("session.compaction.ended", {});
+    await settle();
+
+    await hooks.ctx.handlers.prompt(promptEvent("s1", LONG, "m2"));
+    expect(excluded(calls[1])).toBe(true);
   });
 });
