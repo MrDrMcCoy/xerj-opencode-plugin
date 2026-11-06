@@ -98,6 +98,25 @@ export default Plugin.define({
       });
     };
 
+    const wrapup = async (): Promise<void> => {
+      try {
+        // The host owns compaction; this asks it to run now. Nothing is
+        // rewritten by this plugin.
+        const result = (await rpc().wrapup({}, at())) as {
+          compacted?: boolean;
+          detail?: string;
+        };
+        context.ui.toast.show({
+          message: result.compacted
+            ? "XERJ · the host compacted this session"
+            : `XERJ · ${result.detail ?? "compaction did not run"}`,
+          variant: result.compacted ? "success" : "info",
+        });
+      } catch {
+        context.ui.toast.show({ message: "XERJ is not available", variant: "error" });
+      }
+    };
+
     const reindex = async (): Promise<void> => {
       try {
         // The RPC awaits the pass, so a result means the index is current.
@@ -306,6 +325,16 @@ export default Plugin.define({
           slash: { name: "xerj-reindex" },
           enabled: () => state.ready,
           run: () => reindex(),
+        },
+        {
+          id: "xerj.wrapup",
+          title: "XERJ wrap up",
+          description: "Ask the host to compact this session now",
+          group: "XERJ",
+          palette: true,
+          slash: { name: "xerj-wrapup" },
+          enabled: () => state.ready,
+          run: () => wrapup(),
         },
         {
           id: "xerj.prjdocs",

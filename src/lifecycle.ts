@@ -66,6 +66,19 @@ export class ProjectLifecycle {
     this.checker = setInterval(() => void this.checkIdle(), interval);
   }
 
+  /** The most recently active session, for a command that needs one. */
+  latestSession(): string | null {
+    let latest: string | null = null;
+    let best = -1;
+    for (const [sessionID, at] of this.sessions) {
+      if (at >= best) {
+        best = at;
+        latest = sessionID;
+      }
+    }
+    return latest;
+  }
+
   /** Records activity for a session; the node stays up while this is fresh. */
   touch(sessionID?: string): void {
     this.lastActivityAt = Date.now();

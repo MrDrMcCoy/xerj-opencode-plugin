@@ -326,6 +326,14 @@ const definition = {
         records: { type: ["number", "null"] },
       }),
     },
+    wrapup: {
+      input: valueSchema({ sessionID: { type: "string" } }),
+      output: valueSchema({
+        compacted: { type: "boolean" },
+        sessionID: { type: ["string", "null"] },
+        detail: { type: "string" },
+      }),
+    },
     prjdocs: {
       input: valueSchema({
         eager: { type: "boolean" },

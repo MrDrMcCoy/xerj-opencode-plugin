@@ -589,6 +589,26 @@ export default Plugin.define({
         const result = await runtime.search.search(args.query);
         return { text: result.text, hits: result.hits.length, bytes: result.bytes };
       },
+      // Compaction belongs to the host; this only asks for it now instead of
+      // waiting for the harness to decide. Nothing is rewritten here.
+      wrapup: async (input) => {
+        counters.noteRpc();
+        runtime.lifecycle?.touch();
+        const args = input as { sessionID?: string };
+        const sessionID =
+          args.sessionID ?? runtime.lifecycle?.latestSession() ?? null;
+        if (sessionID === null) {
+          return { compacted: false, sessionID: null, detail: "no active session" };
+        }
+
+        try {
+          await ctx.session.compact({ sessionID });
+          return { compacted: true, sessionID, detail: "the host compacted this session" };
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          return { compacted: false, sessionID, detail };
+        }
+      },
     });
 
     const summarize = async (): Promise<string> => {
