@@ -340,6 +340,22 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-05: Reproducible evaluation and the work it justified. `bun run
+  eval` (scripts/eval.ts) measures 40 labeled questions against a live
+  index; its own source is ignored so it cannot win the queries it
+  measures. Measured: eight injected passages instead of six finds the
+  expected file in 33 of 40 prompts (was 31) for 5% more bytes; one
+  section per file on the context surface cuts 4% of bytes with no
+  recall loss; chronicle files (changelogs, status logs, journals) are
+  demoted like generated files because they name every feature. A
+  strict-match third leg and a coverage floor on trusted hits were tried
+  and dropped (no gain, more bytes). An end-to-end integration test drives
+  the real `setup` with a real binary: it indexes a project, answers a
+  search, and stops cleanly, lifting `src/index.ts` coverage from 49% to
+  65%. Verified live: web spool (5 docs) and external ingest (11 docs)
+  both accept writes and are searchable after the timeout fix. Overall
+  coverage 86.8% lines. 510 unit tests and 10 integration tests pass.
+
 - 2026-11-05: Live audit of the loaded 0.6.4 found the hidden corpus empty.
   Cause: the client gave every request five seconds, and a write carrying a
   `semantic_text` field is embedded before it is acknowledged, which takes
