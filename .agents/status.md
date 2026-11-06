@@ -339,6 +339,20 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: Coverage and structure pass (0.7.0). `PrjdocsIndexer.run` was at
+  cyclomatic complexity 39 after the keyword work; the three target-collection
+  steps (builtins, keywords, detected techs) are methods now and `run` reads as
+  a sequence. New tests: process sampling edge cases, the ecosystem detector,
+  documentation sources for the automation stack, keyword targets that resolve
+  to nothing, a duplicate or one-letter keyword that must not search, and the
+  sidebar and panel branches for no runs, an unknown file count, an embedding
+  pass, day-scale idle stops, a single session, a node with no idle deadline,
+  and a negative net token cost. Unit coverage 88.3% of lines, 89.8% with
+  integration; 844 unit and 12 integration tests pass; no duplicated code.
+  Remaining uncovered code is the MCP host runner tools (a subprocess), the
+  plugin's own wiring inside a live setup, and supervisor/watcher paths that
+  need a fake clock.
+
 - 2026-11-06: Automation ecosystems, eager keywords, and the panel's new
   figures (0.7.0). Detection covers Ansible (`ansible.cfg`, `site.yml`,
   `roles/`, `hosts:`/`become:` markers, `ansible.*` modules), community
