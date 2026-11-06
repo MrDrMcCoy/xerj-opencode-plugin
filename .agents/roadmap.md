@@ -280,14 +280,15 @@ that numbers siblings apart, the pair does not separate them. Neither form
 promises more throughput; both exist so the indexer can share a subset with
 other work.
 
-The percentage resolves at spawn with `os.availableParallelism()`, which counts
-a cgroup CPU quota, and the indices are taken from the plugin process's own
-affinity mask in ascending order, so a parent `taskset` or a container cpuset
-is honored instead of widened. An index above the CPU count is dropped with one
-warning, and a value that resolves to no CPU leaves affinity unchanged and
-warns. An explicit `index.workers` is left alone: the engine's own default
-follows the process's available parallelism, and overriding a deliberate
-worker count would hide the cost of a narrow set.
+On Linux the percentage is a share of the CPUs in the plugin process's own
+affinity mask, taken in ascending order, so a parent `taskset` or a container
+cpuset is honored instead of widened. Elsewhere it is a share of
+`os.availableParallelism()`, which already counts a cgroup quota. An index
+above the CPU count is dropped with one warning, and a value that resolves to
+no CPU leaves affinity unchanged and warns. An explicit `index.workers` is
+left alone: the engine's own default follows the process's available
+parallelism, and overriding a deliberate worker count would hide the cost of a
+narrow set.
 
 Platform behaviour:
 

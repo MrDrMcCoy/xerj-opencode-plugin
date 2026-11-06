@@ -349,8 +349,9 @@ publish, and live TUI verification remain.
   than being overwritten. Windows builds a 64-bit `ProcessorAffinity` mask and
   emits bit 63 as a negative `IntPtr`; a set that needs a second processor group
   warns and is skipped. macOS warns once because it has no per-process CPU
-  selection. Percentages use `os.availableParallelism()` and round down to at
-  least one CPU. The key is wired into the node, project and web watchers, and
+  selection. A percentage is a share of that available set (the affinity mask
+  on Linux, `os.availableParallelism()` elsewhere), rounded down to at least
+  one CPU. The key is wired into the node, project and web watchers, and
   brain runs; brain runs also gained the `priority` they had been missing.
   `index.workers` capping is not implemented: the engine already defaults to
   its own worker count, and the roadmap row's capping sentence was dropped.
