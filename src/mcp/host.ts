@@ -334,8 +334,15 @@ export class McpHost {
           await this.start();
           const eager = typeof raw === "object" && raw !== null && (raw as { eager?: unknown }).eager === true;
           const latest = new LatestVersions({ logger: this.logger });
+          const banner = await this.requireClient().info().catch(() => null);
           const summary = await new PrjdocsIndexer({
             client: this.requireClient(),
+            builtin: {
+              enabled: this.config.prjdocs.builtin,
+              elasticsearchVersion: banner?.wireVersion ?? "8.13",
+              xerjPages: this.config.prjdocs.builtinXerjPages,
+              elasticsearchPages: this.config.prjdocs.builtinElasticsearchPages,
+            },
             prefix: prjdocsPrefix(this.projectRoot),
             projectRoot: this.projectRoot,
             stateDir: join(this.nodeDir, "prjdocs"),

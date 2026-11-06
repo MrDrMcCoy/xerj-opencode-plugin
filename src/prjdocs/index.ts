@@ -20,6 +20,7 @@ import {
   type SearchSurface,
 } from "./discover.ts";
 import { PageJudge, projectTerms } from "./relevance.ts";
+import { builtinSources, type BuiltinSource } from "./builtin.ts";
 import { detectTech, type TechRef } from "./detect.ts";
 import { docsTargets, maxPagesFor, type DocsTarget } from "./sources.ts";
 
@@ -42,6 +43,22 @@ export interface PrjdocsOptions {
   readonly latestVersion?: (ref: TechRef) => Promise<string | null>;
   /** Eager mode: no depth cap, any text page, model-judged relevance. */
   readonly eager?: EagerOptions;
+  /**
+   * Elasticsearch wire version to pull docs for; the node reports it and the
+   * docs branch follows it. Omitted means "always include the defaults".
+   */
+  readonly builtin?: BuiltinOptions;
+}
+
+export interface BuiltinOptions {
+  /** False skips XERJ's own docs and the Elasticsearch reference. */
+  readonly enabled: boolean;
+  /** Wire version from the node banner, e.g. `8.13.0`. */
+  readonly elasticsearchVersion: string;
+  /** Markdown files taken from the XERJ repository. */
+  readonly xerjPages: number;
+  /** Pages taken from the Elasticsearch reference. */
+  readonly elasticsearchPages: number;
 }
 
 export interface EagerOptions {
@@ -108,6 +125,33 @@ export class PrjdocsIndexer {
 
     const terms = projectTerms(techs.map((ref) => `${ref.id} ${ref.evidence}`));
 
+    // XERJ's own docs and the Elasticsearch API are part of every run: a project
+    // asking how the engine behaves needs both, whatever its dependencies are.
+    // Off unless the caller asks: the command turns this on from configuration,
+    // and a library call should not reach the network uninvited.
+    const builtins: BuiltinSource[] =
+      this.options.builtin?.enabled === true
+        ? builtinSources(
+            this.options.builtin?.elasticsearchVersion ?? "8.13",
+            {
+              logger: this.options.logger,
+              fetchImpl: this.options.fetchImpl,
+              signal: this.options.signal,
+              xerjMaxPages: this.options.builtin?.xerjPages,
+              maxPages: this.options.builtin?.elasticsearchPages,
+            },
+          )
+        : [];
+
+    for (const source of builtins) {
+      targets.push({
+        id: source.tech,
+        url: source.url,
+        version: source.version,
+        collect: source.collect,
+      });
+    }
+
     for (const ref of techs.slice(0, this.options.maxTargets ?? 40)) {
       const resolve = this.options.latestVersion;
       const latest =
@@ -149,26 +193,35 @@ export class PrjdocsIndexer {
               },
             );
 
-      const crawled = await crawlDocs({
-        entry: target.url,
-        maxPages: eager?.maxPages ?? this.options.maxPages ?? maxPagesFor(target.id),
-        maxDepth: eager?.maxDepth,
-        anyText: eager !== undefined,
-        judge:
-          judge === undefined
-            ? undefined
-            // The entry page is the site's own root, so it is always kept: it
-            // seeds the crawl even when its wording matches nothing.
-            : async (page) =>
-                page.url === target.url ||
-                (await judge.judge(page.url, page.title, page.body)).relevant,
-        logger: this.options.logger,
-        fetchImpl: this.options.fetchImpl,
-        signal: this.options.signal,
-      }).catch((error: unknown) => {
-        this.options.logger.debug("docs crawl failed", String(error));
-        return [] as CrawledPage[];
-      });
+      // A source that hands over its pages skips the crawler and the judge: the
+      // repository tree and the API reference are relevant by construction.
+      const crawled =
+        target.collect !== undefined
+          ? await target.collect().catch((error: unknown) => {
+              this.options.logger.debug("could not fetch builtin docs", String(error));
+              return [] as CrawledPage[];
+            })
+          : await crawlDocs({
+              entry: target.url,
+              maxPages:
+                eager?.maxPages ?? this.options.maxPages ?? maxPagesFor(target.id),
+              maxDepth: eager?.maxDepth,
+              anyText: eager !== undefined,
+              judge:
+                judge === undefined
+                  ? undefined
+                  // The entry page is the site's own root, so it is always kept:
+                  // it seeds the crawl even when its wording matches nothing.
+                  : async (page) =>
+                      page.url === target.url ||
+                      (await judge.judge(page.url, page.title, page.body)).relevant,
+              logger: this.options.logger,
+              fetchImpl: this.options.fetchImpl,
+              signal: this.options.signal,
+            }).catch((error: unknown) => {
+              this.options.logger.debug("docs crawl failed", String(error));
+              return [] as CrawledPage[];
+            });
 
       if (crawled.length === 0) failed += 1;
       pages += crawled.length;

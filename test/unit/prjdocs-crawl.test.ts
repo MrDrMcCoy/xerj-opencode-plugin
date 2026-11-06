@@ -7,6 +7,12 @@ import {
   linksIn,
 } from "../../src/prjdocs/crawl.ts";
 import { docsTargets, versionLabel } from "../../src/prjdocs/sources.ts";
+import {
+  builtinSources,
+  elasticsearchBranch,
+  listRepoDocs,
+  xerjDocsSource,
+} from "../../src/prjdocs/builtin.ts";
 
 const logger = {
   debug: () => {},
@@ -342,5 +348,96 @@ describe("crawler limits", () => {
     });
 
     expect(pages).toEqual([]);
+  });
+});
+
+describe("builtin documentation sources", () => {
+  const tree = {
+    tree: [
+      { type: "blob", path: "README.md", size: 10 },
+      { type: "blob", path: "docs/README.md", size: 10 },
+      { type: "blob", path: "docs/recipes/agentic-memory.md", size: 20 },
+      { type: "blob", path: "docs/ARCHITECTURE.md", size: 30 },
+      { type: "blob", path: "docs/shots/console.png", size: 40 },
+      { type: "blob", path: "docs/tool.mjs", size: 50 },
+      { type: "tree", path: "docs/sub" },
+    ],
+  };
+
+  function fetcher(): { calls: string[]; fetchImpl: typeof fetch } {
+    const calls: string[] = [];
+    const fetchImpl = (async (input: string | URL) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.includes("api.github.com")) {
+        return new Response(JSON.stringify(tree), { status: 200 });
+      }
+      const name = url.split("/").pop() ?? "page.md";
+      return new Response(`# ${name}\n\n${longBody}`, { status: 200 });
+    }) as unknown as typeof fetch;
+    return { calls, fetchImpl };
+  }
+
+  test("lists only markdown under docs, shallow first", async () => {
+    const { fetchImpl } = fetcher();
+    const paths = await listRepoDocs({ logger, fetchImpl });
+
+    // Depth first, then alphabetical: the overview files land before the tree.
+    expect(paths).toEqual([
+      "docs/ARCHITECTURE.md",
+      "docs/README.md",
+      "docs/recipes/agentic-memory.md",
+    ]);
+  });
+
+  test("fetches each page as markdown and titles it by heading", async () => {
+    const { fetchImpl } = fetcher();
+    const pages = await xerjDocsSource({ logger, fetchImpl }).collect();
+
+    expect(pages).toHaveLength(3);
+    expect(pages[0]?.title).toContain("ARCHITECTURE.md");
+    expect(pages[0]?.url).toContain("github.com/xerj-org/xerj/blob/main/docs/ARCHITECTURE.md");
+    expect(pages[0]?.body).toContain("Documentation text");
+  });
+
+  test("the page budget applies", async () => {
+    const { fetchImpl } = fetcher();
+    const pages = await xerjDocsSource({ logger, fetchImpl, xerjMaxPages: 1 }).collect();
+
+    expect(pages).toHaveLength(1);
+  });
+
+  test("a failed tree listing yields nothing rather than throwing", async () => {
+    const fetchImpl = (async () => new Response("nope", { status: 500 })) as unknown as typeof fetch;
+    const pages = await xerjDocsSource({ logger, fetchImpl }).collect();
+
+    expect(pages).toEqual([]);
+  });
+
+  test("a failed page fetch is skipped", async () => {
+    const fetchImpl = (async (input: string | URL) => {
+      const url = String(input);
+      if (url.includes("api.github.com")) {
+        return new Response(JSON.stringify(tree));
+      }
+      if (url.endsWith("ARCHITECTURE.md")) return new Response("missing", { status: 404 });
+      return new Response(`# Page\n\n${longBody}`);
+    }) as unknown as typeof fetch;
+
+    const pages = await xerjDocsSource({ logger, fetchImpl }).collect();
+    expect(pages.length).toBe(2);
+  });
+
+  test("the elasticsearch branch follows the wire version", () => {
+    expect(elasticsearchBranch("8.13.0")).toBe("8.13");
+    expect(elasticsearchBranch("8.19.4")).toBe("8.19");
+    expect(elasticsearchBranch("unknown")).toBe("8.13");
+  });
+
+  test("both sources are built, in order", () => {
+    const sources = builtinSources("8.13.0", { logger, fetchImpl: fetcher().fetchImpl });
+
+    expect(sources.map((source) => source.tech)).toEqual(["xerj", "elasticsearch"]);
+    expect(sources[1]?.url).toContain("/reference/8.13/index.html");
   });
 });

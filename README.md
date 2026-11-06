@@ -211,6 +211,9 @@ The same entry works with a checkout path instead of the package name; see
 | `prjdocs.eagerMaxPages` | Pages per site in eager mode. Default 120. |
 | `prjdocs.eagerMaxDepth` | Link depth in eager mode. Default 12. |
 | `prjdocs.eagerModelCalls` | Model judgements per run; the heuristic covers the rest. Default 150. |
+| `prjdocs.builtin` | Always index XERJ's own docs and the Elasticsearch reference for this node's version. Default `true`. |
+| `prjdocs.builtinXerjPages` | Markdown files taken from the XERJ repository. Default 200. |
+| `prjdocs.builtinElasticsearchPages` | Pages taken from the Elasticsearch reference. Default 20. |
 | `sysdocs.maxDocs` | Pages indexed per run. Default 5000. |
 | `sysdocs.maxBytesPerDoc` | Bytes kept per page, head first. Default 64 KiB. |
 | `sysdocs.manDirs` | Extra man roots, searched before the machine roots. Empty means `MANPATH` only. |
@@ -368,6 +371,18 @@ Each technology maps to one entry URL. Versioned sources (Node, Python) produce
 one URL for the version the project declares and one for the latest release,
 resolved from `nodejs.org/dist/index.json` and `endoflife.date`; everything else
 is an unversioned site with a page budget of 8 to 25.
+
+Two sources are indexed on every run, whatever the project uses:
+
+- **XERJ's own documentation.** Every markdown file under `docs/` in the
+  `xerj-org/xerj` repository, recipes included, fetched from the source rather
+  than a rendered site. This is what answers "how does the engine do X".
+- **The Elasticsearch reference** for the version this node emulates. The node
+  reports its wire version (`8.13.0`), the branch follows it (`8.13`), and a
+  version change prunes the old pages on the next run.
+
+Set `prjdocs.builtin: false` to skip both, and size them with
+`prjdocs.builtinXerjPages` (200) and `prjdocs.builtinElasticsearchPages` (20).
 
 The crawler stays on the site it started from, follows links two levels deep,
 skips assets and non-HTML responses, and stops at its page budget. A document

@@ -21,6 +21,11 @@ export interface DocsTarget {
   readonly url: string;
   /** Version label used for pruning; "latest" when only one copy exists. */
   readonly version: string;
+  /**
+   * Pages supplied directly instead of crawled, for sources that are a
+   * repository or an API dump rather than a site.
+   */
+  readonly collect?: () => Promise<import("./crawl.ts").CrawledPage[]>;
 }
 
 /** Substituted into `{major}`, `{minor}`, and `{version}`. */

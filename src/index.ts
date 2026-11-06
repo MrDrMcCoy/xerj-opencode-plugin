@@ -402,8 +402,17 @@ export default Plugin.define({
                 search: ctx.websearch,
               }
             : undefined;
+        // The docs branch follows the wire version this node reports, so the
+        // Elasticsearch reference matches the API the engine answers with.
+        const banner = await client.info().catch(() => null);
         const indexer = new PrjdocsIndexer({
           client,
+          builtin: {
+            enabled: config.prjdocs.builtin,
+            elasticsearchVersion: banner?.wireVersion ?? "8.13",
+            xerjPages: config.prjdocs.builtinXerjPages,
+            elasticsearchPages: config.prjdocs.builtinElasticsearchPages,
+          },
           prefix: prjdocsPrefix(projectRoot),
           projectRoot,
           stateDir: join(nodeDir, "prjdocs"),

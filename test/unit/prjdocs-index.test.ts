@@ -406,3 +406,80 @@ describe("project docs failures", () => {
     expect(second.skipped).toBe(0);
   });
 });
+
+describe("always-on documentation", () => {
+  const tree = {
+    tree: [
+      { type: "blob", path: "docs/README.md" },
+      { type: "blob", path: "docs/recipes/agentic-memory.md" },
+    ],
+  };
+
+  /** Serves the XERJ tree, raw markdown, and an Elasticsearch index page. */
+  function builtinFetch(): typeof fetch {
+    return (async (input: string | URL) => {
+      const url = String(input);
+      if (url.includes("api.github.com")) return new Response(JSON.stringify(tree));
+      if (url.includes("raw.githubusercontent.com")) {
+        return new Response(`# XERJ page\n\n${longBody}`);
+      }
+      return new Response(
+        `<html><head><title>Elasticsearch guide</title></head><body><p>${longBody}</p></body></html>`,
+        { headers: { "content-type": "text/html" } },
+      );
+    }) as unknown as typeof fetch;
+  }
+
+  test("XERJ docs and the Elasticsearch reference are indexed with no project tech", async () => {
+    const project = await mkdtemp(join(root, "empty-project-"));
+    const state = await mkdtemp(join(root, "state-"));
+    const fake = client();
+
+    const summary = await new PrjdocsIndexer({
+      client: fake as never,
+      prefix: "xop-prjdoc-builtin",
+      projectRoot: project,
+      stateDir: state,
+      logger,
+      fetchImpl: builtinFetch(),
+      builtin: {
+        enabled: true,
+        elasticsearchVersion: "8.13.0",
+        xerjPages: 10,
+        elasticsearchPages: 2,
+      },
+      maxTargets: 1,
+    }).run();
+
+    expect(summary.targets).toBe(2);
+    expect(summary.indexed).toBeGreaterThanOrEqual(2);
+    const sources = fake.bulks.flatMap((bulk) => bulk.sources);
+    expect(sources.some((source) => source.tech === "xerj")).toBe(true);
+    expect(sources.some((source) => source.tech === "elasticsearch")).toBe(true);
+  });
+
+  test("the builtin sources can be switched off", async () => {
+    const project = await mkdtemp(join(root, "empty-project-"));
+    const state = await mkdtemp(join(root, "state-"));
+    const fake = client();
+
+    const summary = await new PrjdocsIndexer({
+      client: fake as never,
+      prefix: "xop-prjdoc-builtin",
+      projectRoot: project,
+      stateDir: state,
+      logger,
+      fetchImpl: builtinFetch(),
+      builtin: {
+        enabled: false,
+        elasticsearchVersion: "8.13.0",
+        xerjPages: 10,
+        elasticsearchPages: 2,
+      },
+      maxTargets: 1,
+    }).run();
+
+    expect(summary.targets).toBe(0);
+    expect(fake.bulks).toEqual([]);
+  });
+});

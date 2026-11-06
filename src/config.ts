@@ -92,6 +92,15 @@ export interface PrjdocsOptions {
   readonly eagerMaxDepth: number;
   /** Model judgements per run; the heuristic covers the rest. */
   readonly eagerModelCalls: number;
+  /**
+   * Include XERJ's own documentation and the Elasticsearch reference for the
+   * version this node emulates, whatever the project uses.
+   */
+  readonly builtin: boolean;
+  /** Markdown files taken from the XERJ repository. */
+  readonly builtinXerjPages: number;
+  /** Pages taken from the Elasticsearch reference. */
+  readonly builtinElasticsearchPages: number;
 }
 
 export interface SysdocsOptions {
@@ -199,6 +208,9 @@ export const DEFAULT_CONFIG: Config = {
     eagerMaxPages: 120,
     eagerMaxDepth: 12,
     eagerModelCalls: 150,
+    builtin: true,
+    builtinXerjPages: 200,
+    builtinElasticsearchPages: 20,
   },
   sysdocs: {
     maxDocs: 5000,
@@ -426,6 +438,28 @@ export function loadConfig(
         0,
         5000,
         "prjdocs.eagerModelCalls",
+        warnings,
+      ),
+      builtin: readBoolean(
+        prjdocs.builtin,
+        DEFAULT_CONFIG.prjdocs.builtin,
+        "prjdocs.builtin",
+        warnings,
+      ),
+      builtinXerjPages: readInteger(
+        prjdocs.builtinXerjPages,
+        DEFAULT_CONFIG.prjdocs.builtinXerjPages,
+        0,
+        2000,
+        "prjdocs.builtinXerjPages",
+        warnings,
+      ),
+      builtinElasticsearchPages: readInteger(
+        prjdocs.builtinElasticsearchPages,
+        DEFAULT_CONFIG.prjdocs.builtinElasticsearchPages,
+        0,
+        500,
+        "prjdocs.builtinElasticsearchPages",
         warnings,
       ),
     },
