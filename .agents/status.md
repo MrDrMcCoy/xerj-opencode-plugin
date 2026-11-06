@@ -340,6 +340,21 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-05: Brains in the corpus list, live retention, TUI render coverage,
+  and a test-leak fix. Brain corpora now appear in `corpora` with their edge
+  count, so one list answers "is every corpus working"; the end-to-end test
+  configures `.agents` as a brain and `.github` as a hidden folder, which also
+  proves the no-double-index rule. Retention was exercised against a live node
+  (two summaries pruned by a size cap, a decision kept). The TUI render bodies
+  now run under a recorded JSX runtime, so the sidebar line, the corpora rows,
+  the close hint, and the foreign-panel null are asserted: `src/tui.tsx` 79%
+  lines, 97% functions. Two node leaks were found and fixed: thirty-four XERJ
+  nodes and twenty-two watchers had accumulated from unit setup tests that
+  resolved the managed binary and bootstrapped a real runtime; those tests now
+  point at a missing binary, and the end-to-end test waits for its node to
+  exit. A file-agreement ranking experiment produced no recall gain and was
+  reverted. 523 unit and 10 integration tests pass; overall 86% lines.
+
 - 2026-11-05: Corpus health, an empty-scan warning, and a third search leg.
   `xerj_status` now carries `corpora`: name, state, document count, last
   run, and error per corpus, rendered in the panel, so a corpus that writes
