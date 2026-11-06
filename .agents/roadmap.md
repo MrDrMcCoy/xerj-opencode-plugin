@@ -261,6 +261,42 @@ Ship these first. None adds a runtime, a grammar, or a write path.
 | `autoindex map` | XERJ engine | Panel view of what the corpus contains | The panel answers "what do you know" |
 | `prjdocs` keyword surfacing | This plugin | Expose `eagerKeywords` in the panel and the command help | A user can add a term without editing JSON |
 | Sidebar rebuild | AFT and Magic Context, layout only | Bordered box with a `▼ XERJ` accent header, click to collapse, three summary rows when collapsed and named sections when expanded; per-section on/off and collapse memory in the shared `tui-preferences.jsonc` under key `xerj` (`order` is not offered: this host's slots take `prepend`/`append` only); inline `⚠` for a failing corpus; 150 ms refresh debounce | Collapsed and expanded views both render from `StatusSnapshot` alone, a click survives a view switch, and formatting stays pure and tested |
+| **Config example formatting** | This plugin | Rewrite the complete-default options block in the README (and the copy in `plan.md` §3) as one key per line, grouped by section, with a comment naming the default and its unit; the README block omits 21 defaults today, including `node.logMaxBytes`, `index.graph`, `index.git`, `index.gitLimit`, `context.archiveEnabled`, `context.archiveMaxBytes`, every `prjdocs.*`, and every `sysdocs.*`; the `plan.md` copy is staler still (`context.maxPassages` reads 4 against a default of 8) | The block parses as JSONC, its key set equals `DEFAULT_CONFIG`, and a test fails when a new option lands without updating the example |
+| **CPU affinity (`node.cpus`)** | This plugin | Confine every XERJ process to a chosen CPU set: explicit indices and inclusive ranges, `odd`, `even`, or a percentage of the CPUs available to the process, rounded down | `node.cpus: "0-3,8"` confines the node and every index run on Linux, `"50%"` resolves against the available CPU count, and an unset value or an unsupported platform behaves as it does today |
+
+### CPU affinity value syntax
+
+`node.cpus` takes one string:
+
+- `"0-3,8,10-11"` uses those logical CPUs; ranges are inclusive.
+- `"odd"` and `"even"` take every CPU in the plugin's affinity mask whose index
+  is odd or even.
+- `"50%"` takes the lowest-numbered `floor(50% * available)` CPUs, at least
+  one, where `available` counts the CPUs in the plugin's own affinity mask.
+- `null` (the default) or `"all"` makes no affinity change.
+
+`odd` and `even` split the CPU list by index, not by SMT sibling. On a machine
+that numbers siblings apart, the pair does not separate them. Neither form
+promises more throughput; both exist so the indexer can share a subset with
+other work.
+
+The percentage resolves at spawn with `os.availableParallelism()`, which counts
+a cgroup CPU quota, and the indices are taken from the plugin process's own
+affinity mask in ascending order, so a parent `taskset` or a container cpuset
+is honored instead of widened. An index above the CPU count is dropped with one
+warning, and a value that resolves to no CPU leaves affinity unchanged and
+warns. When `index.workers` exceeds the resolved set, the worker count is
+capped to it.
+
+Platform behaviour:
+
+- Linux: `taskset -a -pc <list> <pid>` after spawn, beside the existing
+  `ionice` call. `-a` covers every thread, because `xerj` creates its scan pool
+  after startup and a main-thread-only call would leave the workers unpinned.
+- Windows: `(Get-Process -Id <pid>).ProcessorAffinity`; a set that names a CPU
+  index of 64 or more is refused with a warning, because the mask is 64-bit.
+- macOS: no per-process CPU selection. The key is accepted, one warning says
+  it has no effect, and nothing else changes.
 
 ## Tier M: one to three weeks, high suitability
 
@@ -330,6 +366,7 @@ Ship these first. None adds a runtime, a grammar, or a write path.
 | A gated tool leaks memory or processes | The LSP pool has an idle stop and a server cap; a test asserts zero surviving processes after teardown |
 | An installed server is compromised | Pinned version and checksum, `--ignore-scripts` on npm installs, and a `--version` probe before first use |
 | Installed servers fill the disk | Measured at about 26 MB for the npm set; the panel reports each install and a cache purge removes them |
+| CPU affinity is silently ignored | A missing `taskset`, a restrictive cpuset, or macOS logs one warning and leaves the process unpinned; indexing and retrieval never depend on the key |
 
 ## Sequencing and gates
 
@@ -373,6 +410,8 @@ measured; they include tests and the commits that carry them. A status of
 | Sidebar rebuild | S | Done | 3.0 h | Bordered box with a `▼ XERJ` badge header and version, `onMouseDown` collapse, three rows when collapsed and five sections when expanded, `⚠` line for an error or warning, 150 ms refresh debounce, prefs under key `xerj` in the shared file with other plugins' keys preserved (read once at setup, so no file watcher and no echo guard is needed); ten prefs tests, five view tests, two render tests |
 | `autoindex map` in the panel | S | Done | 0.5 h | Record kinds from a `terms` aggregation, shown as `records: function 545 · section 401`; four panel tests |
 | `prjdocs` keyword surfacing | S | Done | 0.2 h | `config.prjdocsKeywords` in the status, a panel line, and the command description |
+| Config example formatting | S | Not started | — | Scope: the README options block and `plan.md` §3; 21 defaults are absent today, and a parity test is part of the item |
+| CPU affinity (`node.cpus`) | S | Not started | — | Parsing and platform application belong in `src/node/priority.ts`, beside `applyPriority`; `taskset -a -pc` covers every thread on Linux |
 | Graph overview in the panel | M | Done (earlier) | 0 h this pass | Brains already report docs and live edges; the corpora list covers the rest |
 | Import graph and cycles | M | Done | 2.0 h | `analysis/imports.ts` plus `xerj_imports`; relative, Python, Go, and Rust specifiers resolve against project files, unresolved ones are counted; ten module tests and four tool tests |
 | Regex and glob search | M | Done | 1.5 h | `analysis/find.ts` plus `xerj_find`: glob-to-regex with `**` spanning folders, line-numbered matches, secret files skipped, 200-match cap; ten module tests and three tool tests |
@@ -395,8 +434,10 @@ measured; they include tests and the commits that carry them. A status of
 | Dreamer child sessions | XL | Not started | — | — |
 | Notes and smart notes | XL | Not started | — | — |
 
-**Tier S complete: twelve of twelve, 12.9 h** against an 8 to 10 h estimate.
-The sidebar took 3 h against an 8 h plan; the overshoot is in the other items.
+**Tier S: twelve of fourteen done, 12.9 h** against an 8 to 10 h estimate. Two
+items were added on 2026-11-06 after the first twelve shipped: the config
+example formatting and `node.cpus`. The sidebar took 3 h against an 8 h plan;
+the overshoot is in the other items.
 
 Per-item estimates held within about half an hour except commit indexing, where
 the `git log` record layout cost an extra hour and a half, and the auto-search

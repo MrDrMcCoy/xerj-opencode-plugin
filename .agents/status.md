@@ -339,6 +339,23 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: Two Tier S roadmap items added at the user's request, neither
+  started. `node.cpus` is the CPU-affinity key: one string accepting explicit
+  logical CPUs and inclusive ranges (`"0-3,8"`), `odd`, `even`, or a percentage
+  of the available CPUs with the count rounded down to at least one; `null`
+  leaves affinity alone. The design records the platform split (`taskset -a -pc`
+  on Linux so the scan pool's threads are covered, `ProcessorAffinity` on
+  Windows with a 64-CPU mask ceiling, and a single warning on macOS, which has
+  no per-process selection), resolves percentages with
+  `os.availableParallelism()` so a cgroup quota counts, and caps `index.workers`
+  to the resolved set. Parsing and application belong in `src/node/priority.ts`
+  beside `applyPriority`. The second item rewrites the complete-default options
+  block in the README and the copy in `plan.md` §3 as one key per line; the
+  README block omits 21 defaults today (verified against `DEFAULT_CONFIG`: 39 of
+  60 keys present, nothing extra) and the `plan.md` copy is staler still, with
+  `context.maxPassages` reading 4 against a default of 8. Its done criterion is
+  a parity test. No code changed.
+
 - 2026-11-06: Root cause of the `/xerj-prjdocs` failure found and fixed. It was
   never the node or the crawler: `valueSchema` marked every declared property as
   required, so the host rejected the call with `rpc.invalid_input` before the
