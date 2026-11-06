@@ -302,6 +302,18 @@ const definition = {
         records: { type: ["number", "null"] },
       }),
     },
+    sysdocs: {
+      input: valueSchema({}),
+      output: valueSchema({
+        discovered: { type: "number" },
+        indexed: { type: "number" },
+        skipped: { type: "number" },
+        pruned: { type: "number" },
+        failed: { type: "number" },
+        bytes: { type: "number" },
+        source: { type: "string" },
+      }),
+    },
     remember: {
       input: valueSchema({ text: { type: "string" } }),
       output: valueSchema({

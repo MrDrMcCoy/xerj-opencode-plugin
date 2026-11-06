@@ -192,6 +192,10 @@ The same entry works with a checkout path instead of the package name; see
 | `index.brain` | Folders to index as second brains, e.g. `[".agents"]`. |
 | `index.hidden` | Hidden folders to index as plain documents. Empty means "the docs folders that exist": `.agents`, `.github`, `.claude`. Set a list to choose exactly what is indexed. |
 | `index.hiddenMaxBytes` | Per-file ceiling for hidden documents. |
+| `sysdocs.maxDocs` | Pages indexed per run. Default 5000. |
+| `sysdocs.maxBytesPerDoc` | Bytes kept per page, head first. Default 64 KiB. |
+| `sysdocs.manDirs` | Extra man roots; empty means `MANPATH`, then `/usr/local/share/man` and `/usr/share/man`. |
+| `sysdocs.infoDirs` | Extra info roots; empty means `INFOPATH`, then the system info directories. |
 | `memory.retain.days` | Days an automatic summary is kept; `0` disables the age cap. |
 | `memory.retain.maxCount` | Summaries kept regardless of age; `0` disables the count cap. |
 | `memory.retain.maxBytes` | Bytes of summary text kept; `0` disables the size cap. |
@@ -299,6 +303,22 @@ Savings are measured, not asserted: the baseline is each cited file's size
 capped at `stats.maxBaselineBytes`, counted once per session. Reading a file
 subtracts the bytes actually read, so a partial read only removes what it
 covered.
+
+## System documentation
+
+`/xerj-sysdocs` indexes the man and info pages this machine can resolve into
+their own corpus (`xop-sys-<host hash>`). The corpus keeps `path`, `abs_path`,
+`title`, `source`, and `mtime` per page, so a citation reads `man/git.1`.
+
+The first run reads and indexes every page: 3648 pages in about six seconds on
+this machine, roughly 33 MB. A manifest records each page's path, mtime, size,
+and document id, so later runs skip unchanged pages (under 100 ms) and delete
+the documents of pages that are gone.
+
+`body` is plain `text`, not `semantic_text`, so nothing is embedded. A machine's
+man pages are thousands of long documents; embedding them with the local model
+would take hours and add little to reference prose, which is already dense with
+the words people search for.
 
 ## Data locations
 

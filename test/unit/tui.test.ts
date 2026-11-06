@@ -100,6 +100,7 @@ interface Host {
   setReindex(handler: () => Promise<unknown>): void;
   setRemember(handler: () => Promise<unknown>): void;
   setSearch(handler: () => Promise<unknown>): void;
+  setSysdocs(handler: () => Promise<unknown>): void;
   setDialogAnswer(answer: string): void;
   setPanelOpenResult(opens: boolean): void;
   readonly slots: Array<{ append: string; render: (input?: Record<string, unknown>) => unknown }>;
@@ -123,6 +124,15 @@ function makeHost(): Host {
   let reindex = async (): Promise<unknown> => ({ queued: true, records: 900 });
   let remember = async (): Promise<unknown> => ({ id: "mem-1", created: true });
   let search = async (): Promise<unknown> => ({ text: "[1] src/a.ts:1\ncode", hits: 1, bytes: 20 });
+  let sysdocs = async (): Promise<unknown> => ({
+    discovered: 400,
+    indexed: 12,
+    skipped: 380,
+    pruned: 8,
+    failed: 0,
+    bytes: 1024,
+    source: "both",
+  });
 
   const rpc = () => {
     const tag = generation;
@@ -145,6 +155,10 @@ function makeHost(): Host {
       search: async (_input: unknown, options?: CallOptions) => {
         record("search", options);
         return search();
+      },
+      sysdocs: async (_input: unknown, options?: CallOptions) => {
+        record("sysdocs", options);
+        return sysdocs();
       },
       events: { on: () => () => {} },
     };
@@ -226,6 +240,9 @@ function makeHost(): Host {
     },
     setReindex: (handler) => {
       reindex = handler;
+    },
+    setSysdocs: (handler) => {
+      sysdocs = handler;
     },
     setRemember: (handler) => {
       remember = handler;
@@ -562,4 +579,26 @@ describe("tui failures and rendering", () => {
     expect(host.toasts.at(-1)?.message).toBe("XERJ reindex queued");
   });
 
+});
+
+
+describe("system docs command", () => {
+  test("runs the method and reports indexed, unchanged, and pruned", async () => {
+    const host = makeHost();
+    const { dispose } = await setup(host);
+
+    const command = host.commands.find(
+      (candidate) => candidate.id === "xerj.sysdocs",
+    );
+    expect(command).toBeDefined();
+    await command?.run("");
+    await flush();
+
+    const toast = host.toasts.at(-1);
+    expect(toast?.message).toContain("12 indexed");
+    expect(toast?.message).toContain("380 unchanged");
+    expect(toast?.message).toContain("8 pruned");
+    expect(host.calls.some((call) => call.method.startsWith("sysdocs"))).toBe(true);
+    dispose();
+  });
 });

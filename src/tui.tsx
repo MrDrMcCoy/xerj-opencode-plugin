@@ -152,6 +152,39 @@ export default Plugin.define({
       }
     };
 
+    const sysdocs = async (): Promise<void> => {
+      context.ui.toast.show({
+        message: "XERJ is reading system documentation…",
+        variant: "info",
+      });
+      try {
+        const result = (await rpc().sysdocs({}, at())) as {
+          discovered?: number;
+          indexed?: number;
+          skipped?: number;
+          pruned?: number;
+          failed?: number;
+        };
+        const indexed = result.indexed ?? 0;
+        const skipped = result.skipped ?? 0;
+        const pruned = result.pruned ?? 0;
+        const failed = result.failed ?? 0;
+        context.ui.toast.show({
+          message:
+            `XERJ system docs · ${indexed.toLocaleString("en-US")} indexed · ` +
+            `${skipped.toLocaleString("en-US")} unchanged · ` +
+            `${pruned.toLocaleString("en-US")} pruned` +
+            (failed > 0 ? ` · ${failed} failed` : ""),
+          variant: failed > 0 ? "info" : "success",
+        });
+      } catch {
+        context.ui.toast.show({
+          message: "XERJ could not read system documentation",
+          variant: "error",
+        });
+      }
+    };
+
     const search = async (prefill?: string): Promise<void> => {
       const query =
         prefill?.trim() ||
@@ -229,6 +262,17 @@ export default Plugin.define({
           slash: { name: "xerj-reindex" },
           enabled: () => state.ready,
           run: () => reindex(),
+        },
+        {
+          id: "xerj.sysdocs",
+          title: "XERJ system docs",
+          description:
+            "Index this machine's man and info pages, skipping unchanged ones",
+          group: "XERJ",
+          palette: true,
+          slash: { name: "xerj-sysdocs" },
+          enabled: () => state.ready,
+          run: () => sysdocs(),
         },
         {
           id: "xerj.remember",

@@ -4,6 +4,7 @@
 
 import { existsSync } from "node:fs";
 import { mkdir, stat, writeFile } from "node:fs/promises";
+import { hostname } from "node:os";
 import { join, resolve } from "node:path";
 import { directoryBytes, fileBytes } from "./disk.ts";
 import { Plugin } from "@opencode/plugin";
@@ -33,6 +34,7 @@ import {
   memoryNamespace,
   nodeDataDir,
   nodeLogPath,
+  sysdocsPrefix,
   projectBrainName,
   projectNodeDir,
   projectPath,
@@ -51,6 +53,7 @@ import {
   type DatasetStatus,
   type StatusSnapshot,
 } from "./rpc.ts";
+import { SysdocIndexer } from "./sysdocs/index.ts";
 import { MemoryStore } from "./memory/store.ts";
 import {
   SessionPrompts,
@@ -319,6 +322,7 @@ export default Plugin.define({
           prefix,
           webPrefix(projectRoot),
           externalPrefix(projectRoot),
+          sysdocsPrefix(hostname()),
           memoryNs,
           runtime.brains,
         );
@@ -373,6 +377,33 @@ export default Plugin.define({
         counters.noteRpc();
         runtime.lifecycle?.touch();
         return snapshot();
+      },
+      sysdocs: async () => {
+        counters.noteRpc();
+        runtime.lifecycle?.touch();
+        const handle = runtime.node ?? (await nodes.ensure().catch(() => null));
+
+        if (handle === null || runtime.binary === null) {
+          throw new Error("the XERJ node is not available");
+        }
+
+        const client = new XerjClient(handle.baseUrl);
+        const indexer = new SysdocIndexer({
+          client,
+          prefix: sysdocsPrefix(hostname()),
+          stateDir: join(nodeDir, "sysdocs"),
+          logger,
+          maxDocs: config.sysdocs.maxDocs,
+          maxBytesPerDoc: config.sysdocs.maxBytesPerDoc,
+          manDirs: config.sysdocs.manDirs.length > 0 ? config.sysdocs.manDirs : undefined,
+          infoDirs: config.sysdocs.infoDirs.length > 0 ? config.sysdocs.infoDirs : undefined,
+        });
+
+        const summary = await indexer.run();
+        counters.noteIndexRun();
+        void registration.events.emit("updated", { updatedAt: Date.now() }).catch(() => {});
+        logger.info("system docs indexed", { ...summary });
+        return summary;
       },
       reindex: async () => {
         counters.noteRpc();
@@ -807,6 +838,7 @@ export default Plugin.define({
           prefix,
           webPrefix(projectRoot),
           externalPrefix(projectRoot),
+          sysdocsPrefix(hostname()),
           ...runtime.brains.map((brain) => brain.prefix),
         ],
         logger,
@@ -1044,6 +1076,7 @@ function datasetRows(
   project: string,
   web: string,
   external: string,
+  sysdocs: string,
   memoryNs: string,
   brains: ReadonlyArray<BrainSpec>,
 ): DatasetStatus[] {
@@ -1062,6 +1095,10 @@ function datasetRows(
     {
       name: "external",
       matches: (index: string) => index.startsWith(`${external}-`),
+    },
+    {
+      name: "sysdocs",
+      matches: (index: string) => index.startsWith(`${sysdocs}-`),
     },
     ...brains.map((brain) => ({
       name: `brain:${brain.name}`,

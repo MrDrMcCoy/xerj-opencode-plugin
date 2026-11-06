@@ -76,6 +76,17 @@ export interface ContextOptions {
   readonly timeoutMs: number;
 }
 
+export interface SysdocsOptions {
+  /** Pages indexed per run; the rest wait for the next run. */
+  readonly maxDocs: number;
+  /** Bytes kept per page. */
+  readonly maxBytesPerDoc: number;
+  /** Extra man roots; empty means MANPATH, then the system defaults. */
+  readonly manDirs: ReadonlyArray<string>;
+  /** Extra info roots; empty means INFOPATH, then the system defaults. */
+  readonly infoDirs: ReadonlyArray<string>;
+}
+
 export interface MemoryRetainOptions {
   /** Days an automatic summary is kept; 0 disables the age cap. */
   readonly days: number;
@@ -116,6 +127,7 @@ export interface Config {
   readonly index: IndexOptions;
   readonly remote: RemoteOptions;
   readonly context: ContextOptions;
+  readonly sysdocs: SysdocsOptions;
   readonly memory: MemoryOptions;
   readonly stats: StatsOptions;
   readonly telemetry: TelemetryOptions;
@@ -161,6 +173,12 @@ export const DEFAULT_CONFIG: Config = {
     maxPassages: 8,
     timeoutMs: 400,
   },
+  sysdocs: {
+    maxDocs: 5000,
+    maxBytesPerDoc: 65536,
+    manDirs: [],
+    infoDirs: [],
+  },
   memory: {
     enabled: true,
     captureTurns: true,
@@ -185,6 +203,7 @@ export function loadConfig(
   const index = asObject(root.index);
   const remote = asObject(root.remote);
   const context = asObject(root.context);
+  const sysdocs = asObject(root.sysdocs);
   const memory = asObject(root.memory);
   const retain = asObject(memory.retain);
   const stats = asObject(root.stats);
@@ -334,6 +353,26 @@ export function loadConfig(
         warnings,
       ),
     },
+    sysdocs: {
+      maxDocs: readInteger(
+        sysdocs.maxDocs,
+        DEFAULT_CONFIG.sysdocs.maxDocs,
+        1,
+        100_000,
+        "sysdocs.maxDocs",
+        warnings,
+      ),
+      maxBytesPerDoc: readInteger(
+        sysdocs.maxBytesPerDoc,
+        DEFAULT_CONFIG.sysdocs.maxBytesPerDoc,
+        512,
+        10 * 1024 ** 2,
+        "sysdocs.maxBytesPerDoc",
+        warnings,
+      ),
+      manDirs: readStringList(sysdocs.manDirs, "sysdocs.manDirs", warnings),
+      infoDirs: readStringList(sysdocs.infoDirs, "sysdocs.infoDirs", warnings),
+    },
     memory: {
       enabled: readBoolean(memory.enabled, DEFAULT_CONFIG.memory.enabled, "memory.enabled", warnings),
       captureTurns: readBoolean(
@@ -440,6 +479,19 @@ function readLibc(value: unknown, warnings: string[]): Libc {
   if (value === "musl" || value === "gnu") return value;
   warnings.push(`binary.libc must be "musl" or "gnu"; using ${DEFAULT_CONFIG.binary.libc}`);
   return DEFAULT_CONFIG.binary.libc;
+}
+
+/** A list of non-empty strings; anything else is dropped with a warning. */
+function readStringList(value: unknown, name: string, warnings: string[]): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    warnings.push(`${name} must be a list of strings`);
+    return [];
+  }
+
+  const kept = value.filter((entry): entry is string => typeof entry === "string");
+  if (kept.length !== value.length) warnings.push(`${name} dropped non-string entries`);
+  return kept.map((entry) => entry.trim()).filter((entry) => entry.length > 0);
 }
 
 function readPriority(value: unknown, warnings: string[]): NodePriority {

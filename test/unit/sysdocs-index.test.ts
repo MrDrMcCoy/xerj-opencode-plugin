@@ -1,0 +1,167 @@
+import { afterAll, describe, expect, test } from "bun:test";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { gzipSync } from "node:zlib";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { SysdocIndexer, discoverPages } from "../../src/sysdocs/index.ts";
+
+const root = await mkdtemp(join(tmpdir(), "xerj-sysdocs-"));
+afterAll(async () => rm(root, { recursive: true, force: true }));
+
+const logger = {
+  debug: () => {},
+  info: () => {},
+  warn: () => {},
+  error: () => {},
+  entries: async () => [],
+  flush: async () => {},
+};
+
+interface Recorded {
+  index: string;
+  actions: ReadonlyArray<{ id: string; source: Record<string, unknown> }>;
+}
+
+function fakeClient(): {
+  bulks: Recorded[];
+  deletes: Array<{ index: string; ids: ReadonlyArray<string> }>;
+  bulk: (index: string, actions: Recorded["actions"]) => Promise<void>;
+  bulkDelete: (index: string, ids: ReadonlyArray<string>) => Promise<void>;
+  indices: () => Promise<Array<{ index: string; docs: number; bytes: number }>>;
+  deleteIndex: () => Promise<void>;
+} {
+  const bulks: Recorded[] = [];
+  const deletes: Array<{ index: string; ids: ReadonlyArray<string> }> = [];
+  return {
+    bulks,
+    deletes,
+    bulk: async (index, actions) => void bulks.push({ index, actions }),
+    bulkDelete: async (index, ids) => void deletes.push({ index, ids }),
+    indices: async () => [],
+    deleteIndex: async () => {},
+  };
+}
+
+async function fixture(): Promise<{ man: string; info: string; state: string }> {
+  const man = join(root, `man-${Math.random().toString(36).slice(2)}`);
+  const info = join(root, `info-${Math.random().toString(36).slice(2)}`);
+  const state = join(root, `state-${Math.random().toString(36).slice(2)}`);
+  await mkdir(join(man, "man1"), { recursive: true });
+  await mkdir(join(man, "man5"), { recursive: true });
+  await mkdir(info, { recursive: true });
+
+  await writeFile(
+    join(man, "man1/git.1.gz"),
+    gzipSync('.TH GIT 1\n.SH NAME\ngit - the stupid content tracker\n'),
+  );
+  await writeFile(join(man, "man5/hosts.5.gz"), gzipSync(".SH NAME\nhosts - resolver table\n"));
+  await writeFile(join(man, "man1/notes.txt"), "not a page");
+  await writeFile(
+    join(info, "coreutils.info.gz"),
+    gzipSync("File: coreutils.info, Node: Top\n\nGNU core utilities\n"),
+  );
+  return { man, info, state };
+}
+
+describe("discoverPages", () => {
+  test("finds man and info pages and ignores other files", async () => {
+    const { man, info } = await fixture();
+    const pages = await discoverPages({ manDirs: [man], infoDirs: [info] });
+
+    expect(pages.map((page) => `${page.source}:${page.name}`).sort()).toEqual([
+      "info:coreutils",
+      "man:git",
+      "man:hosts",
+    ]);
+  });
+
+  test("a missing directory is not an error", async () => {
+    const pages = await discoverPages({
+      manDirs: [join(root, "absent")],
+      infoDirs: [],
+    });
+    expect(pages).toEqual([]);
+  });
+});
+
+describe("SysdocIndexer", () => {
+  test("indexes once, skips unchanged pages, and prunes removed ones", async () => {
+    const { man, info, state } = await fixture();
+    const client = fakeClient();
+    const indexer = new SysdocIndexer({
+      client: client as never,
+      prefix: "xop-sys-test",
+      stateDir: state,
+      logger,
+      manDirs: [man],
+      infoDirs: [info],
+    });
+
+    const first = await indexer.run();
+    expect(first.indexed).toBe(3);
+    expect(first.skipped).toBe(0);
+    expect(client.bulks.flatMap((entry) => entry.actions)).toHaveLength(3);
+
+    // Nothing changed: no writes, everything skipped.
+    const second = await indexer.run();
+    expect(second.indexed).toBe(0);
+    expect(second.skipped).toBe(3);
+    expect(second.pruned).toBe(0);
+    expect(client.bulks.flatMap((entry) => entry.actions)).toHaveLength(3);
+
+    // A page disappears: its id is pruned.
+    await rm(join(man, "man5/hosts.5.gz"));
+    const third = await indexer.run();
+    expect(third.pruned).toBe(1);
+    expect(client.deletes[0]?.ids).toHaveLength(1);
+  });
+
+  test("a rewritten page is re-indexed under the same id", async () => {
+    const { man, info, state } = await fixture();
+    const client = fakeClient();
+    const indexer = new SysdocIndexer({
+      client: client as never,
+      prefix: "xop-sys-test",
+      stateDir: state,
+      logger,
+      manDirs: [man],
+      infoDirs: [info],
+    });
+
+    await indexer.run();
+    const ids = new Set(client.bulks.flatMap((entry) => entry.actions.map((action) => action.id)));
+
+    await writeFile(
+      join(man, "man1/git.1.gz"),
+      gzipSync(".SH NAME\ngit - rewritten body\n"),
+    );
+    const second = await indexer.run();
+
+    expect(second.indexed).toBe(1);
+    const last = client.bulks.at(-1)?.actions[0];
+    expect(last?.id).toBeDefined();
+    expect(ids.has(last?.id ?? "")).toBe(true);
+  });
+
+  test("a page that is one long document is capped", async () => {
+    const { man, info, state } = await fixture();
+    const client = fakeClient();
+    const indexer = new SysdocIndexer({
+      client: client as never,
+      prefix: "xop-sys-test",
+      stateDir: state,
+      logger,
+      manDirs: [man],
+      infoDirs: [info],
+      maxBytesPerDoc: 40,
+    });
+
+    await indexer.run();
+    const bodies = client.bulks
+      .flatMap((entry) => entry.actions)
+      .map((action) => String(action.source.body));
+
+    expect(bodies.length).toBeGreaterThan(0);
+    for (const body of bodies) expect(body.length).toBeLessThan(400);
+  });
+});

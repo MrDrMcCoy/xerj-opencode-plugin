@@ -294,6 +294,15 @@ export function brainSpecs(
 }
 
 /**
+ * System documentation is machine-wide, but each project has its own node, so
+ * the name is derived from the host rather than the project. Two projects on
+ * one machine therefore write the same index name in their own nodes.
+ */
+export function sysdocsPrefix(host: string): string {
+  return `${PREFIX_ROOT}-sys-${pathHash(host)}`;
+}
+
+/**
  * Graph name for the project corpus itself. The project is indexed as a brain,
  * so its edges need a name that is unique per project on a shared node, the
  * same reason a configured brain carries a folder hash.
