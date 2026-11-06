@@ -110,108 +110,136 @@ function matchBacktick(command: string, open: number): number {
   return command.length;
 }
 
+/** One token stream; `quote` and `escaped` persist across characters. */
+interface TokenState {
+  readonly commands: string[][];
+  current: string[];
+  token: string;
+  hasToken: boolean;
+  quote: "'" | '"' | null;
+  escaped: boolean;
+  skipNext: boolean;
+}
+
 function tokenize(command: string): string[][] {
-  const commands: string[][] = [];
-  let current: string[] = [];
-  let token = "";
-  let hasToken = false;
-  let quote: "'" | '"' | null = null;
-  let escaped = false;
-  let skipNext = false;
-
-  const flushToken = (): void => {
-    if (!hasToken) return;
-    if (!skipNext) current.push(token);
-    skipNext = false;
-    token = "";
-    hasToken = false;
-  };
-
-  const flushCommand = (): void => {
-    flushToken();
-    if (current.length > 0) commands.push(current);
-    current = [];
+  const state: TokenState = {
+    commands: [],
+    current: [],
+    token: "",
+    hasToken: false,
+    quote: null,
+    escaped: false,
+    skipNext: false,
   };
 
   for (let index = 0; index < command.length; index += 1) {
     const char = command[index] ?? "";
-
-    if (escaped) {
-      token += char;
-      hasToken = true;
-      escaped = false;
+    if (state.escaped) {
+      appendChar(state, char);
       continue;
     }
-
-    if (char === "\\" && quote !== "'") {
-      escaped = true;
+    if (char === "\\" && state.quote !== "'") {
+      state.escaped = true;
       continue;
     }
-
-    if (quote !== null) {
-      if (char === quote) quote = null;
-      else {
-        token += char;
-        hasToken = true;
-      }
+    if (state.quote !== null) {
+      readQuoted(state, char);
       continue;
     }
-
     if (char === "'" || char === '"') {
-      quote = char;
-      hasToken = true;
+      state.quote = char;
+      state.hasToken = true;
       continue;
     }
-
     if (char === " " || char === "\t" || char === "\r") {
-      flushToken();
+      flushToken(state);
       continue;
     }
-
-    if (char === "\n" || char === ";" || char === "|" || char === "&") {
-      flushCommand();
+    if (isCommandBreak(char)) {
+      flushCommand(state);
       continue;
     }
-
-    // A subshell starts a new command scope; treat the parens as separators so
-    // `(cd dir && cat a)` resolves against `dir`. A closing paren ends the
-    // current token, which may sit right against it (`cat a)`).
-    if (char === ")") {
-      flushCommand();
-      continue;
-    }
-
-    if (char === "(" && !hasToken) {
-      flushCommand();
-      continue;
-    }
-
-    if (char === "<" || char === ">") {
-      // The target of a redirection is not read, so drop the next token. A
-      // leading file descriptor (`2>`) is part of the redirection, not an
-      // argument.
-      if (/^\d$/.test(token)) {
-        token = "";
-        hasToken = false;
-      }
-      flushToken();
-      skipNext = true;
-      continue;
-    }
-
-    if (char === "#" && !hasToken) {
-      while (index + 1 < command.length && command[index + 1] !== "\n") {
-        index += 1;
-      }
-      continue;
-    }
-
-    token += char;
-    hasToken = true;
+    index = readSpecial(state, command, index, char);
   }
 
-  flushCommand();
-  return commands;
+  flushCommand(state);
+  return state.commands;
+}
+
+/** Newline, `;`, `|`, `&`, or a subshell boundary ends the current command. */
+function isCommandBreak(char: string): boolean {
+  return char === "\n" || char === ";" || char === "|" || char === "&" || char === ")";
+}
+
+function appendChar(state: TokenState, char: string): void {
+  state.token += char;
+  state.hasToken = true;
+}
+
+function readQuoted(state: TokenState, char: string): void {
+  if (char === state.quote) {
+    state.quote = null;
+    return;
+  }
+  appendChar(state, char);
+}
+
+/**
+ * Handles the characters that are not plain text and returns the index the
+ * loop should continue from, which only changes when a comment is skipped.
+ */
+function readSpecial(
+  state: TokenState,
+  command: string,
+  index: number,
+  char: string,
+): number {
+  // A subshell starts a new scope; `(cd dir && cat a)` resolves against `dir`.
+  if (char === "(" && !state.hasToken) {
+    flushCommand(state);
+    return index;
+  }
+  if (char === "<" || char === ">") {
+    readRedirection(state);
+    return index;
+  }
+  if (char === "#" && !state.hasToken) return skipComment(command, index);
+
+  appendChar(state, char);
+  return index;
+}
+
+/** The target of a redirection is not read, so the next token is dropped. */
+function readRedirection(state: TokenState): void {
+  // A leading file descriptor (`2>`) belongs to the redirection, not to an
+  // argument.
+  if (/^\d$/.test(state.token)) {
+    state.token = "";
+    state.hasToken = false;
+  }
+  flushToken(state);
+  state.skipNext = true;
+}
+
+/** Returns the index of the last character before the line ends. */
+function skipComment(command: string, index: number): number {
+  let at = index;
+  while (at + 1 < command.length && command[at + 1] !== "\n") at += 1;
+  return at;
+}
+
+function flushToken(state: TokenState): void {
+  if (!state.hasToken) return;
+  if (!state.skipNext) state.current.push(state.token);
+  state.skipNext = false;
+  state.token = "";
+  state.hasToken = false;
+}
+
+function flushCommand(state: TokenState): void {
+  flushToken(state);
+  if (state.current.length > 0) state.commands.push(state.current);
+  state.current = [];
 }
 
 /**

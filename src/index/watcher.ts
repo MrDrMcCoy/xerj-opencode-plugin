@@ -228,22 +228,7 @@ export class CorpusService {
     this.stopped = true;
     this.clearTimer();
     this.closeLocalWatch();
-    const child = this.child;
-    this.child = null;
-    if (!child) return;
-
-    child.kill("SIGTERM");
-    await new Promise<void>((resolvePromise) => {
-      const timer = setTimeout(() => {
-        child.kill("SIGKILL");
-        resolvePromise();
-      }, STOP_GRACE_MS);
-      child.once("close", () => {
-        clearTimeout(timer);
-        resolvePromise();
-      });
-    });
-
+    await this.stopChild();
     this.state = "idle";
   }
 
