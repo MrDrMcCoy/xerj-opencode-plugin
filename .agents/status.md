@@ -273,7 +273,7 @@ test/unit/*.test.ts    pure-function tests
 3. Publish the next release when the user asks. `v0.7.0` is released and
    `npm` serves it. `publish.yml` stages when the token requires it; approve
    the staged version at npmjs.com.
-5. Known coverage gaps need a fake clock or several processes: `mcp/host.ts`
+4. Known coverage gaps need a fake clock or several processes: `mcp/host.ts`
    runner tools, the plugin's own wiring inside a live setup, supervisor
    port-scan exhaustion, and watcher restart backoff.
 
