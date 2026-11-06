@@ -124,7 +124,8 @@ function stubHost(projectRoot: string, options: Record<string, unknown> = {}): S
 describe("server setup wiring", () => {
   test("registers the tools, hooks, and rpc methods", async () => {
     const project = await mkdtemp(join(tmpdir(), "xerj-setup-"));
-    const host = stubHost(project);
+    // A missing binary keeps the test to wiring: no download, no spawn.
+    const host = stubHost(project, { binary: { path: join(project, "absent-xerj") } });
 
     try {
       const cleanup = (await plugin.setup(host.ctx as never)) as () => void;
@@ -163,7 +164,7 @@ describe("server setup wiring", () => {
   test("surfaces a configuration warning without failing setup", async () => {
     const project = await mkdtemp(join(tmpdir(), "xerj-setup-"));
     const host = stubHost(project, {
-      binary: { target: "not-a-real-target" },
+      binary: { path: join(project, "absent-xerj"), target: "not-a-real-target" },
     });
 
     try {
@@ -180,7 +181,7 @@ describe("server setup wiring", () => {
 
   test("refuses to index the home directory", async () => {
     const home = process.env.HOME ?? "/root";
-    const host = stubHost(home);
+    const host = stubHost(home, { binary: { path: join(home, "absent-xerj") } });
 
     try {
       const cleanup = (await plugin.setup(host.ctx as never)) as () => void;
@@ -197,7 +198,7 @@ describe("server setup wiring", () => {
   test("honours a disabled index without starting a corpus", async () => {
     const project = await mkdtemp(join(tmpdir(), "xerj-setup-"));
     const host = stubHost(project, {
-      binary: { target: "not-a-real-target" },
+      binary: { path: join(project, "absent-xerj") },
       index: { auto: false, watch: false },
     });
 
@@ -216,7 +217,10 @@ describe("server setup wiring", () => {
 
   test("setup never throws and returns a cleanup function", async () => {
     const project = await mkdtemp(join(tmpdir(), "xerj-setup-"));
-    const host = stubHost(project, { storage: { root: "/" } });
+    const host = stubHost(project, {
+      storage: { root: "/" },
+      binary: { path: join(project, "absent-xerj") },
+    });
 
     try {
       const cleanup = await plugin.setup(host.ctx as never);
@@ -231,7 +235,10 @@ describe("server setup wiring", () => {
 describe("server rpc handlers", () => {
   test("reindex reports nothing queued when indexing is off", async () => {
     const project = await mkdtemp(join(tmpdir(), "xerj-setup-"));
-    const host = stubHost(project, { index: { auto: false, watch: false } });
+    const host = stubHost(project, {
+      index: { auto: false, watch: false },
+      binary: { path: join(project, "absent-xerj") },
+    });
 
     try {
       const cleanup = (await plugin.setup(host.ctx as never)) as () => void;
@@ -247,7 +254,10 @@ describe("server rpc handlers", () => {
 
   test("remember and search answer clearly before the node exists", async () => {
     const project = await mkdtemp(join(tmpdir(), "xerj-setup-"));
-    const host = stubHost(project, { index: { auto: false, watch: false } });
+    const host = stubHost(project, {
+      index: { auto: false, watch: false },
+      binary: { path: join(project, "absent-xerj") },
+    });
 
     try {
       const cleanup = (await plugin.setup(host.ctx as never)) as () => void;

@@ -27,6 +27,16 @@ const logger = createLogger(
   { echoToConsole: false },
 );
 
+/** True when the pid is still running. */
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const quietLogger = {
   debug: () => {},
   info: () => {},
@@ -307,8 +317,26 @@ describe("plugin setup end to end", () => {
 
       expect(DEFAULT_CONFIG.context.maxPassages).toBeGreaterThan(0);
     } finally {
+      // Teardown is asynchronous in the host, so wait for the node to actually
+      // exit; a leaked node holds a port and a thread for the rest of the run.
+      const node = (await host.status().catch(() => ({}))) as {
+        node?: { pid?: number | null };
+      };
+      const nodePid = node.node?.pid ?? null;
+
       cleanup();
-      await Bun.sleep(200);
+      const stopDeadline = Date.now() + 15_000;
+      while (Date.now() < stopDeadline) {
+        if (nodePid === null || !isAlive(nodePid)) break;
+        await Bun.sleep(200);
+      }
+      if (nodePid !== null && isAlive(nodePid)) {
+        try {
+          process.kill(nodePid, "SIGKILL");
+        } catch {
+          // Already gone between the check and the signal.
+        }
+      }
       if (previous === undefined) delete process.env.XDG_DATA_HOME;
       else process.env.XDG_DATA_HOME = previous;
     }
