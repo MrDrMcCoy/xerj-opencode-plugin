@@ -66,7 +66,11 @@ async function fixture(): Promise<{ man: string; info: string; state: string }> 
 describe("discoverPages", () => {
   test("finds man and info pages and ignores other files", async () => {
     const { man, info } = await fixture();
-    const pages = await discoverPages({ manDirs: [man], infoDirs: [info] });
+    const pages = await discoverPages({
+      manDirs: [man],
+      infoDirs: [info],
+      roots: { man: [], info: [] },
+    });
 
     expect(pages.map((page) => `${page.source}:${page.name}`).sort()).toEqual([
       "info:coreutils",
@@ -79,6 +83,7 @@ describe("discoverPages", () => {
     const pages = await discoverPages({
       manDirs: [join(root, "absent")],
       infoDirs: [],
+      roots: { man: [], info: [] },
     });
     expect(pages).toEqual([]);
   });
@@ -95,6 +100,7 @@ describe("SysdocIndexer", () => {
       logger,
       manDirs: [man],
       infoDirs: [info],
+      roots: { man: [], info: [] },
     });
 
     const first = await indexer.run();
@@ -126,6 +132,7 @@ describe("SysdocIndexer", () => {
       logger,
       manDirs: [man],
       infoDirs: [info],
+      roots: { man: [], info: [] },
     });
 
     await indexer.run();
@@ -153,6 +160,7 @@ describe("SysdocIndexer", () => {
       logger,
       manDirs: [man],
       infoDirs: [info],
+      roots: { man: [], info: [] },
       maxBytesPerDoc: 40,
     });
 

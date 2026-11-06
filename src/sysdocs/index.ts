@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
 import type { Logger } from "../log.ts";
 import { NodeRequestError, type XerjClient } from "../node/client.ts";
+import { supplementaryRoots, type SupplementaryRoots } from "./roots.ts";
 import {
   dedupePages,
   formatSysdoc,
@@ -49,6 +50,8 @@ export interface SysdocOptions {
   readonly maxBytesPerDoc?: number;
   readonly manDirs?: ReadonlyArray<string>;
   readonly infoDirs?: ReadonlyArray<string>;
+  /** Machine roots to supplement the configured ones; a test seam. */
+  readonly roots?: SupplementaryRoots;
 }
 
 export interface SysdocSummary {
@@ -67,16 +70,20 @@ export interface SysdocSummary {
  * skipped, because not every system has them.
  */
 export async function discoverPages(
-  options: Pick<SysdocOptions, "manDirs" | "infoDirs">,
+  options: Pick<SysdocOptions, "manDirs" | "infoDirs" | "roots">,
 ): Promise<SysdocPage[]> {
-  const manDirs =
-    options.manDirs ??
-    splitPath(process.env.MANPATH) ??
-    DEFAULT_MAN_DIRS;
-  const infoDirs =
-    options.infoDirs ??
-    splitPath(process.env.INFOPATH) ??
-    DEFAULT_INFO_DIRS;
+  // `MANPATH` wins where it is set, but a developer's pages usually live
+  // outside it: XDG data, a Nix profile, Homebrew. Those roots follow, then the
+  // system ones, so a user-installed page shadows the distribution copy.
+  const extra = options.roots ?? supplementaryRoots();
+  const manDirs = [
+    ...(options.manDirs ?? splitPath(process.env.MANPATH) ?? []),
+    ...extra.man,
+  ];
+  const infoDirs = [
+    ...(options.infoDirs ?? splitPath(process.env.INFOPATH) ?? []),
+    ...extra.info,
+  ];
 
   const pages: SysdocPage[] = [];
   for (const root of manDirs) pages.push(...(await scanMan(root)));
@@ -84,12 +91,7 @@ export async function discoverPages(
   // An `INFOPATH` that points at an empty tree is common (a package manager
   // sets one); the system roots are still worth reading. An explicit list from
   // config is honoured as given, so a caller can index exactly one tree.
-  let infoPages: SysdocPage[] = [];
-  for (const root of infoDirs) infoPages.push(...(await scanInfo(root)));
-  if (infoPages.length === 0 && options.infoDirs === undefined) {
-    for (const root of DEFAULT_INFO_DIRS) infoPages.push(...(await scanInfo(root)));
-  }
-  pages.push(...infoPages);
+  for (const root of infoDirs) pages.push(...(await scanInfo(root)));
 
   return dedupePages(pages);
 }

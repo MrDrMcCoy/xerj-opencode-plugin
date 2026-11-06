@@ -194,8 +194,8 @@ The same entry works with a checkout path instead of the package name; see
 | `index.hiddenMaxBytes` | Per-file ceiling for hidden documents. |
 | `sysdocs.maxDocs` | Pages indexed per run. Default 5000. |
 | `sysdocs.maxBytesPerDoc` | Bytes kept per page, head first. Default 64 KiB. |
-| `sysdocs.manDirs` | Extra man roots; empty means `MANPATH`, then `/usr/local/share/man` and `/usr/share/man`. |
-| `sysdocs.infoDirs` | Extra info roots; empty means `INFOPATH`, then the system info directories. |
+| `sysdocs.manDirs` | Extra man roots, searched before the machine roots. Empty means `MANPATH` only. |
+| `sysdocs.infoDirs` | Extra info roots, searched before the machine roots. Empty means `INFOPATH` only. |
 | `memory.retain.days` | Days an automatic summary is kept; `0` disables the age cap. |
 | `memory.retain.maxCount` | Summaries kept regardless of age; `0` disables the count cap. |
 | `memory.retain.maxBytes` | Bytes of summary text kept; `0` disables the size cap. |
@@ -307,8 +307,22 @@ covered.
 ## System documentation
 
 `/xerj-sysdocs` indexes the man and info pages this machine can resolve into
-their own corpus (`xop-sys-<host hash>`). The corpus keeps `path`, `abs_path`,
-`title`, `source`, and `mtime` per page, so a citation reads `man/git.1`.
+their own corpus (`xop-sys-<host hash>`).
+
+Roots are searched in this order, and the first copy of a name wins, so a page
+you installed shadows the distribution's copy:
+
+1. `MANPATH` and `INFOPATH`, when set.
+2. `sysdocs.manDirs` and `sysdocs.infoDirs`, when configured.
+3. `$XDG_DATA_HOME` (or `~/.local/share`), then `~/.nix-profile/share`.
+4. `NIX_PROFILES`, then `/run/current-system/sw` for a NixOS system profile.
+5. `HOMEBREW_PREFIX`, then `/home/linuxbrew/.linuxbrew`, `/opt/homebrew`, and
+   `/usr/local` for Homebrew.
+6. `/usr/local/share` and `/usr/share`.
+
+A root that does not exist is skipped, so a machine without Nix or Homebrew
+pays nothing for either. The corpus keeps `path`, `abs_path`, `title`, `source`,
+and `mtime` per page, so a citation reads `man/git.1`.
 
 A manifest records each page's path, mtime, size, and document id, so a first
 run indexes everything (3648 pages in about six seconds here, 33 MB) and later

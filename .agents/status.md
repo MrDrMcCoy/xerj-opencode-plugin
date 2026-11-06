@@ -340,6 +340,29 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-05: System documentation corpus and `/xerj-sysdocs` (0.7.0). The
+  command walks `MANPATH`/`INFOPATH` (then the system roots), keeps the first
+  copy of each name and section, strips roff control lines while keeping
+  section headings, and bulk-loads each page into `xop-sys-<host hash>`. A
+  manifest of path, mtime, size, and id makes repeat runs cheap: measured here,
+  3648 pages in 5.8 s (33 MB of text), then 83 ms for a no-op run, with a
+  removed page pruned by id. `body` is plain `text` rather than
+  `semantic_text`, so nothing is embedded: thousands of long pages would take
+  hours with the local model and buy little on reference prose. The corpus
+  joins the search prefixes (a `filesystem mount` query cites `man/mount.8`)
+  and appears as the `sysdocs` dataset.
+
+  Roots beyond `MANPATH` are searched in precedence order, so a user-installed
+  page shadows the distribution copy: `$XDG_DATA_HOME`, `~/.nix-profile/share`,
+  `NIX_PROFILES`, `/run/current-system/sw`, `HOMEBREW_PREFIX`, the Homebrew
+  defaults, then `/usr/local/share` and `/usr/share`. A root that does not
+  exist costs nothing. Verified with `XDG_DATA_HOME` pointed at a scratch tree:
+  a page there was discovered and won for a name the system also provides;
+  Linuxbrew's `share/man` is empty on this machine, so the corpus stays at 3648
+  pages and a repeat run is 90 ms with everything skipped. Config:
+  `sysdocs.maxDocs`, `maxBytesPerDoc`, `manDirs`, `infoDirs`. 578 unit and 10
+  integration tests pass.
+
 - 2026-11-05: The project corpus is one graph (0.6.9). `index.graph`
   (default on) runs `autoindex --brain <project>-<hash>` instead of
   `--no-graph`, so a single corpus carries sections, symbols, `path:line`,
