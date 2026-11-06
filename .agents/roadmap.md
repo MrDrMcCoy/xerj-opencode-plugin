@@ -260,7 +260,7 @@ Ship these first. None adds a runtime, a grammar, or a write path.
 | Memory curation | Magic Context | Merge near-duplicates, archive superseded facts, score by use | The store stops growing with restatements |
 | `autoindex map` | XERJ engine | Panel view of what the corpus contains | The panel answers "what do you know" |
 | `prjdocs` keyword surfacing | This plugin | Expose `eagerKeywords` in the panel and the command help | A user can add a term without editing JSON |
-| Sidebar rebuild | AFT and Magic Context, layout only | Bordered box with a `▼ XERJ` accent header, click to collapse, three summary rows when collapsed and named sections when expanded; per-section on/off and collapse memory in the shared `tui-preferences.jsonc` under key `xerj`; inline `⚠` for a failing corpus; 150 ms refresh debounce | Collapsed and expanded views both render from `StatusSnapshot` alone, a click survives a view switch, and formatting stays pure and tested |
+| Sidebar rebuild | AFT and Magic Context, layout only | Bordered box with a `▼ XERJ` accent header, click to collapse, three summary rows when collapsed and named sections when expanded; per-section on/off and collapse memory in the shared `tui-preferences.jsonc` under key `xerj` (`order` is not offered: this host's slots take `prepend`/`append` only); inline `⚠` for a failing corpus; 150 ms refresh debounce | Collapsed and expanded views both render from `StatusSnapshot` alone, a click survives a view switch, and formatting stays pure and tested |
 
 ## Tier M: one to three weeks, high suitability
 
@@ -370,7 +370,7 @@ measured; they include tests and the commits that carry them. A status of
 | Memory verification | S | Done | 1.5 h | `baac28d`; `memory/verify.ts`, 10 tests, panel count |
 | Auto-search hint | S | Done | 1.0 h | `search({ hint: true })` skips the word gate with a 150 ms deadline; one `<xerj-hint>` line naming the candidate; three hook tests |
 | Memory curation | S | Done | 1.0 h | `memory/curate.ts`: exact duplicate summaries dropped, other repeats flagged `duplicateOf`, never deleted; seven tests |
-| Sidebar rebuild | S | Not started | — | Bordered box, `▼ XERJ` header, click-to-collapse with the controller in the setup closure, collapsed summary rows plus expanded sections, prefs under key `xerj` in `tui-preferences.jsonc` with an echo guard, inline failure rows, 150 ms debounce; about 8 h across five pieces |
+| Sidebar rebuild | S | Done | 3.0 h | Bordered box with a `▼ XERJ` badge header and version, `onMouseDown` collapse, three rows when collapsed and five sections when expanded, `⚠` line for an error or warning, 150 ms refresh debounce, prefs under key `xerj` in the shared file with other plugins' keys preserved (read once at setup, so no file watcher and no echo guard is needed); ten prefs tests, five view tests, two render tests |
 | `autoindex map` in the panel | S | Done | 0.5 h | Record kinds from a `terms` aggregation, shown as `records: function 545 · section 401`; four panel tests |
 | `prjdocs` keyword surfacing | S | Done | 0.2 h | `config.prjdocsKeywords` in the status, a panel line, and the command description |
 | Graph overview in the panel | M | Done (earlier) | 0 h this pass | Brains already report docs and live edges; the corpora list covers the rest |
@@ -395,8 +395,8 @@ measured; they include tests and the commits that carry them. A status of
 | Dreamer child sessions | XL | Not started | — | — |
 | Notes and smart notes | XL | Not started | — | — |
 
-**Tier S: eleven of twelve done, 9.9 h** against an 8 to 10 h estimate. The
-sidebar rebuild (about 8 h) is the remaining item and is not started.
+**Tier S complete: twelve of twelve, 12.9 h** against an 8 to 10 h estimate.
+The sidebar took 3 h against an 8 h plan; the overshoot is in the other items.
 
 Per-item estimates held within about half an hour except commit indexing, where
 the `git log` record layout cost an extra hour and a half, and the auto-search
