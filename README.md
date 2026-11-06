@@ -204,6 +204,8 @@ This is the complete set with its defaults, in
           "memoryTokens": 400,
           "archiveEnabled": true,
           "archiveMaxBytes": 67108864,   // 64 MiB
+          "rehydrate": true,             // recall passages after a compaction
+          "rehydrateTokens": 600,
           "maxPassages": 8,
           "timeoutMs": 400
         },
@@ -297,6 +299,8 @@ The same entry works with a checkout path instead of the package name; see
 | `context.maxTokens` | Ceiling for injected passages. |
 | `context.memoryTokens` | Ceiling for injected memories. |
 | `context.timeoutMs` | Retrieval deadline; miss it and inject nothing. |
+| `context.rehydrate` | After the host compacts a session, re-inject two or three passages from that session's working set once, under a `<xerj-recall>` marker. A fresh retrieval with hits supersedes it. |
+| `context.rehydrateTokens` | Ceiling for the post-compaction recall, in tokens; 0 disables it. |
 | `memory.captureTurns` | Store each substantive turn's final answer (400+ characters) as a `summary` memory, paired with its prompt. Needs `context.enabled`, which records the prompts. |
 | `stats.maxBaselineBytes` | Cap on the baseline credited per cited file. |
 | `telemetry.anomaly` | Reserved; background telemetry is not implemented. |
@@ -386,6 +390,12 @@ Then the context surface decides what is worth a token:
   injected again, so a follow-up question does not pay twice for one section.
 - **Budget.** `context.maxPassages` passages within `context.maxTokens`, split
   evenly so one whole-section match cannot hide the others.
+- **Post-compaction recall.** When the host compacts a session, the summary
+  drops the passages the session was working from. On the next model call the
+  plugin re-reads up to three of those files and injects a window around each
+  cited line under a `<xerj-recall>` marker, capped by
+  `context.rehydrateTokens`. It happens once, and a fresh retrieval with hits
+  supersedes it. The summariser's own request receives nothing.
 
 Send a question to `xerj_search` and the same legs run with the tool surface:
 no relevance gate, no budget discard, and generated files kept but demoted,

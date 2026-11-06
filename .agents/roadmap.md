@@ -426,7 +426,7 @@ measured; they include tests and the commits that carry them. A status of
 | `xerj_expand` | M | Done | 0.5 h | Prints `[n] U:`/`[n] A:` for a turn range, or says the archive is off; wired for the plugin and the MCP server |
 | Pre-compaction window archive | M | Not started | — | Deferred by the user. The `compaction` hook receives `event.messages` before the summary exists; flattening the text parts into the existing archive keeps tool output that a summary compresses away. Design is fixed: last N messages or about 200 KB, whichever comes first, deduped by message id against compaction retries, media parts skipped, and a marker so `xerj_expand` shows where the captured block starts |
 | Fact mining from the compaction window | M | Not started | — | Deferred by the user. Two routes: a heuristic pass over the same window (patterns for decisions, constraints, config keys, commands that worked) at about 2 h, or one model call bounded by a token budget at about 3 to 4 h. Needs a precision measurement before it defaults on, a `derived` memory kind, and reuse of the stale flag; gated by `memory.extract`, off by default |
-| Post-compaction rehydration | M | Not started | — | Deferred by the user. Snapshot the per-session injected locations on `session.compaction.ended` (today they are cleared), then on the next `context` call prefer those paths and inject two or three passages, once, under `context.rehydrateTokens`. Alternatives costed: summary-seeded retrieval about 4 h, model-judged about a day plus a gate. Suppress injection while a `model.request` with `kind: "compaction"` is in flight, since the `context` hook cannot see the request kind |
+| Post-compaction rehydration | M | Done | 2.0 h | `src/rehydrate.ts` builds the block from the three newest citations, re-reading a 24-line window inside the project root and capping the result at `context.rehydrateTokens` (600); `session.compaction.ended` snapshots the working set, the `model.request` hook suppresses the summariser's own call, and a fresh retrieval with hits supersedes the recall. Ten module tests and six hook tests |
 | History search | M | Done | 1.0 h | `archive/index.ts` bulk-loads one document per turn into `<prefix>-archive-docs`, idempotent by session and ordinal, with a manifest so a pruned turn leaves the index; the archive is now a search prefix and its own dataset row; five module tests |
 | LSP pool | L | Not started | — | Gated by `analysis.lsp.enabled` |
 | Server installer | L | Not started | — | — |
@@ -446,13 +446,12 @@ the `git log` record layout cost an extra hour and a half, and the auto-search
 hint, where the dedupe test had to distinguish the hint pass from the retrieval
 pass.
 
-Tier M so far: **7.5 h** across six items this pass, seven of fourteen with the
-graph overview that predates it. Remaining, all deferred or gated: the
+Tier M so far: **9.5 h** across seven items this pass, eight of fourteen with
+the graph overview that predates it. Remaining, all deferred or gated: the
 tree-sitter layer and the complexity work it enables (grammar source settled,
-work deferred), the pre-compaction window archive, fact mining, and
-post-compaction rehydration (all deferred by the user), `xerj_code` (needs a
-network gate, since `corpus add` clones), and `xerj_ask` (gated by
-`hub.enabled` and `hub.network`).
+work deferred), the pre-compaction window archive and fact mining (both
+deferred by the user), `xerj_code` (needs a network gate, since `corpus add`
+clones), and `xerj_ask` (gated by `hub.enabled` and `hub.network`).
 
 ## Settled decisions
 

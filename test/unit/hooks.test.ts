@@ -47,7 +47,7 @@ describe("context blocks", () => {
 
 type Handler = (event: unknown) => Promise<void>;
 
-type HookName = "prompt" | "context";
+type HookName = "prompt" | "context" | "model.request";
 
 interface FakeCtx {
   handlers: Record<HookName, Handler>;
@@ -184,6 +184,8 @@ async function register(
     config?: Partial<Config["context"]>;
     search?: SearchService;
     memory?: MemoryStore;
+    projectRoot?: string;
+    readRecallFile?: (path: string) => Promise<string | null>;
   } = {},
 ): Promise<Hooks> {
   const hooks: Hooks = {
@@ -220,6 +222,8 @@ async function register(
     recordQuery: async (sessionID, paths, bytes, hits) => {
       hooks.queries.push({ sessionID, paths: [...paths], bytes, hits });
     },
+    projectRoot: overrides.projectRoot,
+    readRecallFile: overrides.readRecallFile,
   });
   return hooks;
 }
@@ -244,9 +248,13 @@ describe("hook registration", () => {
     expect(Object.keys(hooks.ctx.handlers)).toEqual([]);
   });
 
-  test("registers the prompt and context hooks", async () => {
+  test("registers the prompt, context and model-request hooks", async () => {
     const hooks = await register();
-    expect(Object.keys(hooks.ctx.handlers).sort()).toEqual(["context", "prompt"]);
+    expect(Object.keys(hooks.ctx.handlers).sort()).toEqual([
+      "context",
+      "model.request",
+      "prompt",
+    ]);
   });
 });
 
@@ -601,6 +609,145 @@ describe("compaction and injection dedupe", () => {
 
     await hooks.ctx.handlers.prompt(promptEvent("s1", LONG, "m2"));
     expect(excluded(calls.at(-1))).toBe(true);
+  });
+
+  test("restores the working set once after a compaction", async () => {
+    const reads: string[] = [];
+    const hooks = await register({
+      search: fakeSearch(passage(), []),
+      projectRoot: "/project",
+      readRecallFile: async (path) => {
+        reads.push(path);
+        return "const journal = 'node';\nmore text";
+      },
+    });
+
+    await hooks.ctx.handlers.prompt(promptEvent("s1", LONG, "m1"));
+    await hooks.ctx.handlers.context(contextEvent("s1", "m1"));
+    expect(hooks.injections).toBe(1);
+
+    hooks.ctx.push("session.compaction.ended", { sessionID: "s1" });
+    await settle();
+
+    // The summarised continuation has no new prompt, so the context call is
+    // the only chance to put the working set back.
+    const recalled = contextEvent("s1", "m2");
+    await hooks.ctx.handlers.context(recalled);
+    const texts = systemTexts(recalled);
+    const block = texts.find((text) => text.includes("<xerj-recall>"));
+    expect(block).toBeDefined();
+    expect(block).toContain("src/a.ts:1");
+    expect(block).toContain("const journal");
+    expect(hooks.injections).toBe(2);
+    expect(hooks.costs?.at(-1)).toBe(Buffer.byteLength(block!));
+    expect(reads).toEqual(["/project/src/a.ts"]);
+
+    // Once only: the next call has nothing left to restore.
+    const again = contextEvent("s1", "m3");
+    await hooks.ctx.handlers.context(again);
+    expect(
+      systemTexts(again).some((text) => text.includes("<xerj-recall>")),
+    ).toBe(false);
+    expect(hooks.injections).toBe(2);
+  });
+
+  test("a fresh retrieval supersedes the pre-compaction set", async () => {
+    const hooks = await register({
+      search: fakeSearch(passage(), []),
+      projectRoot: "/project",
+      readRecallFile: async () => "old passage",
+    });
+
+    await hooks.ctx.handlers.prompt(promptEvent("s1", LONG, "m1"));
+    await hooks.ctx.handlers.context(contextEvent("s1", "m1"));
+
+    hooks.ctx.push("session.compaction.ended", { sessionID: "s1" });
+    await settle();
+
+    await hooks.ctx.handlers.prompt(promptEvent("s1", LONG, "m2"));
+    const event = contextEvent("s1", "m2");
+    await hooks.ctx.handlers.context(event);
+
+    const texts = systemTexts(event);
+    expect(texts.some((text) => text.includes("<xerj-context>"))).toBe(true);
+    expect(texts.some((text) => text.includes("<xerj-recall>"))).toBe(false);
+  });
+
+  test("the summariser's own request receives no recall", async () => {
+    const hooks = await register({
+      search: fakeSearch(passage(), []),
+      projectRoot: "/project",
+      readRecallFile: async () => "restored passage",
+    });
+
+    await hooks.ctx.handlers.prompt(promptEvent("s1", LONG, "m1"));
+    await hooks.ctx.handlers.context(contextEvent("s1", "m1"));
+
+    hooks.ctx.push("session.compaction.ended", { sessionID: "s1" });
+    await settle();
+
+    await hooks.ctx.handlers["model.request"]({
+      sessionID: "s1",
+      kind: "compaction",
+    });
+    const summariser = contextEvent("s1", "m2");
+    await hooks.ctx.handlers.context(summariser);
+    expect(systemTexts(summariser)).toEqual([]);
+
+    // The agent loop clears the suppression and gets the recall.
+    await hooks.ctx.handlers["model.request"]({
+      sessionID: "s1",
+      kind: "primary",
+    });
+    const resumed = contextEvent("s1", "m3");
+    await hooks.ctx.handlers.context(resumed);
+    expect(
+      systemTexts(resumed).some((text) => text.includes("<xerj-recall>")),
+    ).toBe(true);
+  });
+
+  test("a slow read is dropped instead of delaying the turn", async () => {
+    const hooks = await register({
+      search: fakeSearch(passage(), []),
+      projectRoot: "/project",
+      readRecallFile: () => new Promise<string | null>(() => {}),
+    });
+
+    await hooks.ctx.handlers.prompt(promptEvent("s1", LONG, "m1"));
+    await hooks.ctx.handlers.context(contextEvent("s1", "m1"));
+
+    hooks.ctx.push("session.compaction.ended", { sessionID: "s1" });
+    await settle();
+
+    const started = Date.now();
+    const event = contextEvent("s1", "m2");
+    await hooks.ctx.handlers.context(event);
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(
+      systemTexts(event).some((text) => text.includes("<xerj-recall>")),
+    ).toBe(false);
+  });
+
+  test("does not restore anything when context.rehydrate is off", async () => {
+    const hooks = await register({
+      config: { rehydrate: false },
+      search: fakeSearch(passage(), []),
+      projectRoot: "/project",
+      readRecallFile: async () => "restored passage",
+    });
+
+    await hooks.ctx.handlers.prompt(promptEvent("s1", LONG, "m1"));
+    await hooks.ctx.handlers.context(contextEvent("s1", "m1"));
+
+    hooks.ctx.push("session.compaction.ended", { sessionID: "s1" });
+    await settle();
+
+    const event = contextEvent("s1", "m2");
+    await hooks.ctx.handlers.context(event);
+    expect(
+      systemTexts(event).some((text) => text.includes("<xerj-recall>")),
+    ).toBe(false);
+    expect(hooks.injections).toBe(1);
   });
 });
 

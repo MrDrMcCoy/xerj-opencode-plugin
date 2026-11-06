@@ -2,6 +2,27 @@ import { describe, expect, test } from "bun:test";
 import { DEFAULT_CONFIG, loadConfig } from "../../src/config.ts";
 import { Priority } from "../../src/node/priority.ts";
 
+describe("context.rehydrate", () => {
+  test("is on with a 600-token cap by default", () => {
+    const { config } = loadConfig(undefined);
+    expect(config.context.rehydrate).toBe(true);
+    expect(config.context.rehydrateTokens).toBe(600);
+  });
+
+  test("reads the switch and the cap", () => {
+    const { config } = loadConfig({
+      context: { rehydrate: false, rehydrateTokens: 200 },
+    });
+    expect(config.context.rehydrate).toBe(false);
+    expect(config.context.rehydrateTokens).toBe(200);
+  });
+
+  test("clamps a negative cap to zero", () => {
+    const { config } = loadConfig({ context: { rehydrateTokens: -5 } });
+    expect(config.context.rehydrateTokens).toBe(0);
+  });
+});
+
 describe("node.cpus", () => {
   test("defaults to no affinity change", () => {
     expect(loadConfig(undefined).config.node.cpus).toBeNull();

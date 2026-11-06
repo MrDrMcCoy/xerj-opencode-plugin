@@ -88,6 +88,9 @@ export interface ContextOptions {
   /** Keeps raw turns so a compacted session can still be expanded. */
   readonly archiveEnabled: boolean;
   readonly archiveMaxBytes: number;
+  /** Re-injects the session's working set after the host compacts. */
+  readonly rehydrate: boolean;
+  readonly rehydrateTokens: number;
   readonly maxPassages: number;
   readonly timeoutMs: number;
 }
@@ -226,6 +229,8 @@ export const DEFAULT_CONFIG: Config = {
     memoryTokens: 400,
     archiveEnabled: true,
     archiveMaxBytes: 64 * 1024 * 1024,
+    rehydrate: true,
+    rehydrateTokens: 600,
     maxPassages: 8,
     timeoutMs: 400,
   },
@@ -434,6 +439,20 @@ export function loadConfig(
         1_048_576,
         Number.MAX_SAFE_INTEGER,
         "context.archive.maxBytes",
+        warnings,
+      ),
+      rehydrate: readBoolean(
+        context.rehydrate,
+        DEFAULT_CONFIG.context.rehydrate,
+        "context.rehydrate",
+        warnings,
+      ),
+      rehydrateTokens: readInteger(
+        context.rehydrateTokens,
+        DEFAULT_CONFIG.context.rehydrateTokens,
+        0,
+        10_000,
+        "context.rehydrateTokens",
         warnings,
       ),
       maxPassages: readInteger(

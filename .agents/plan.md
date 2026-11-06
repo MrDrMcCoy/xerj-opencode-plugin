@@ -547,7 +547,18 @@ files, so do not label it as a file count in the UI.
   Budget 300 tokens, refresh when the index generation changes.
 - On every call, append `<xerj-context>` with the cached retrieval block for
   the current turn, if any and if not already injected.
+- On the first call after `session.compaction.ended`, re-read up to three of
+  the session's recent `path:line` citations and append a `<xerj-recall>`
+  block: a window around each line, capped by `context.rehydrateTokens`
+  (600), once, and only inside the project root. A fresh retrieval with hits
+  supersedes it. `context.rehydrate=false` disables it.
 - Never touch `event.messages`; never delete tools.
+
+The `context` hook cannot see why the model is being called, so
+`session.hook("model.request")` supplies the kind. A request with
+`kind: "compaction"` is the summariser's own call; suppression lasts until
+the next non-compaction request, and that call gets no corpus part and no
+recall. This costs one hook registration and no extra retrieval.
 
 If retrieval missed the `timeoutMs` deadline, inject nothing. Tools remain.
 

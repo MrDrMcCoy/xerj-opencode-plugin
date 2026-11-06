@@ -10,6 +10,12 @@ import type { Config } from "../config.ts";
 import type { Logger } from "../log.ts";
 import type { MemoryStore } from "../memory/store.ts";
 import { formatMemories } from "../memory/store.ts";
+import {
+  buildRecallBlock,
+  recallKey,
+  type CitedLocation,
+  type RecallReader,
+} from "../rehydrate.ts";
 import { contentTerms, coversTerms } from "../search/rank.ts";
 import type { SearchHit, SearchService } from "../search/service.ts";
 
@@ -36,6 +42,10 @@ export interface SessionHookOptions {
   readonly onActivity?: (sessionID?: string) => void;
   /** Stops the compaction watch when the plugin shuts down. */
   readonly signal?: AbortSignal;
+  /** Project root used to re-read cited files after a compaction. */
+  readonly projectRoot?: string;
+  /** Reads a cited file for post-compaction recall; tests replace it. */
+  readonly readRecallFile?: RecallReader;
   readonly recordQuery: (
     sessionID: string,
     paths: ReadonlyArray<string>,
@@ -53,6 +63,8 @@ interface Prepared {
   readonly hits: number;
   /** `path:line` keys of the passages in this block, for session dedupe. */
   readonly locations: ReadonlyArray<string>;
+  /** The same passages as file and line, for post-compaction recall. */
+  readonly recall: ReadonlyArray<CitedLocation>;
 }
 
 const MIN_QUERY_LENGTH = 12;
@@ -137,6 +149,12 @@ export async function registerSessionHooks(
   // budget on text the model can already see.
   const seen = new Map<string, Set<string>>();
   const summarized = new Map<string, true>();
+  // The passages the session is currently working from, and the snapshot taken
+  // when the host compacted, waiting for the next model call.
+  const working = new Map<string, ReadonlyArray<CitedLocation>>();
+  const recallable = new Map<string, ReadonlyArray<CitedLocation>>();
+  // The summariser itself must not receive recall; only the agent loop does.
+  const compacting = new Set<string>();
 
   await ctx.session.hook("prompt", async (event) => {
     options.onActivity?.(event.sessionID);
@@ -174,6 +192,7 @@ export async function registerSessionHooks(
           memory: "",
           hits: 0,
           locations: [],
+          recall: [],
         });
         return;
       }
@@ -184,6 +203,9 @@ export async function registerSessionHooks(
         memory,
         hits: result.hits.length,
         locations: result.hits.map(locationKey),
+        recall: result.hits.flatMap((hit) =>
+          hit.path === null ? [] : [{ path: hit.path, line: hit.line ?? 1 }],
+        ),
       });
     } catch (error) {
       options.logger.debug("prompt retrieval skipped", String(error));
@@ -192,6 +214,9 @@ export async function registerSessionHooks(
 
   await ctx.session.hook("context", async (event) => {
     options.onActivity?.(event.sessionID);
+    // The compaction request is the summariser's own call; it needs the
+    // history it is about to replace, not a recall of it.
+    if (compacting.has(event.sessionID)) return;
     if (!summarized.has(event.sessionID)) {
       forgetOldest(summarized, event.sessionID, true);
       try {
@@ -207,45 +232,150 @@ export async function registerSessionHooks(
     }
 
     const entry = prepared.get(event.sessionID);
-    if (!entry) return;
-
-    if (lastInjected.get(event.sessionID) === entry.messageID) return;
-    forgetOldest(lastInjected, event.sessionID, entry.messageID);
-    prepared.delete(event.sessionID);
-
+    const duplicate =
+      entry !== undefined &&
+      lastInjected.get(event.sessionID) === entry.messageID;
     let overhead = 0;
-    if (entry.memory.length > 0) {
-      event.system.push({ type: "text", text: entry.memory });
-      overhead += Buffer.byteLength(entry.memory, "utf8");
-    }
-    if (entry.block.length > 0) {
-      event.system.push({ type: "text", text: entry.block });
-      overhead += Math.max(0, Buffer.byteLength(entry.block, "utf8") - entry.passageBytes);
-    }
-    if (entry.memory.length === 0 && entry.block.length === 0) return;
+    let injected = false;
+    // A fresh retrieval with real passages supersedes the pre-compaction
+    // working set; recall would only spend budget on the same question.
+    let freshHits = false;
 
-    if (entry.block.length > 0) {
-      const locations = seen.get(event.sessionID) ?? new Set<string>();
-      for (const key of entry.locations) {
-        locations.add(key);
-        // A long session at the cap would stop deduping rather than grow; the
-        // oldest key leaves first.
-        if (locations.size > MAX_LOCATIONS_PER_SESSION) {
-          const oldest = locations.values().next().value;
-          if (oldest !== undefined) locations.delete(oldest);
+    if (entry !== undefined && !duplicate) {
+      forgetOldest(lastInjected, event.sessionID, entry.messageID);
+      prepared.delete(event.sessionID);
+
+      if (entry.memory.length > 0) {
+        event.system.push({ type: "text", text: entry.memory });
+        overhead += Buffer.byteLength(entry.memory, "utf8");
+      }
+      if (entry.block.length > 0) {
+        event.system.push({ type: "text", text: entry.block });
+        overhead += Math.max(
+          0,
+          Buffer.byteLength(entry.block, "utf8") - entry.passageBytes,
+        );
+      }
+
+      if (entry.memory.length > 0 || entry.block.length > 0) {
+        injected = true;
+        freshHits = entry.hits > 0 && entry.block.length > 0;
+        if (entry.block.length > 0) {
+          rememberLocations(seen, event.sessionID, entry.locations);
+        }
+        if (entry.recall.length > 0) {
+          forgetOldest(working, event.sessionID, entry.recall);
         }
       }
-      forgetOldest(seen, event.sessionID, locations);
     }
 
+    // The host compacted this session. Restore a few passages from its own
+    // working set once, on the first call that is not the summariser itself.
+    const snapshot = recallable.get(event.sessionID);
+    if (snapshot !== undefined) {
+      recallable.delete(event.sessionID);
+      if (!freshHits) {
+        const recall = await buildRecall({
+          options,
+          entry,
+          snapshot,
+        });
+        if (recall !== null) {
+          event.system.push({ type: "text", text: recall.text });
+          overhead += recall.bytes;
+          rememberLocations(seen, event.sessionID, recall.locations);
+          const restored = snapshot.filter((location) =>
+            recall.locations.includes(recallKey(location)),
+          );
+          if (restored.length > 0) {
+            forgetOldest(working, event.sessionID, restored);
+          }
+          injected = true;
+        }
+      }
+    }
+
+    if (!injected) return;
     options.onInject?.();
     if (overhead > 0) options.onCost?.(event.sessionID, overhead);
+  });
+
+  // The summariser's own request is the one call that must not receive
+  // recall, and `kind` is the only signal that distinguishes it.
+  await ctx.session.hook("model.request", async (event) => {
+    if (event.kind === "compaction") {
+      compacting.add(event.sessionID);
+      return;
+    }
+    compacting.delete(event.sessionID);
   });
 
   // The host compacts history on its own. What it drops is gone from the
   // window, so a passage injected before the compaction has to be allowed
   // back in; otherwise the plugin goes quiet exactly when room is tightest.
-  void watchCompaction(ctx, options, seen, memoriesShown);
+  void watchCompaction(ctx, options, {
+    seen,
+    memoriesShown,
+    prepared,
+    working,
+    recallable,
+  });
+}
+
+/** Adds keys to the session's dedupe set, evicting the oldest past the cap. */
+function rememberLocations(
+  seen: Map<string, Set<string>>,
+  sessionID: string,
+  keys: ReadonlyArray<string>,
+): void {
+  if (keys.length === 0) return;
+  const locations = seen.get(sessionID) ?? new Set<string>();
+  for (const key of keys) {
+    locations.add(key);
+    // A long session at the cap would stop deduping rather than grow; the
+    // oldest key leaves first.
+    if (locations.size > MAX_LOCATIONS_PER_SESSION) {
+      const oldest = locations.values().next().value;
+      if (oldest !== undefined) locations.delete(oldest);
+    }
+  }
+  forgetOldest(seen, sessionID, locations);
+}
+
+// A recall is a bonus, so it never delays a turn for long: three file reads
+// on a slow disk are dropped rather than admitted late.
+const RECALL_DEADLINE_MS = 120;
+
+async function buildRecall(input: {
+  readonly options: SessionHookOptions;
+  readonly entry: Prepared | undefined;
+  readonly snapshot: ReadonlyArray<CitedLocation>;
+}) {
+  const { options, entry, snapshot } = input;
+  if (!options.config.context.rehydrate) return null;
+  if (options.projectRoot === undefined) return null;
+
+  const covered = new Set(entry?.locations ?? []);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), RECALL_DEADLINE_MS);
+  });
+
+  try {
+    const block = buildRecallBlock({
+      projectRoot: options.projectRoot,
+      locations: snapshot,
+      maxBytes: options.config.context.rehydrateTokens * 4,
+      exclude: (key) => covered.has(key),
+      readFile: options.readRecallFile,
+    });
+    return await Promise.race([block, deadline]);
+  } catch (error) {
+    options.logger.debug("post-compaction recall failed", String(error));
+    return null;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 /** The event stream shape this file needs; the host provides more. */
@@ -263,8 +393,13 @@ interface EventStream {
 async function watchCompaction(
   ctx: Plugin.Context,
   options: SessionHookOptions,
-  seen: Map<string, Set<string>>,
-  memoriesShown: Map<string, Set<string>>,
+  state: {
+    readonly seen: Map<string, Set<string>>;
+    readonly memoriesShown: Map<string, Set<string>>;
+    readonly prepared: Map<string, Prepared>;
+    readonly working: Map<string, ReadonlyArray<CitedLocation>>;
+    readonly recallable: Map<string, ReadonlyArray<CitedLocation>>;
+  },
 ): Promise<void> {
   const events = (ctx as { event?: EventStream }).event;
   if (events === undefined || typeof events.subscribe !== "function") return;
@@ -276,8 +411,18 @@ async function watchCompaction(
     })) {
       const sessionID = sessionOf(raw);
       if (sessionID === null) continue;
-      seen.delete(sessionID);
-      memoriesShown.delete(sessionID);
+
+      // Keep the working set for one recall, then forget what the session was
+      // told: the summary no longer carries those passages, so they must be
+      // allowed back in.
+      const working = state.working.get(sessionID);
+      if (working !== undefined && working.length > 0) {
+        forgetOldest(state.recallable, sessionID, working);
+      }
+      state.working.delete(sessionID);
+      state.prepared.delete(sessionID);
+      state.seen.delete(sessionID);
+      state.memoriesShown.delete(sessionID);
       options.logger.debug("cleared injection dedupe after a compaction", sessionID);
     }
   } catch (error) {

@@ -339,6 +339,35 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: Post-compaction rehydration is implemented, so the defect that
+  motivated it is closed: the host's summary drops the passages a session was
+  working from, and the plugin no longer goes quiet at exactly that point. On
+  `session.compaction.ended` the session's current `path:line` working set is
+  snapshotted and the dedupe sets are cleared. On the next model call,
+  `src/rehydrate.ts` re-reads up to three of those files and appends a
+  `<xerj-recall>` block with a 24-line window around each cited line, capped at
+  `context.rehydrateTokens * 4` bytes (600 tokens by default). The block is
+  charged to the ledger through `onCost`, its keys join the session dedupe set,
+  and it is sent once. A fresh retrieval with real hits supersedes it, because
+  the new question has already been answered from the index. Paths are resolved
+  against the project root and refused outside it; URLs, index ids, missing
+  files, and files above 1 MiB are skipped silently. The read is raced against
+  a 120 ms deadline so a slow disk cannot delay a turn; a miss injects nothing.
+  `context.rehydrate` (default true) and `context.rehydrateTokens` (default
+  600, 0 disables) are the new keys, added to the README block and table, and
+  the parity test now covers them.
+  The summariser's own request is suppressed through a new
+  `session.hook("model.request")` registration: `kind: "compaction"` marks the
+  session and the `context` hook returns before injecting anything; the next
+  non-compaction request clears the mark. Before this, the corpus block was
+  also being offered to the compaction request, which is wasted tokens. A
+  prepared block for a message the compaction swallowed is dropped on
+  `session.compaction.ended`. Ten module tests and five hook tests cover the
+  window, the three-citation limit, exclusion, path refusal, the byte cap, the
+  snapshot, the one-shot behaviour, the fresh-retrieval supersede rule, the
+  deadline, and both sides of the suppression. 1012 unit tests pass; typecheck
+  clean. No release was tagged or pushed.
+
 - 2026-11-06: The last two Tier S items are implemented, so the tier is
   fourteen of fourteen. `node.cpus` accepts an index list with inclusive ranges
   (`"0-3,8"`), `odd`, `even`, or a percentage; `null` and `"all"` leave affinity

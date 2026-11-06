@@ -823,6 +823,7 @@ export default Plugin.define({
       onPrompt: (sessionID, text) => prompts.note(sessionID, text),
       onPromptArchive: (sessionID, text) => void archive?.append(sessionID, "user", text),
       signal: shutdown.signal,
+      projectRoot,
       recordQuery: (sessionID, paths, bytes, hits) =>
         ledger.recordQuery(sessionID, paths, bytes, hits),
     });
