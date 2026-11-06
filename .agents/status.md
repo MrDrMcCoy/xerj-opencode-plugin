@@ -340,6 +340,20 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-05: Log rotation, disk reporting, failure-path tests, retrieval
+  docs, and a bigger benchmark. `node.logMaxBytes` (8 MiB default, 0 off)
+  rotates the engine log to `node.log.1` at spawn; it had reached 3.9 MB in
+  one day and had no bound. `status.disk` reports engine-data and log bytes
+  with a bounded walk, shown in the panel's Index section. Three real setup
+  failures are now tested (a binary that cannot report a version, a visible
+  `storage.root`, an unwritable workspace); with the end-to-end test counted,
+  `src/index.ts` is 74% lines and the tree 87%. The README explains the whole
+  retrieval chain (legs, gates, demotion, one section per file, session
+  dedupe, budget, tool vs context surface) and how to measure a change. The
+  benchmark grew to 60 prompts: baseline 50/60 on a current index. Demoting
+  plan and design documents was measured and reverted. 536 unit and 10
+  integration tests pass.
+
 - 2026-11-05: Brains in the corpus list, live retention, TUI render coverage,
   and a test-leak fix. Brain corpora now appear in `corpora` with their edge
   count, so one list answers "is every corpus working"; the end-to-end test
