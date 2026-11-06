@@ -339,6 +339,25 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: GPU stack coverage raised from a front page to the collections
+  (0.7.0). Sources can name component seeds: CUDA's cuBLAS, cuFFT, cuSPARSE,
+  cuSOLVER, cuRAND, NPP, libdevice, maths API, cudla, best practices, compiler
+  guide, cuDNN, and NCCL; ROCm's HIP, rocBLAS, hipBLASLt, MIOpen, RCCL,
+  rocFFT, hipFFT, rocPRIM, hipCUB, rocSPARSE, rocSOLVER, rocRAND, rocWMMA,
+  composable_kernel, and rocDecode; oneAPI's specification plus oneTBB,
+  oneDNN, and oneCCL; Vulkan's guide and specification chapters; SYCL's spec.
+  Each seed is crawled inside its own directory with at least eight pages and
+  a shared budget: 200 CUDA, 150 ROCm, 120 Vulkan, 80 oneAPI, 40 SYCL. CUDA's
+  page limit is 8 MB because its library guides are single multi-megabyte
+  pages, and its programming guide alone is 3.5 MB.
+  Seeds crawl four at a time: seventeen simultaneous requests to
+  docs.nvidia.com came back empty, while the same seeds batched returned their
+  guides. ROCm now resolves its newest release from its docs landing page
+  (`AMD ROCm 10.1.0`), so a pinned 10.1 and the latest collapse into one target.
+  Measured: CUDA 126 docs/16.0 MB, ROCm 150/1.3 MB, SYCL 29/1.4 MB, oneAPI
+  80/0.4 MB, Vulkan 112/9.2 MB — 497 documents and 28.4 MB for a project using
+  all five, against 73 before. 807 unit and 12 integration tests pass.
+
 - 2026-11-06: Intel oneAPI awareness (0.7.0). Detection reads the oneAPI
   headers and namespaces (oneMKL, oneDNN, oneTBB), the Level Zero API
   (`level_zero/ze_api.h`, `zeInit`), `dpcpp`/`icpx`, `ONEAPI_ROOT`, an
