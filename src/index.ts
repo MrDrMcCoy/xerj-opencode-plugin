@@ -437,9 +437,21 @@ export default Plugin.define({
     // and tools, so the work lives in one place and the three surfaces only
     // differ in how they report it.
     const runPrjdocs = async (input: unknown) => {
-        const handle = runtime.node ?? (await nodes.ensure().catch(() => null));
+        const ensured = runtime.node
+          ? { handle: runtime.node, failure: null }
+          : await nodes
+              .ensure()
+              .then((handle) => ({ handle, failure: null }))
+              .catch((error: unknown) => ({ handle: null, failure: errorText(error) }));
 
-        if (handle === null) throw new Error("the XERJ node is not available");
+        if (ensured.handle === null) {
+          throw new Error(
+            ensured.failure === null
+              ? "the XERJ node is not available"
+              : `the XERJ node did not start: ${ensured.failure}`,
+          );
+        }
+        const handle = ensured.handle;
 
         const client = new XerjClient(handle.baseUrl);
         const latest = new LatestVersions({ logger, signal: shutdown.signal });
@@ -574,11 +586,21 @@ export default Plugin.define({
     };
 
     const runSysdocs = async () => {
-        const handle = runtime.node ?? (await nodes.ensure().catch(() => null));
+        const ensured = runtime.node
+          ? { handle: runtime.node, failure: null }
+          : await nodes
+              .ensure()
+              .then((handle) => ({ handle, failure: null }))
+              .catch((error: unknown) => ({ handle: null, failure: errorText(error) }));
 
-        if (handle === null || runtime.binary === null) {
-          throw new Error("the XERJ node is not available");
+        if (ensured.handle === null || runtime.binary === null) {
+          throw new Error(
+            ensured.failure === null
+              ? "the XERJ node is not available"
+              : `the XERJ node did not start: ${ensured.failure}`,
+          );
         }
+        const handle = ensured.handle;
 
         const client = new XerjClient(handle.baseUrl);
         const indexer = new SysdocIndexer({
@@ -608,17 +630,28 @@ export default Plugin.define({
       prjdocs: async (input: unknown) => {
         counters.noteRpc();
         runtime.lifecycle?.touch();
-        return runPrjdocs(input);
+        return runPrjdocs(input).catch((error: unknown) => {
+          logger.warn("project docs failed", errorText(error));
+          throw error;
+        });
       },
       sysdocs: async () => {
         counters.noteRpc();
         runtime.lifecycle?.touch();
-        return runSysdocs();
+        // A command that fails in another project has to leave a trace: the
+        // toast is the user's only other view of it.
+        return runSysdocs().catch((error: unknown) => {
+          logger.warn("system docs failed", errorText(error));
+          throw error;
+        });
       },
       reindex: async () => {
         counters.noteRpc();
         runtime.lifecycle?.touch();
-        return runReindex();
+        return runReindex().catch((error: unknown) => {
+          logger.warn("reindex failed", errorText(error));
+          throw error;
+        });
       },
       remember: async (input) => {
         counters.noteRpc();
@@ -1383,6 +1416,11 @@ async function recordKinds(
       docs: typeof bucket.doc_count === "number" ? bucket.doc_count : 0,
     }))
     .sort((left, right) => right.docs - left.docs);
+}
+
+/** One line of an error, for the log ring. */
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function corpusStatus(corpus: CorpusService | null): Pick<

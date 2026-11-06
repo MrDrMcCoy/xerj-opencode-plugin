@@ -442,7 +442,7 @@ describe("tui commands", () => {
     dispose();
 
     expect(host.toasts.at(-1)).toEqual({
-      message: "XERJ is not available",
+      message: "XERJ is not available: node is down",
       variant: "error",
     });
   });
@@ -572,7 +572,24 @@ describe("tui failures and rendering", () => {
     dispose();
 
     expect(host.toasts.at(-1)).toEqual({
-      message: "XERJ memory is not available",
+      message: "XERJ remember failed: node is down",
+      variant: "error",
+    });
+  });
+
+  test("project docs report the reason when the pass fails", async () => {
+    const host = makeHost();
+    host.setPrjdocs(async () => {
+      throw new Error("the XERJ node is not available");
+    });
+    const { dispose } = await setup(host);
+    await flush();
+
+    await byId(host, "xerj.prjdocs").run();
+    dispose();
+
+    expect(host.toasts.at(-1)).toEqual({
+      message: "XERJ project docs failed: the XERJ node is not available",
       variant: "error",
     });
   });
@@ -589,7 +606,7 @@ describe("tui failures and rendering", () => {
     dispose();
 
     expect(host.toasts.at(-1)).toEqual({
-      message: "XERJ search is not available",
+      message: "XERJ search failed: node is down",
       variant: "error",
     });
   });

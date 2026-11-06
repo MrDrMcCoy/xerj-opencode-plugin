@@ -163,8 +163,11 @@ export default Plugin.define({
             : `XERJ · ${result.detail ?? "compaction did not run"}`,
           variant: result.compacted ? "success" : "info",
         });
-      } catch {
-        context.ui.toast.show({ message: "XERJ is not available", variant: "error" });
+      } catch (error) {
+        context.ui.toast.show({
+          message: `XERJ is not available: ${describe(error)}`,
+          variant: "error",
+        });
       }
     };
 
@@ -184,9 +187,9 @@ export default Plugin.define({
           message,
           variant: result.queued ? "success" : "info",
         });
-      } catch {
+      } catch (error) {
         context.ui.toast.show({
-          message: "XERJ is not available",
+          message: `XERJ is not available: ${describe(error)}`,
           variant: "error",
         });
       }
@@ -214,9 +217,9 @@ export default Plugin.define({
             : `Already remembered as ${result.id}`,
           variant: result.created ? "success" : "info",
         });
-      } catch {
+      } catch (error) {
         context.ui.toast.show({
-          message: "XERJ memory is not available",
+          message: `XERJ remember failed: ${describe(error)}`,
           variant: "error",
         });
       }
@@ -258,9 +261,9 @@ export default Plugin.define({
             (failed > 0 ? ` · ${failed} failed` : ""),
           variant: failed > 0 ? "info" : "success",
         });
-      } catch {
+      } catch (error) {
         context.ui.toast.show({
-          message: "XERJ could not read project documentation",
+          message: `XERJ project docs failed: ${describe(error)}`,
           variant: "error",
         });
       }
@@ -291,9 +294,9 @@ export default Plugin.define({
             (failed > 0 ? ` · ${failed} failed` : ""),
           variant: failed > 0 ? "info" : "success",
         });
-      } catch {
+      } catch (error) {
         context.ui.toast.show({
-          message: "XERJ could not read system documentation",
+          message: `XERJ system docs failed: ${describe(error)}`,
           variant: "error",
         });
       }
@@ -319,9 +322,9 @@ export default Plugin.define({
           message:
             result.hits === 0 ? "No passages matched." : clip(result.text),
         });
-      } catch {
+      } catch (error) {
         context.ui.toast.show({
-          message: "XERJ search is not available",
+          message: `XERJ search failed: ${describe(error)}`,
           variant: "error",
         });
       }
