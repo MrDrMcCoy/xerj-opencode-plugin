@@ -267,7 +267,7 @@ root, and it stays in this tier because it needs no process and no network.
 | Sidebar rebuild | AFT and Magic Context, layout only | Bordered box with a `▼ XERJ` accent header, click to collapse, three summary rows when collapsed and named sections when expanded; per-section on/off and collapse memory in the shared `tui-preferences.jsonc` under key `xerj` (`order` is not offered: this host's slots take `prepend`/`append` only); inline `⚠` for a failing corpus; 150 ms refresh debounce | Collapsed and expanded views both render from `StatusSnapshot` alone, a click survives a view switch, and formatting stays pure and tested |
 | **Config example formatting** | This plugin | Rewrite the complete-default options block in the README (and the copy in `plan.md` §3) as one key per line, grouped by section, with a comment naming the default and its unit; the README block omits 21 defaults today, including `node.logMaxBytes`, `index.graph`, `index.git`, `index.gitLimit`, `context.archiveEnabled`, `context.archiveMaxBytes`, every `prjdocs.*`, and every `sysdocs.*`; the `plan.md` copy is staler still (`context.maxPassages` reads 4 against a default of 8) | The block parses as JSONC, its key set equals `DEFAULT_CONFIG`, and a test fails when a new option lands without updating the example |
 | **CPU affinity (`node.cpus`)** | This plugin | Confine every XERJ process to a chosen CPU set: explicit indices and inclusive ranges, `odd` (the default), `even`, or a percentage of the CPUs available to the process, rounded down | `node.cpus: "0-3,8"` confines the node and every index run on Linux, `"50%"` resolves against the available CPU count, `null` or `"all"` leaves affinity unchanged, and an unsupported platform behaves as it does today |
-| **Local telemetry** | This plugin | Record every operation with its type, duration, and outcome into bounded files under the XERJ data root, so the plugin's own performance can be measured and improved | `xerj_telemetry` reports count, error rate, p50/p95, and total time per type from the local files; with telemetry on, retrieval p50 and p95 do not move and no flush lands inside a turn; the store never exceeds `telemetry.maxBytes` |
+| **Local telemetry** | This plugin | Record every operation with its type, duration, and outcome into bounded files under the XERJ data root, plus boot phases, crashes, and restarts, so the plugin's own performance can be measured and improved | `xerj_telemetry` reports count, error rate, p50/p95, and total time per type, and the last ten boots with their setup/ready/indexed figures and crash counts; with telemetry on, retrieval p50 and p95 do not move and no flush lands inside a turn; the store never exceeds `telemetry.maxBytes` |
 
 ### CPU affinity value syntax
 
@@ -343,6 +343,7 @@ One store per installation, under the XERJ data root:
   ops.1.ndjson … ops.N.ndjson   rotated, 1 is the newest rotation
   rings/<type>.ndjson           last N samples for one type
   rollup/<date>/<instance>.json per-day, per-instance counters
+  state/boot-<instance>.json    this process's boot id and last phase
   writer.lock                   owner pid and heartbeat
   README.txt                    what this is and that nothing leaves
 ```
@@ -377,6 +378,7 @@ new file. Groups and their types:
 | hooks | `hook.prompt`, `hook.context`, `hook.tool` |
 | graph | `graph.ego`, `graph.overview` |
 | archive | `archive.append`, `archive.expand` |
+| lifecycle | `lifecycle.boot`, `lifecycle.ready`, `lifecycle.indexed`, `lifecycle.crash`, `lifecycle.restart` |
 
 Two of those groups are wrapped generically rather than at each call site.
 `buildTools` times every tool it returns, and the RPC registration times every
@@ -397,28 +399,33 @@ without a parser dependency:
 ```
 
 Fields are fixed and validated on write. `meta` accepts bounded scalars only:
-counts, byte sizes, booleans, enum strings, and the project prefix. It never
-accepts a prompt, a query, a file body, or an absolute path.
+counts, byte sizes, booleans, enum strings, the project prefix, and up to
+`telemetry.maxText` characters of one caller-supplied string. It never
+accepts a prompt, a file body, or model output.
+
+`telemetry.maxText` defaults to 160, which is enough to identify the query, the
+symbol, or the project-relative path an operation was about, and short enough
+that 45 types of 256 samples stay under about 4 MB. The text passes through
+the same `redact()` the fetched-page spool uses, so a bearer token or an API
+key pasted into a query is not written to disk. `redact` moves from
+`src/remote/spool.ts` to `src/redact.ts` so telemetry does not import the
+remote layer; the spool keeps using it.
 
 An error is recorded as its class name and, for an HTTP failure, its status
 code. Error messages are not recorded, because they embed URLs, file contents,
 and model output.
 
-`telemetry.maxText` (default 0) is the one escape hatch: 0 records no text at
-all, and a positive number clips a caller-supplied string to that many
-characters. The default is what makes the privacy statement in the README
-true without a footnote.
-
 Durations use `performance.now()`, which is monotonic. Timestamps use
 `Date.now()`.
 
-#### Three files, three jobs
+#### What each file holds
 
 | File | Holds | Written how | Bound |
 |---|---|---|---|
 | `ops.ndjson` | every operation, chronological | append, O_APPEND | rotates at `telemetry.rotateBytes` (8 MiB), `telemetry.rotations` (4) kept |
 | `rings/<type>.ndjson` | the last `telemetry.samplesPerType` (256) samples of one type | append by any instance, compacted by the owner | 256 lines, rewritten tail-only |
 | `rollup/<date>/<instance>.json` | per-day count, errors, total ms, max ms per type | each instance writes its own file | one small file per day per instance |
+| `state/boot-<instance>.json` | this process's boot id and last reached phase | rewritten at each milestone, removed on a clean shutdown | one tiny file per live instance |
 
 The rings answer "what is the latency distribution of this operation now".
 The rollup answers "how many times did it run, over all time", which a
@@ -454,6 +461,56 @@ Nothing in the retrieval path reads telemetry. `xerj_search` does not consult
 it, the prompt hook does not gate on it, and disabling it changes no output
 byte. That is the same rule the capability gates follow.
 
+#### Startup, crashes, and restarts
+
+A store that only sees completed operations cannot explain the worst turns:
+the one that waited for a cold node, and the session where the node died
+twice. Five lifecycle records answer that, sharing a `bootId` so they read as
+one timeline.
+
+`t0` is the load time of a two-line `src/telemetry/boot-clock.ts` that
+`src/index.ts` imports first, so the numbers include the plugin's own import
+cost. Every record below carries `ms` from a defined origin:
+
+| Record | When | `ms` means | `meta` |
+|---|---|---|---|
+| `lifecycle.boot` | end of `setup()` | `t0` → tools, hooks, and RPC registered | per-phase `config`, `binary`, `nodeSpawn`; previous shutdown clean or not |
+| `lifecycle.ready` | node first answers | `t0` → first successful health probe | whether the node was attached or spawned, and the port |
+| `lifecycle.indexed` | first corpus run document after this boot | `t0` → index usable | corpus and record count |
+| `lifecycle.crash` | a death we did not ask for | uptime of the thing that died | `kind` (`plugin`, `node`, `watcher`), exit code, signal, last phase |
+| `lifecycle.restart` | service answers again after a death | time from death to answering | `reason` (`crash`, `idle`, `manual`) and the uptime that was lost |
+
+Clean versus crashed shutdown comes from a marker, not from memory:
+
+```
+<data root>/telemetry/state/boot-<instance>.json
+{"bootId":"…","pid":123,"at":1762470000000,"phase":"ready"}
+```
+
+Setup writes it and advances `phase`; a clean shutdown removes it. The next
+start treats a marker whose pid is gone as a crash and records
+`lifecycle.crash` with `kind: "plugin"` and the last phase reached, so the
+report says "died while indexing" rather than "died". A marker whose pid is
+alive belongs to another instance and is left alone. Markers older than seven
+days are swept with the rest of the store.
+
+The node is spawned detached and unref'd, so it produces no exit event. Its
+crash is inferred from the pidfile, which `stopNode` removes on every path it
+owns: a pidfile whose process is gone, found by `ensure()` or `stopNode`,
+is a crash, recorded once per pid and mtime. The supervisor already makes
+that distinction for its own stop logic, so the record is a side effect of a
+decision it already takes, not a second watcher.
+
+The resident watcher does report its own exit: the corpus service already
+separates a stop it requested from a signal, and a signaled exit already
+triggers a backoff restart. That branch gains the `lifecycle.crash` and
+`lifecycle.restart` records, with the attempt number.
+
+The report shows the last ten boots as `setup 12 ms · ready 1.2 s · indexed
+8.4 s`, marks an unclean previous shutdown, and counts crashes and restarts
+per day. One node that dies after four minutes is a different problem from one
+that runs all day and stops on idle, and only the uptime separates them.
+
 #### The size limit
 
 `telemetry.maxBytes` defaults to 134217728 (128 MiB) and covers the whole
@@ -478,12 +535,14 @@ files are also written by another process.
 `xerj_telemetry` takes `op` (a type, a prefix like `tool.`, or omitted for
 all), `window` (`session`, `day`, or `all`, default `day`), `sort` (`count`,
 `p95`, `total`, or `errors`), and `limit` (default 20). It returns one row per
-type: count, errors, p50, p95, max, and total milliseconds, plus the store's
-size and the date the surviving history starts.
+type: count, errors, p50, p95, max, and total milliseconds; a `starts` block
+with the last ten boots, their setup/ready/indexed figures, and the crash and
+restart counts; the store's size; and the date the surviving history starts.
 
-The panel gains a telemetry section with the same figures for the five
-busiest types and the line `local only · never sent`. The TUI reads them
-through the status RPC, never the filesystem.
+The panel gains a telemetry section with the five busiest types, the last
+boot's `ready` figure, any unclean shutdown, and the line
+`local only · never sent`. The TUI reads them through the status RPC, never
+the filesystem.
 
 #### Configuration
 
@@ -495,14 +554,20 @@ through the status RPC, never the filesystem.
   "rotateBytes": 8388608,   // 8 MiB before ops.ndjson rotates
   "rotations": 4,           // rotated ops files kept
   "flushMs": 5000,          // queue drain period
-  "maxText": 0              // characters of caller text; 0 records none
+  "maxText": 160            // characters of caller text; 0 records none
 }
 ```
 
 On by default because the data is local, bounded, and the only way the plugin
 can report its own cost. An installation that disagrees sets
 `telemetry.enabled: false`; the directory is then never created and no write
-path runs.
+path runs, including the lifecycle marker.
+
+The README gains this block in the options example, a row per key in the
+options table, and a short paragraph that says in plain words: the files are
+local, they are never sent anywhere, the plugin has no network path for them,
+and `enabled: false` leaves no trace. The tool description repeats the first
+two sentences, because that is where a model and a user will read them.
 
 #### Failure and edge cases
 
@@ -513,8 +578,11 @@ path runs.
 | clock jumps backwards | `performance.now()` keeps durations sane; only the timestamp is odd |
 | two instances flush at once | appends are atomic; compaction is owner-only |
 | the owner dies | the lock goes stale after 60 s and the next flush takes over |
-| `maxText` above 0 | text is clipped, never written whole |
+| text above `maxText` | clipped, then redacted, then written: never whole |
 | store over the cap | sweep in the documented order, then log-only |
+| a boot marker survives a crash | the next start records the crash and rewrites the marker; nothing blocks setup |
+| two instances leave markers | each has its own file and pid; a marker whose pid is alive is ignored |
+| the previous run was killed before any milestone | the crash record carries `phase: "setup"`, which is still a signal |
 
 #### Tests
 
@@ -526,17 +594,28 @@ once and keeps the plugin alive; a corrupt line is skipped; `maxText: 0`
 records no text even when a caller passes one; a full queue drops without
 throwing; two stores on one directory agree on the owner.
 
+Lifecycle tests: a boot writes three records that share one `bootId` and
+carry increasing `ms`; a clean shutdown removes the marker, so the next boot
+reports no crash; a killed process leaves the marker, and the next boot
+records `plugin` with the last phase; a stale pidfile records exactly one
+node crash, and a second ensure does not repeat it; a signaled watcher
+records a crash and a restart with the attempt number; an idle stop records
+`lifecycle.restart` with `reason: "idle"` and no crash; `maxText: 160`
+clips a long string and redacts a bearer token inside it.
+
 Integration: drive one retrieval and one tool call with telemetry on, then
 assert both appear in `ops.ndjson` and in their rings, and that the count in
-the rollup matches.
+the rollup matches. Then stop the node through the plugin and assert the next
+start records an idle restart, not a crash.
 
 Performance gate: measure retrieval p50 and p95 and the prompt hook's wall
 time on this repository with telemetry off and on. On must be within noise,
 and no flush may appear inside a turn. If it does not hold, the flush moves
 off the turn path or the feature ships off by default.
 
-Effort: about 6 hours. Store and sweep 2 h, span API and wiring 1.5 h, report
-and tool 1 h, tests 1.5 h.
+Effort: about 8.5 hours. Store and sweep 2 h, span API and generic wraps
+1.5 h, lifecycle records and crash detection 1.5 h, report and tool 1.5 h,
+tests 2 h.
 
 ## Tier M: one to three weeks, high suitability
 
@@ -609,8 +688,10 @@ and tool 1 h, tests 1.5 h.
 | CPU affinity is silently ignored | A missing `taskset`, a restrictive cpuset, or macOS logs one warning and leaves the process unpinned; indexing and retrieval never depend on the key |
 | Telemetry slows the turns it measures | Records go to an in-memory queue that a timer drains; `span` never awaits a write, a full queue drops, and the performance gate compares retrieval p50/p95 with telemetry off and on |
 | The telemetry store fills the disk | `telemetry.maxBytes` (128 MiB) bounds the directory, the sweep runs every ten minutes, and the defaults top out at about 42 MiB so the cap is a backstop |
-| Telemetry captures private text | `meta` is a fixed set of scalar fields, error messages are never recorded, and `telemetry.maxText` defaults to 0, which records no caller text at all |
+| Telemetry captures private text | `meta` is a fixed set of scalar fields, error messages are never recorded, and caller text is clipped at `telemetry.maxText` (160) and passed through `redact()` first; prompts and file bodies are never recorded |
 | Two instances corrupt the rings | Appends are atomic under O_APPEND; only the lock owner rewrites a file, and a stale lock is taken over after 60 s |
+| A crash is miscounted as a clean stop, or twice | The marker is removed on every teardown path, an idle stop is recorded as `idle` and not as a crash, and node crashes are deduped by pid and pidfile mtime |
+| A leftover crash marker blocks startup | The marker is read after setup has registered its tools, never before; a read failure is a warning and a fresh marker |
 
 ## Sequencing and gates
 
@@ -656,7 +737,7 @@ measured; they include tests and the commits that carry them. A status of
 | `prjdocs` keyword surfacing | S | Done | 0.2 h | `config.prjdocsKeywords` in the status, a panel line, and the command description |
 | Config example formatting | S | Done | 0.5 h | README block is one key per line with comments; `test/unit/config-example.test.ts` compares every flattened key and value with `DEFAULT_CONFIG`; `plan.md` §3 is a readable subset that points at the README for the full set |
 | CPU affinity (`node.cpus`) | S | Done | 1.5 h | `src/node/priority.ts` parses lists, ranges, `odd`, `even`, and percentages; resolves against `/proc/self/status` on Linux; applies `taskset -a -pc`, `ProcessorAffinity`, or one macOS warning; wired into node, watcher, and brain spawns; 29 unit tests |
-| Local telemetry | S | Not started | — | Design settled: three file families under `<data root>/telemetry`, a closed `OpType` set, generic wraps for tools and RPC, owner-only compaction, and a 128 MiB sweep. About 6 h |
+| Local telemetry | S | Not started | — | Design settled: ops log, per-type rings, and per-day rollups under `<data root>/telemetry`, a closed `OpType` set, generic wraps for tools and RPC, owner-only compaction, a 128 MiB sweep, and lifecycle records for boot phases, crashes, and restarts. About 8.5 h |
 | Graph overview in the panel | M | Done (earlier) | 0 h this pass | Brains already report docs and live edges; the corpora list covers the rest |
 | Import graph and cycles | M | Done | 2.0 h | `analysis/imports.ts` plus `xerj_imports`; relative, Python, Go, and Rust specifiers resolve against project files, unresolved ones are counted; ten module tests and four tool tests |
 | Regex and glob search | M | Done | 1.5 h | `analysis/find.ts` plus `xerj_find`: glob-to-regex with `**` spanning folders, line-numbered matches, secret files skipped, 200-match cap; ten module tests and three tool tests |
