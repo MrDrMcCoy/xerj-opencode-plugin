@@ -340,6 +340,24 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-05: Second improvement batch on 0.6.3, all measured on the live
+  neural index. The semantic leg now vouches for its top three hits when
+  they share at least one word with the prompt (`trustSemantic`, set only
+  when `index.neural` is on): on 40 labeled prompts the expected file
+  survived 36 times instead of 31, for 3% more bytes, and the one-word
+  anchor kept ten directive prompts at 12.4 KB instead of 19.8 KB. The
+  context hook stops re-injecting a `path:line` the session already holds,
+  and its per-session tracking is capped (200 sessions LRU, 512 locations
+  each) after the unbounded sets were found to grow for the life of the
+  server. The search tool's empty result now states what the index holds
+  and suggests `xerj_def` instead of saying only "No passages matched";
+  the tool surface gained its first four tests. Setup warns when a
+  project's `.agents`, `.github`, or `.claude` notes exist but are not
+  indexed, since the engine skips hidden folders silently. Freshness
+  verified live end to end: an appended README line was searchable within
+  12 s and gone within 10 s of the revert. 390 unit tests and 9
+  integration tests pass; typecheck clean.
+
 - 2026-11-05: Audit of the loaded 0.6.3 on rc.101 found the memory index
   refusing to open. The neural reconcile dropped only `xop-*` indices, so
   the memory index kept its lexical vectors and the engine answered
