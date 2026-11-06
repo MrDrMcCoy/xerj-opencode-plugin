@@ -403,6 +403,35 @@ Eager mode is off by default because it costs model calls and network traffic.
 Measured on `docs.solidjs.com` with the heuristic judge: 25 pages and 169 KB in
 9 s, reaching pages three levels below the entry.
 
+## System documentation
+
+`/xerj-sysdocs` indexes the man and info pages this machine can resolve into
+their own corpus (`xop-sys-<host hash>`).
+
+Roots are searched in this order, and the first copy of a name wins, so a page
+you installed shadows the distribution's copy:
+
+1. `MANPATH` and `INFOPATH`, when set.
+2. `sysdocs.manDirs` and `sysdocs.infoDirs`, when configured.
+3. `$XDG_DATA_HOME` (or `~/.local/share`), then `~/.nix-profile/share`.
+4. `NIX_PROFILES`, then `/run/current-system/sw` for a NixOS system profile.
+5. `HOMEBREW_PREFIX`, then `/home/linuxbrew/.linuxbrew`, `/opt/homebrew`, and
+   `/usr/local` for Homebrew.
+6. `/usr/local/share` and `/usr/share`.
+
+A root that does not exist is skipped, so a machine without Nix or Homebrew
+pays nothing for either. The corpus keeps `path`, `abs_path`, `title`, `source`,
+and `mtime` per page, so a citation reads `man/git.1`.
+
+A manifest records each page's path, mtime, size, and document id, so a first
+run indexes everything (3648 pages in about six seconds here, 33 MB) and later
+runs skip unchanged pages in under 100 ms. A page that disappeared from disk is
+deleted from the corpus.
+
+`body` is plain `text`, not `semantic_text`, so no page is embedded. A machine
+holds thousands of long pages, embedding them with the local model takes hours,
+and reference prose already carries the words people search for.
+
 ## Extra indexes and dumps
 
 `xerj_dataset` manages the indexes on this node beyond the plugin's own
@@ -568,35 +597,6 @@ that version is already published, and otherwise runs
 `NPM_TOKEN` is read from the `npm` GitHub environment, so the job declares
 `environment: npm` and any protection rules on that environment (required
 reviewers, branch or tag restrictions) apply before it publishes.
-
-## System documentation
-
-`/xerj-sysdocs` indexes the man and info pages this machine can resolve into
-their own corpus (`xop-sys-<host hash>`).
-
-Roots are searched in this order, and the first copy of a name wins, so a page
-you installed shadows the distribution's copy:
-
-1. `MANPATH` and `INFOPATH`, when set.
-2. `sysdocs.manDirs` and `sysdocs.infoDirs`, when configured.
-3. `$XDG_DATA_HOME` (or `~/.local/share`), then `~/.nix-profile/share`.
-4. `NIX_PROFILES`, then `/run/current-system/sw` for a NixOS system profile.
-5. `HOMEBREW_PREFIX`, then `/home/linuxbrew/.linuxbrew`, `/opt/homebrew`, and
-   `/usr/local` for Homebrew.
-6. `/usr/local/share` and `/usr/share`.
-
-A root that does not exist is skipped, so a machine without Nix or Homebrew
-pays nothing for either. The corpus keeps `path`, `abs_path`, `title`, `source`,
-and `mtime` per page, so a citation reads `man/git.1`.
-
-A manifest records each page's path, mtime, size, and document id, so a first
-run indexes everything (3648 pages in about six seconds here, 33 MB) and later
-runs skip unchanged pages in under 100 ms. A page that disappeared from disk is
-deleted from the corpus.
-
-`body` is plain `text`, not `semantic_text`, so no page is embedded. A machine
-holds thousands of long pages, embedding them with the local model takes hours,
-and reference prose already carries the words people search for.
 
 ## Data locations
 
