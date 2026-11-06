@@ -19,6 +19,7 @@ import { createLogger, type KeyValueStorage, type Logger } from "./log.ts";
 import { ProjectLifecycle, startSessionTracking } from "./lifecycle.ts";
 import { XerjClient, type IndexSummary } from "./node/client.ts";
 import { NodeRuntime } from "./node/runtime.ts";
+import { reconcileCorpusMode } from "./node/corpus-mode.ts";
 import { reconcileEmbedMode } from "./node/embed-mode.ts";
 import { detectNode, EmbedMode, stopNode, type NodeHandle } from "./node/supervisor.ts";
 import {
@@ -505,6 +506,27 @@ export default Plugin.define({
         return false;
       });
       if (rebuilt) logger.info("rebuilding indices for the embedding mode");
+
+      // A corpus built with `--no-graph` cannot be continued on the graph path;
+      // the engine refuses rather than mixing two authorities. Switching
+      // `index.graph` therefore rebuilds the project corpus once.
+      const reshaped = await reconcileCorpusMode({
+        client: new XerjClient(handle.baseUrl),
+        nodeDir,
+        stateDir: corpusLayout(projectRoot, prefix, stateRoot).stateDir,
+        mode: config.index.graph ? "graph" : "flat",
+        projectPrefix: prefix,
+      }).catch((error: unknown) => {
+        logger.warn("could not reconcile the corpus mode", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return false;
+      });
+      if (reshaped) {
+        logger.info("rebuilding the project corpus for graph mode", {
+          graph: config.index.graph,
+        });
+      }
     };
 
     const startProjectIndexer = async (handle: NodeHandle): Promise<void> => {
@@ -804,6 +826,10 @@ export default Plugin.define({
                   label: ".",
                   directory: projectRoot,
                   prefix,
+                  // Measured on this repo: sequence edges (adjacent sections of
+                  // one file) added tokens without adding answers, while
+                  // pathcite edges are the cross-file references worth a hop.
+                  pathciteOnly: true,
                 },
               ]
             : runtime.brains,

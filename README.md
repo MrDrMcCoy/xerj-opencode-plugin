@@ -195,6 +195,7 @@ The same entry works with a checkout path instead of the package name; see
 | `memory.retain.days` | Days an automatic summary is kept; `0` disables the age cap. |
 | `memory.retain.maxCount` | Summaries kept regardless of age; `0` disables the count cap. |
 | `memory.retain.maxBytes` | Bytes of summary text kept; `0` disables the size cap. |
+| `index.graph` | Index the project as one graph corpus (a "super brain"): sections, symbols, `path:line`, and edges. On by default; `false` restores the flat `--no-graph` corpus with the engine's own watcher. A change rebuilds the project corpus once. |
 | `index.semantic` | Include the semantic retrieval leg. |
 | `index.neural` | Embed passages with the node's neural model (`--embed-mode neural`). Set `false` for lexical embeddings. Changing it rebuilds the project index once; neural indexing is roughly ten times slower than lexical. |
 | `remote.enabled` | Spool and index fetched pages. |
@@ -267,8 +268,10 @@ Send a question to `xerj_search` and the same legs run with the tool surface:
 no relevance gate, no budget discard, and generated files kept but demoted,
 because there the caller asked explicitly.
 
-Brain hits get one hop of neighbors over `pathcite` and `sequence` edges, with
-their own budget. Brain paths are rewritten to project-relative paths before
+Brain hits get one hop of neighbors, with their own budget. Configured brains
+follow `pathcite` and `sequence` edges; the project-wide graph follows only
+`pathcite`, because adjacent-section edges added tokens without adding answers
+when measured here. Brain paths are rewritten to project-relative paths before
 line resolution, and a hidden whole-file hit is dropped when a brain section
 covers the same file, so one file is cited from its precise section.
 

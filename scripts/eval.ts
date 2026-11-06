@@ -12,7 +12,8 @@
 
 import { DEFAULT_CONFIG } from "../src/config.ts";
 import { XerjClient } from "../src/node/client.ts";
-import { indexPrefix } from "../src/paths.ts";
+import { indexPrefix, projectBrainName } from "../src/paths.ts";
+import { BrainGraph } from "../src/search/brains.ts";
 import { SearchService } from "../src/search/service.ts";
 
 interface LabeledPrompt {
@@ -118,6 +119,10 @@ function parseArgs(argv: ReadonlyArray<string>, projectRoot: string): Options {
     maxTokens: Number(flags.get("max-tokens") ?? DEFAULT_CONFIG.context.maxTokens),
     surface: (flags.get("surface") ?? "context") === "tool" ? "tool" : "context",
     trust: flags.has("no-trust") ? false : true,
+    /** Expand a hit one hop through the graph; measures what edges add. */
+    expand: flags.has("expand"),
+    /** Graph name of the corpus; defaults to the project's own brain name. */
+    brain: flags.get("brain"),
     json: flags.has("json"),
   };
 }
@@ -133,7 +138,31 @@ const logger = {
   entries: async () => [],
   flush: async () => {},
 } as never;
-const service = new SearchService(client, [options.prefix], logger, projectRoot);
+// Graph corpora can expand a hit one hop. Off by default so a run measures the
+// corpus itself; `--expand` measures what the graph adds.
+const graph = options.expand
+  ? new BrainGraph({
+      client,
+      brains: [
+        {
+          name: options.brain ?? projectBrainName(projectRoot),
+          label: ".",
+          directory: projectRoot,
+          prefix: options.prefix,
+          pathciteOnly: true,
+        },
+      ],
+      logger,
+    })
+  : null;
+
+const service = new SearchService(
+  client,
+  [options.prefix],
+  logger,
+  projectRoot,
+  graph,
+);
 
 let found = 0;
 let answerable = 0;

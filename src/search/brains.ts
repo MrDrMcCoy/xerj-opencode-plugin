@@ -21,6 +21,8 @@ export interface NeighborRef {
 }
 
 const ALLOWED_TYPES = new Set(["pathcite", "sequence"]);
+/** Cross-file references only: the flow order between sections is not evidence. */
+const PATHCITE_ONLY = new Set(["pathcite"]);
 const TYPE_PRIORITY: Record<string, number> = { pathcite: 0, sequence: 1 };
 const MAX_NEIGHBORS = 2;
 const MAX_TEXT_CHARS = 600;
@@ -92,7 +94,8 @@ export class BrainGraph {
       edges.push(...ego.edges);
     }
 
-    const neighbors = pickNeighbors({ edges }, seeds, limit);
+    const allowed = spec.pathciteOnly === true ? PATHCITE_ONLY : ALLOWED_TYPES;
+    const neighbors = pickNeighbors({ edges }, seeds, limit, allowed);
     if (neighbors.length === 0) return [];
 
     const response = await this.options.client
@@ -163,21 +166,26 @@ export function pickNeighbors(
   ego: unknown,
   seeds: ReadonlyArray<string>,
   limit: number,
+  allowed: ReadonlySet<string> = ALLOWED_TYPES,
 ): NeighborRef[] {
   if (!isRecord(ego) || !Array.isArray(ego.edges)) return [];
-  return rankNeighbors(collectNeighbors(ego.edges, new Set(seeds)), limit);
+  return rankNeighbors(
+    collectNeighbors(ego.edges, new Set(seeds), allowed),
+    limit,
+  );
 }
 
 /** One candidate per neighbor id, skipping the seeds themselves. */
 function collectNeighbors(
   edges: ReadonlyArray<unknown>,
   seeds: ReadonlySet<string>,
+  allowed: ReadonlySet<string>,
 ): Array<NeighborRef & { weight: number }> {
   const candidates: Array<NeighborRef & { weight: number }> = [];
   const seen = new Set<string>();
 
   for (const edge of edges) {
-    const candidate = neighborOf(edge, seeds);
+    const candidate = neighborOf(edge, seeds, allowed);
     if (candidate === null || seen.has(candidate.id)) continue;
     seen.add(candidate.id);
     candidates.push(candidate);
@@ -189,12 +197,13 @@ function collectNeighbors(
 function neighborOf(
   edge: unknown,
   seeds: ReadonlySet<string>,
+  allowed: ReadonlySet<string>,
 ): (NeighborRef & { weight: number }) | null {
   if (!isRecord(edge)) return null;
   if (edge.invalid_at !== null && edge.invalid_at !== undefined) return null;
 
   const type = typeof edge.type === "string" ? edge.type : "";
-  if (!ALLOWED_TYPES.has(type)) return null;
+  if (!allowed.has(type)) return null;
 
   const src = typeof edge.src === "string" ? edge.src : "";
   const dst = typeof edge.dst === "string" ? edge.dst : "";

@@ -203,3 +203,20 @@ describe("project-wide brain", () => {
     expect(queried).toEqual([]);
   });
 });
+
+describe("pathcite-only specs", () => {
+  test("sequence edges are skipped but citations still expand", () => {
+    const ego = {
+      edges: [
+        { type: "sequence", src: "seed", dst: "next", invalid_at: null },
+        { type: "pathcite", src: "seed", dst: "cited", invalid_at: null },
+      ],
+    };
+
+    const both = pickNeighbors(ego, ["seed"], 2);
+    const citations = pickNeighbors(ego, ["seed"], 2, new Set(["pathcite"]));
+
+    expect(both.map((neighbor) => neighbor.id)).toContain("next");
+    expect(citations.map((neighbor) => neighbor.id)).toEqual(["cited"]);
+  });
+});

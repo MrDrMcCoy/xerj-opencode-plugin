@@ -244,6 +244,12 @@ export interface BrainSpec {
   readonly label: string;
   readonly directory: string;
   readonly prefix: string;
+  /**
+   * Expand only along cross-file references. The project-wide brain uses this:
+   * its `sequence` edges join adjacent sections of one file, which adds tokens
+   * without adding answers (measured on this repository).
+   */
+  readonly pathciteOnly?: boolean;
 }
 
 /**
