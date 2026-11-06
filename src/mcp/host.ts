@@ -224,6 +224,7 @@ export class McpHost {
       embedMode: this.config.index.neural ? EmbedMode.Neural : EmbedMode.Lexical,
       logMaxBytes: this.config.node.logMaxBytes,
       priority: this.config.node.priority,
+      cpus: this.config.node.cpus,
       logger: this.logger,
       binary: () => this.binary,
       onSpawned: () => {},
@@ -271,6 +272,7 @@ export class McpHost {
       storage: this.storage,
       logger: this.logger,
       priority: this.config.node.priority,
+      cpus: this.config.node.cpus,
     });
   }
 

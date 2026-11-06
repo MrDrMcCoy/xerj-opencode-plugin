@@ -285,8 +285,9 @@ a cgroup CPU quota, and the indices are taken from the plugin process's own
 affinity mask in ascending order, so a parent `taskset` or a container cpuset
 is honored instead of widened. An index above the CPU count is dropped with one
 warning, and a value that resolves to no CPU leaves affinity unchanged and
-warns. When `index.workers` exceeds the resolved set, the worker count is
-capped to it.
+warns. An explicit `index.workers` is left alone: the engine's own default
+follows the process's available parallelism, and overriding a deliberate
+worker count would hide the cost of a narrow set.
 
 Platform behaviour:
 
@@ -410,8 +411,8 @@ measured; they include tests and the commits that carry them. A status of
 | Sidebar rebuild | S | Done | 3.0 h | Bordered box with a `▼ XERJ` badge header and version, `onMouseDown` collapse, three rows when collapsed and five sections when expanded, `⚠` line for an error or warning, 150 ms refresh debounce, prefs under key `xerj` in the shared file with other plugins' keys preserved (read once at setup, so no file watcher and no echo guard is needed); ten prefs tests, five view tests, two render tests |
 | `autoindex map` in the panel | S | Done | 0.5 h | Record kinds from a `terms` aggregation, shown as `records: function 545 · section 401`; four panel tests |
 | `prjdocs` keyword surfacing | S | Done | 0.2 h | `config.prjdocsKeywords` in the status, a panel line, and the command description |
-| Config example formatting | S | Not started | — | Scope: the README options block and `plan.md` §3; 21 defaults are absent today, and a parity test is part of the item |
-| CPU affinity (`node.cpus`) | S | Not started | — | Parsing and platform application belong in `src/node/priority.ts`, beside `applyPriority`; `taskset -a -pc` covers every thread on Linux |
+| Config example formatting | S | Done | 0.5 h | README block is one key per line with comments; `test/unit/config-example.test.ts` compares every flattened key and value with `DEFAULT_CONFIG`; `plan.md` §3 is a readable subset that points at the README for the full set |
+| CPU affinity (`node.cpus`) | S | Done | 1.5 h | `src/node/priority.ts` parses lists, ranges, `odd`, `even`, and percentages; resolves against `/proc/self/status` on Linux; applies `taskset -a -pc`, `ProcessorAffinity`, or one macOS warning; wired into node, watcher, and brain spawns; 29 unit tests |
 | Graph overview in the panel | M | Done (earlier) | 0 h this pass | Brains already report docs and live edges; the corpora list covers the rest |
 | Import graph and cycles | M | Done | 2.0 h | `analysis/imports.ts` plus `xerj_imports`; relative, Python, Go, and Rust specifiers resolve against project files, unresolved ones are counted; ten module tests and four tool tests |
 | Regex and glob search | M | Done | 1.5 h | `analysis/find.ts` plus `xerj_find`: glob-to-regex with `**` spanning folders, line-numbered matches, secret files skipped, 200-match cap; ten module tests and three tool tests |
@@ -434,10 +435,10 @@ measured; they include tests and the commits that carry them. A status of
 | Dreamer child sessions | XL | Not started | — | — |
 | Notes and smart notes | XL | Not started | — | — |
 
-**Tier S: twelve of fourteen done, 12.9 h** against an 8 to 10 h estimate. Two
-items were added on 2026-11-06 after the first twelve shipped: the config
-example formatting and `node.cpus`. The sidebar took 3 h against an 8 h plan;
-the overshoot is in the other items.
+**Tier S complete: fourteen of fourteen, 14.9 h** against an 8 to 10 h
+estimate. Two items landed on 2026-11-06 after the first twelve shipped: the
+config example formatting (0.5 h) and `node.cpus` (1.5 h). The sidebar took
+3 h against an 8 h plan; the overshoot is in the other items.
 
 Per-item estimates held within about half an hour except commit indexing, where
 the `git log` record layout cost an extra hour and a half, and the auto-search

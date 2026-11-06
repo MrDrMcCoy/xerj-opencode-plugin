@@ -60,31 +60,35 @@ choice.
 
 ## 3. Configuration
 
-Plugin options in `opencode.json(c)`; every value has a default.
+Plugin options in `opencode.json(c)`; every value has a default. The README
+lists the complete set with defaults; this is the shape:
 
 ```jsonc
 {
-  "plugins": [{
-    "package": "@mrdrmccoy/xerj-opencode-plugin",
-    "options": {
-      "binary":  { "version": "auto", "path": null, "target": null,
-                   "libc": "musl" },
-      "storage": { "root": null },
-      "node":    { "url": null, "port": 9200, "dataDir": null,
-                   "idleMs": 1800000, "shutdownOnIdle": true },
-      "index":   { "auto": true, "watch": true, "debounceMs": 800, "periodicMs": 900000,
-                   "workers": null, "brain": [], "hidden": [],
-                   "hiddenMaxBytes": 262144, "semantic": true,
-                   "maxBytes": 2147483648, "maxMinutes": 10 },
-      "remote":  { "enabled": true, "maxBytes": 2000000 },
-      "context": { "enabled": true, "maxTokens": 1500, "memoryTokens": 400,
-                   "maxPassages": 4, "timeoutMs": 400 },
-      "memory":  { "enabled": true },
-      "stats":   { "enabled": true, "bytesPerToken": 4,
-                   "maxBaselineBytes": 131072 },
-      "telemetry": { "anomaly": false }
+  "plugins": [
+    {
+      "package": "@mrdrmccoy/xerj-opencode-plugin",
+      "options": {
+        "binary": {
+          "version": "auto"
+        },
+        "storage": {
+          "root": null
+        },
+        "node": {
+          "priority": "low",
+          "cpus": null
+        },
+        "index": {
+          "graph": true,
+          "hidden": [".agents"]
+        },
+        "context": {
+          "maxPassages": 8
+        }
+      }
     }
-  }]
+  ]
 }
 ```
 

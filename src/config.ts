@@ -1,4 +1,8 @@
-import { Priority as NodePriority } from "./node/priority.ts";
+import {
+  Priority as NodePriority,
+  parseCpuSpec,
+  type CpuSpec,
+} from "./node/priority.ts";
 import type { Libc } from "./platform.ts";
 
 // Plugin options. Every field has a default, unknown keys are ignored, and a
@@ -29,6 +33,11 @@ export interface NodeOptions {
    * a faster first index.
    */
   readonly priority: NodePriority;
+  /**
+   * CPUs every XERJ process may use: indices and ranges, `odd`, `even`, or a
+   * percentage of the available CPUs. Null leaves affinity unchanged.
+   */
+  readonly cpus: CpuSpec | null;
   /** Preferred ES-compatible port; the supervisor may advance it. */
   readonly port: number;
   readonly dataDir: string | null;
@@ -186,6 +195,7 @@ export const DEFAULT_CONFIG: Config = {
   node: {
     url: null,
     priority: NodePriority.Low,
+    cpus: null,
     logMaxBytes: 8 * 1024 ** 2,
     port: 9200,
     dataDir: null,
@@ -283,6 +293,7 @@ export function loadConfig(
     node: {
       url: readString(node.url, null) ?? (envUrl ? envUrl : null),
       priority: readPriority(node.priority, warnings),
+      cpus: readCpuSpec(node.cpus, warnings),
       logMaxBytes: readInteger(
         node.logMaxBytes,
         DEFAULT_CONFIG.node.logMaxBytes,
@@ -675,6 +686,23 @@ function readPriority(value: unknown, warnings: string[]): NodePriority {
     `node.priority must be one of ${Object.values(NodePriority).join(", ")}; using ${fallback}`,
   );
   return fallback;
+}
+
+function readCpuSpec(value: unknown, warnings: string[]): CpuSpec | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string") {
+    warnings.push("node.cpus must be a string; leaving CPU affinity unchanged");
+    return null;
+  }
+
+  const parsed = parseCpuSpec(value);
+  if (parsed.error !== null) {
+    warnings.push(
+      `node.cpus is invalid (${parsed.error}); leaving CPU affinity unchanged`,
+    );
+    return null;
+  }
+  return parsed.spec;
 }
 
 function readBoolean(value: unknown, fallback: boolean, key: string, warnings: string[]): boolean {

@@ -158,26 +158,91 @@ This is the complete set with its defaults, in
     {
       "package": "@mrdrmccoy/xerj-opencode-plugin",
       "options": {
-        "binary":  { "version": "auto", "path": null, "target": null,
-                     "libc": "musl" },
-        "storage": { "root": null },
-        "node":    { "url": null, "priority": "low", "port": 9200,
-                     "dataDir": null, "idleMs": 1800000,
-                     "shutdownOnIdle": true },
-        "index":   { "auto": true, "watch": true, "debounceMs": 800,
-                     "periodicMs": 900000, "workers": null, "brain": [],
-                     "hidden": [], "hiddenMaxBytes": 262144,
-                     "semantic": true, "neural": true, "maxBytes": 2147483648,
-                     "maxMinutes": 10 },
-        "remote":  { "enabled": true, "maxBytes": 2000000 },
-        "context": { "enabled": true, "maxTokens": 1500, "memoryTokens": 400,
-                     "maxPassages": 8, "timeoutMs": 400 },
-        "memory":  { "enabled": true, "captureTurns": true,
-                     "retain": { "days": 180, "maxCount": 0,
-                                 "maxBytes": 2147483648 } },
-        "stats":   { "enabled": true, "bytesPerToken": 4,
-                     "maxBaselineBytes": 131072 },
-        "telemetry": { "anomaly": false }
+        "binary": {
+          "version": "auto",             // "auto" tracks the newest release
+          "path": null,                  // explicit binary; skips download
+          "target": null,                // e.g. "aarch64-apple-darwin"
+          "libc": "musl"                 // "musl" or "gnu" on Linux
+        },
+        "storage": {
+          "root": null                   // null means <project>/.xerj
+        },
+        "node": {
+          "url": null,                   // attach to this node; never spawn
+          "priority": "low",             // "low", "normal", or "high"
+          "cpus": null,                  // "0-3,8", "odd", "even", "50%"
+          "logMaxBytes": 8388608,        // 8 MiB; 0 disables rotation
+          "port": 9200,
+          "dataDir": null,
+          "idleMs": 1800000,             // 30 minutes
+          "shutdownOnIdle": true
+        },
+        "index": {
+          "auto": true,
+          "watch": true,
+          "debounceMs": 800,
+          "periodicMs": 900000,          // 15 minutes
+          "workers": null,
+          "brain": [],
+          "hidden": [],
+          "hiddenMaxBytes": 262144,      // 256 KiB per hidden file
+          "semantic": true,
+          "graph": true,
+          "git": true,
+          "gitLimit": 500,
+          "neural": true,
+          "maxBytes": 2147483648,        // 2 GiB first-index ceiling
+          "maxMinutes": 10
+        },
+        "remote": {
+          "enabled": true,
+          "maxBytes": 2000000
+        },
+        "context": {
+          "enabled": true,
+          "maxTokens": 1500,
+          "memoryTokens": 400,
+          "archiveEnabled": true,
+          "archiveMaxBytes": 67108864,   // 64 MiB
+          "maxPassages": 8,
+          "timeoutMs": 400
+        },
+        "prjdocs": {
+          "maxTargets": 40,
+          "maxPages": 0,                 // 0 uses the per-source default
+          "eager": false,
+          "eagerMaxPages": 120,
+          "eagerMaxDepth": 12,
+          "eagerModelCalls": 150,
+          "eagerKeywords": [],
+          "builtin": true,
+          "builtinXerjPages": 200,
+          "builtinElasticsearchPages": 2500,
+          "builtinRefreshDays": 7
+        },
+        "sysdocs": {
+          "maxDocs": 5000,
+          "maxBytesPerDoc": 65536,       // 64 KiB
+          "manDirs": [],
+          "infoDirs": []
+        },
+        "memory": {
+          "enabled": true,
+          "captureTurns": true,
+          "retain": {
+            "days": 180,
+            "maxCount": 0,               // 0 disables the count cap
+            "maxBytes": 2147483648       // 2 GiB
+          }
+        },
+        "stats": {
+          "enabled": true,
+          "bytesPerToken": 4,
+          "maxBaselineBytes": 131072     // 128 KiB
+        },
+        "telemetry": {
+          "anomaly": false
+        }
       }
     }
   ]
@@ -197,6 +262,7 @@ The same entry works with a checkout path instead of the package name; see
 | `node.url` | Attach to this node and never spawn one. |
 | `node.logMaxBytes` | Size at which `node.log` rotates to `node.log.1`; `0` disables rotation. Default 8 MiB. |
 | `node.priority` | CPU and I/O priority for every XERJ process: `low` (default), `normal`, or `high`. `low` is nice 19 plus idle-class I/O on Linux, the idle priority class on Windows. |
+| `node.cpus` | CPUs every XERJ process may use: a comma-separated list of indices and ranges (`"0-3,8"`), `odd`, `even`, or a percentage of the available CPUs (`"50%"`, rounded down). `null` (default) leaves affinity unchanged. Linux uses `taskset`; Windows uses `ProcessorAffinity`; macOS has no per-process selection and warns once. |
 | `node.port` | Preferred port. The supervisor advances it if taken. |
 | `node.idleMs` | Stop this project's node after this long with no session activity. |
 | `node.shutdownOnIdle` | Set false to keep the node up after the last session closes. |

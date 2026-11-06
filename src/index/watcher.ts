@@ -6,7 +6,12 @@
 // falls back to periodic one-shot runs so the index still converges.
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { applyPriority, type Priority } from "../node/priority.ts";
+import {
+  applyCpuAffinity,
+  applyPriority,
+  type CpuSpec,
+  type Priority,
+} from "../node/priority.ts";
 import { existsSync, readdirSync, watch, type FSWatcher } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import type { Config } from "../config.ts";
@@ -51,6 +56,8 @@ export interface CorpusServiceOptions {
   readonly logger: Logger;
   /** CPU and I/O priority for index processes; omitted leaves them alone. */
   readonly priority?: Priority;
+  /** CPU set for index processes; null or omitted leaves affinity alone. */
+  readonly cpus?: CpuSpec | null;
   readonly onChange?: () => void;
   readonly onRun?: (run: CorpusRun) => void;
 }
@@ -330,6 +337,13 @@ export class CorpusService {
       void applyPriority({
         pid: child.pid,
         priority: this.options.priority,
+        logger: this.options.logger,
+      });
+    }
+    if (this.options.cpus !== null && this.options.cpus !== undefined) {
+      void applyCpuAffinity({
+        pid: child.pid,
+        spec: this.options.cpus,
         logger: this.options.logger,
       });
     }

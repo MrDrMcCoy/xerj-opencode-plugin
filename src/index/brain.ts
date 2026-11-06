@@ -8,6 +8,12 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { Config } from "../config.ts";
 import type { Logger } from "../log.ts";
+import {
+  applyCpuAffinity,
+  applyPriority,
+  type CpuSpec,
+  type Priority,
+} from "../node/priority.ts";
 import { XerjClient, type ClientObserver } from "../node/client.ts";
 import type { BrainSpec } from "../paths.ts";
 
@@ -34,6 +40,10 @@ export interface BrainIndexerOptions {
   readonly config: Config;
   readonly specs: ReadonlyArray<BrainSpec>;
   readonly logger: Logger;
+  /** CPU and I/O priority for brain runs; omitted leaves them alone. */
+  readonly priority?: Priority;
+  /** CPU set for brain runs; null or omitted leaves affinity alone. */
+  readonly cpus?: CpuSpec | null;
   readonly observer?: ClientObserver;
   readonly onChange?: () => void;
   readonly onRun?: () => void;
@@ -113,7 +123,11 @@ export class BrainIndexer {
     }
 
     try {
-      const output = await run(this.options.binaryPath, args, this.timeoutMs());
+      const output = await run(this.options.binaryPath, args, this.timeoutMs(), {
+        priority: this.options.priority,
+        cpus: this.options.cpus,
+        logger: this.options.logger,
+      });
       const summary = await this.summarize(spec, parseBrainRun(output));
       this.record(spec, { at: Date.now(), ...summary, error: null });
       this.options.onRun?.();
@@ -194,11 +208,33 @@ function run(
   command: string,
   args: ReadonlyArray<string>,
   timeoutMs: number,
+  options: {
+    readonly priority?: Priority;
+    readonly cpus?: CpuSpec | null;
+    readonly logger?: Logger;
+  },
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, [...args], { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
+
+    if (child.pid !== undefined) {
+      if (options.priority !== undefined) {
+        void applyPriority({
+          pid: child.pid,
+          priority: options.priority,
+          logger: options.logger,
+        });
+      }
+      if (options.cpus !== null && options.cpus !== undefined) {
+        void applyCpuAffinity({
+          pid: child.pid,
+          spec: options.cpus,
+          logger: options.logger,
+        });
+      }
+    }
 
     const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
     child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));

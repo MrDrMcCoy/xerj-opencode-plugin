@@ -17,7 +17,7 @@ import {
   type NodeDetection,
   type NodeHandle,
 } from "./supervisor.ts";
-import type { Priority } from "./priority.ts";
+import type { CpuSpec, Priority } from "./priority.ts";
 
 export type RuntimeNodeState = "stopped" | "starting" | "running" | "error";
 
@@ -36,6 +36,8 @@ export interface NodeRuntimeOptions {
   readonly logMaxBytes?: number;
   /** CPU and I/O priority for a spawned node; omitted leaves it alone. */
   readonly priority?: Priority;
+  /** CPU set for a spawned node; null or omitted leaves affinity alone. */
+  readonly cpus?: CpuSpec | null;
   readonly logger: Logger;
   readonly binary: () => InstalledBinary | null;
   readonly onSpawned?: () => void;
@@ -127,6 +129,7 @@ export class NodeRuntime {
         embedMode: this.options.embedMode,
         logMaxBytes: this.options.logMaxBytes,
         priority: this.options.priority,
+        cpus: this.options.cpus,
         onPort: (port) => persistPort(this.options.nodeDir, port),
         logger: this.options.logger,
       });

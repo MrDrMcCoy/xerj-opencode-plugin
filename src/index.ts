@@ -892,6 +892,7 @@ export default Plugin.define({
         storage,
         logger,
         priority: config.node.priority,
+        cpus: config.node.cpus,
         onRun: () => counters.noteIndexRun(),
         onChange: publishChange,
       });
@@ -915,6 +916,7 @@ export default Plugin.define({
         storage,
         logger,
         priority: config.node.priority,
+        cpus: config.node.cpus,
         onRun: () => counters.noteIndexRun(),
         onChange: publishChange,
       });
@@ -949,6 +951,8 @@ export default Plugin.define({
         config,
         specs: runtime.brains,
         logger,
+        priority: config.node.priority,
+        cpus: config.node.cpus,
         observer,
         onRun: () => counters.noteIndexRun(),
         onChange: publishChange,
@@ -1001,6 +1005,7 @@ export default Plugin.define({
       embedMode: config.index.neural ? EmbedMode.Neural : EmbedMode.Lexical,
       logMaxBytes: config.node.logMaxBytes,
       priority: config.node.priority,
+      cpus: config.node.cpus,
       logger,
       binary: () => runtime.binary,
       onSpawned: () => counters.noteSpawn(),

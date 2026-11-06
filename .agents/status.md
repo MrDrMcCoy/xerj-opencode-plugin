@@ -339,6 +339,32 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: The last two Tier S items are implemented, so the tier is
+  fourteen of fourteen. `node.cpus` accepts an index list with inclusive ranges
+  (`"0-3,8"`), `odd`, `even`, or a percentage; `null` and `"all"` leave affinity
+  alone. `src/node/priority.ts` owns parsing, resolution, and application.
+  Linux reads the process's real affinity mask from `/proc/self/status` and
+  applies `taskset -a -pc <list> <pid>` so the scan pool's threads are covered;
+  a cgroup or a parent `taskset` therefore narrows the available indices rather
+  than being overwritten. Windows builds a 64-bit `ProcessorAffinity` mask and
+  emits bit 63 as a negative `IntPtr`; a set that needs a second processor group
+  warns and is skipped. macOS warns once because it has no per-process CPU
+  selection. Percentages use `os.availableParallelism()` and round down to at
+  least one CPU. The key is wired into the node, project and web watchers, and
+  brain runs; brain runs also gained the `priority` they had been missing.
+  `index.workers` capping is not implemented: the engine already defaults to
+  its own worker count, and the roadmap row's capping sentence was dropped.
+  Verified live on this 64-CPU host: a spawned `sleep` was pinned to CPU 0 and
+  `taskset -pc` reported `current affinity list: 0`. 29 new unit tests cover
+  parsing, formatting, resolution, platform application, and warnings; 994 unit
+  tests pass, typecheck clean.
+  The README options block is now one key per line with comments and includes
+  all 61 defaults; `test/unit/config-example.test.ts` flattens
+  the block and compares every key and value with `DEFAULT_CONFIG`, so a new
+  option cannot land without updating the example. `plan.md` §3 is a short,
+  readable subset that points at the README for the full set. No release was
+  tagged or pushed.
+
 - 2026-11-06: Two Tier S roadmap items added at the user's request, neither
   started. `node.cpus` is the CPU-affinity key: one string accepting explicit
   logical CPUs and inclusive ranges (`"0-3,8"`), `odd`, `even`, or a percentage

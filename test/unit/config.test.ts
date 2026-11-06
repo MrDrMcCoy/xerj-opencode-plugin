@@ -2,6 +2,50 @@ import { describe, expect, test } from "bun:test";
 import { DEFAULT_CONFIG, loadConfig } from "../../src/config.ts";
 import { Priority } from "../../src/node/priority.ts";
 
+describe("node.cpus", () => {
+  test("defaults to no affinity change", () => {
+    expect(loadConfig(undefined).config.node.cpus).toBeNull();
+  });
+
+  test("reads a CPU list", () => {
+    const { config, warnings } = loadConfig({ node: { cpus: "0-3,8" } });
+    expect(config.node.cpus).toEqual({
+      kind: "list",
+      indexes: [0, 1, 2, 3, 8],
+    });
+    expect(warnings).toHaveLength(0);
+  });
+
+  test("reads odd, even and a percentage", () => {
+    expect(loadConfig({ node: { cpus: "odd" } }).config.node.cpus).toEqual({
+      kind: "odd",
+    });
+    expect(loadConfig({ node: { cpus: "even" } }).config.node.cpus).toEqual({
+      kind: "even",
+    });
+    expect(loadConfig({ node: { cpus: "50%" } }).config.node.cpus).toEqual({
+      kind: "percent",
+      percent: 50,
+    });
+  });
+
+  test("treats all as no affinity change", () => {
+    expect(loadConfig({ node: { cpus: "all" } }).config.node.cpus).toBeNull();
+  });
+
+  test("falls back with a warning on a malformed value", () => {
+    const { config, warnings } = loadConfig({ node: { cpus: "3-1" } });
+    expect(config.node.cpus).toBeNull();
+    expect(warnings.some((entry) => entry.includes("node.cpus"))).toBe(true);
+  });
+
+  test("falls back with a warning on the wrong type", () => {
+    const { config, warnings } = loadConfig({ node: { cpus: 2 } });
+    expect(config.node.cpus).toBeNull();
+    expect(warnings.some((entry) => entry.includes("node.cpus"))).toBe(true);
+  });
+});
+
 describe("loadConfig", () => {
   test("returns defaults for undefined options", () => {
     const { config, warnings } = loadConfig(undefined);

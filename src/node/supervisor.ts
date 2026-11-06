@@ -26,7 +26,12 @@ import {
   nodePortPath,
 } from "../paths.ts";
 import { rotateNodeLog } from "./log-file.ts";
-import { applyPriority, type Priority } from "./priority.ts";
+import {
+  applyCpuAffinity,
+  applyPriority,
+  type CpuSpec,
+  type Priority,
+} from "./priority.ts";
 
 export type NodeState = "xerj" | "foreign" | "down";
 
@@ -66,6 +71,8 @@ export interface EnsureNodeOptions {
   readonly logMaxBytes?: number;
   /** CPU and I/O priority for the spawned process; omitted leaves it alone. */
   readonly priority?: Priority;
+  /** CPU set for the spawned process; null or omitted leaves affinity alone. */
+  readonly cpus?: CpuSpec | null;
 }
 
 /** What the pidfile and port file say, without trusting either. */
@@ -180,6 +187,7 @@ export async function ensureNode(options: EnsureNodeOptions): Promise<NodeHandle
       options.nodeDir,
       options.embedMode ?? EmbedMode.Neural,
       options.priority,
+      options.cpus,
       options.logMaxBytes ?? 0,
       logger,
     );
@@ -279,6 +287,7 @@ async function spawnNode(
   nodeDir: string,
   embedMode: EmbedMode,
   priority: Priority | undefined,
+  cpus: CpuSpec | null | undefined,
   logMaxBytes: number,
   logger: Logger,
 ): Promise<number> {
@@ -313,9 +322,12 @@ async function spawnNode(
   await log.close().catch(() => {});
   if (child.pid === undefined) throw new NodeError("xerj exited before it had a pid");
 
-  // Priority is best effort and never blocks startup.
+  // Priority and affinity are best effort and never block startup.
   if (priority !== undefined) {
     await applyPriority({ pid: child.pid, priority, logger });
+  }
+  if (cpus !== null && cpus !== undefined) {
+    await applyCpuAffinity({ pid: child.pid, spec: cpus, logger });
   }
   return child.pid;
 }
