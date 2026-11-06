@@ -339,6 +339,8 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: Checked what a plugin can see when compaction starts. `ctx.session.hook("compaction", handler)` is a real hook and its event is `SessionCompaction`, which extends `SessionContext`: the handler receives `messages` and `system` before the summary exists, so the whole window is available, including tool calls, tool output, and intermediate assistant text that the turn archive never records. `SessionCompaction.result` also lets a plugin supply its own `summary` or a `native.messages` replacement window and skip the model request; that is the compaction engine already listed as a non-goal, so it stays unused. `session.compaction.ended` still fires afterwards with only the summary text. Recorded in the roadmap as Tier M `Pre-compaction capture`, not started: archive the window behind a size cap and, separately, mine it for durable facts. No code changed.
+
 - 2026-11-06: Grammar source decided, and the reference-corpus surface checked.
   The user accepted the full `tree-sitter-wasms` pack (0.1.13, 51.8 MB, all
   languages), so the tree-sitter item is no longer blocked; it downloads once

@@ -377,6 +377,7 @@ measured; they include tests and the commits that carry them. A status of
 | `xerj_ask` and hub packs | M | Not started | — | Gated by `hub.enabled`, `hub.network` |
 | Turn archive | M | Done | 1.5 h | `archive/turns.ts`: one NDJSON file per session under `<node dir>/archive`, 4 KB per turn, oldest half dropped past `context.archive.maxBytes`; prompts and answers both archived; eight module tests |
 | `xerj_expand` | M | Done | 0.5 h | Prints `[n] U:`/`[n] A:` for a turn range, or says the archive is off; wired for the plugin and the MCP server |
+| Pre-compaction capture | M | Not started | — | The `compaction` session hook receives `event.messages` before the summary exists, so the full window (tool calls, tool output, intermediate text) can be archived and scanned for durable facts; the archive already exists, so this is a hook plus a flattening pass |
 | History search | M | Done | 1.0 h | `archive/index.ts` bulk-loads one document per turn into `<prefix>-archive-docs`, idempotent by session and ordinal, with a manifest so a pruned turn leaves the index; the archive is now a search prefix and its own dataset row; five module tests |
 | LSP pool | L | Not started | — | Gated by `analysis.lsp.enabled` |
 | Server installer | L | Not started | — | — |
