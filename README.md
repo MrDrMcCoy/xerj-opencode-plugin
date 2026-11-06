@@ -282,6 +282,11 @@ bun run eval
 bun run eval --k 8 --surface tool --json
 ```
 
+It prints two numbers: how often the expected file is cited, and how often the
+answer text itself arrived (a token each prompt pins). The second is the one
+that says whether the injected block is useful rather than merely on target,
+and it separates a file that was never picked from a section that was cut.
+
 Defaults match what the plugin ships. Run it against a current index: a file
 added since the last pass is missing from the corpus, and the miss it causes
 looks like a ranking fault. A one-prompt change is inside the noise of a
