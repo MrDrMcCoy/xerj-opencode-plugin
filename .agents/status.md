@@ -270,11 +270,7 @@ test/unit/*.test.ts    pure-function tests
    `embed-backup/` and no warning in the ring. The new warning makes the next
    occurrence visible; the cause is still unknown. Suspects: the rc.101 data
    format change, or the embed-mode reconcile before the backup rule existed.
-3. The web corpus reported `docs: 0 · records: 5` with an empty spool and no
-   `xop-web-*` index. The stale-count fix covers the report, but nothing
-   re-creates the corpus because the spool is empty; decide whether a missing
-   spool index should clear the run record.
-4. Publish the next release when the user asks. `v0.7.0` is released and
+3. Publish the next release when the user asks. `v0.7.0` is released and
    `npm` serves it. `publish.yml` stages when the token requires it; approve
    the staged version at npmjs.com.
 5. Known coverage gaps need a fake clock or several processes: `mcp/host.ts`
@@ -357,6 +353,31 @@ publish, and live TUI verification remain.
   expected, z-score, and score. Warm-up buckets are not flagged.
 
 ## Log
+
+- 2026-11-06: The stale web run record is fixed, and the badge no longer flaps.
+  The live store showed `ready -> degraded · index is missing; the last pass
+  wrote 5 records` and back again roughly every thirty seconds. Two causes,
+  both fixed.
+
+  The web corpus spool had lost every page and its `xop-web-*` index was gone,
+  but the stored run record still claimed five records. Nothing recreates that
+  corpus because an empty spool has nothing to index, so the record alone made
+  a healthy service read as broken. `RemoteSpool.isEmpty()` reports whether any
+  page is spooled, `CorpusService.clearRun()` forgets a run and its stored key,
+  and the web indexer calls both before it starts. Two tests.
+
+  A snapshot also computed the badge twice, once from run records before the
+  node was asked and once from the datasets after, and both recorded a
+  transition. The first pass cannot see a missing index, so every poll logged a
+  `ready -> degraded` and `degraded -> ready` pair. `StateTracker` in
+  `src/telemetry/state.ts` separates `view` (no side effect) from `settle` (one
+  transition per snapshot); the base pass defers and the full pass settles.
+  Four tests.
+
+  This closes status item 3. The live server still runs the module from before
+  the fix, so the logged flap continues until the next OpenCode restart; the
+  config loads the working tree, so a restart picks it up. 1080 unit tests
+  pass; typecheck clean.
 
 - 2026-11-06: Local telemetry confirmed live after an OpenCode restart. The
   store appears at `~/.local/share/opencode/xerj/telemetry`: `ops.ndjson`
