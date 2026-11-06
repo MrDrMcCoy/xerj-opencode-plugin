@@ -367,6 +367,25 @@ Eager mode is off by default because it costs model calls and network traffic.
 Measured on `docs.solidjs.com` with the heuristic judge: 25 pages and 169 KB in
 9 s, reaching pages three levels below the entry.
 
+## Releasing
+
+Pushing a tag that matches `package.json` publishes to npm:
+
+```
+git tag -a v0.7.0 -m "v0.7.0"
+git push origin main --follow-tags
+```
+
+`.github/workflows/publish.yml` runs on any `v*` tag. It first calls
+`ci.yml` (typecheck, unit, and integration tests against a pinned binary), and
+only a green run reaches the publish job, so a tag that would have failed CI
+never lands on the registry.
+
+The publish job stops if the tag and the manifest disagree, skips silently when
+that version is already published, and otherwise runs
+`npm publish --access public --provenance`. Provenance requires the `NPM_TOKEN`
+repository secret with publish rights for the package.
+
 ## System documentation
 
 `/xerj-sysdocs` indexes the man and info pages this machine can resolve into

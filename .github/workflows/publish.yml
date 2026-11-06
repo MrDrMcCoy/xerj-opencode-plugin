@@ -1,0 +1,75 @@
+name: Publish
+
+# Publishes to npm only after a tag passes the same checks main runs, so a tag
+# that would have failed CI never reaches the registry.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify the tagged commit
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    name: Publish to npm
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      # `--provenance` signs the publish with this workflow's identity.
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: The tag and the manifest must agree
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          VERSION="$(node -p 'require("./package.json").version')"
+          if [ "$TAG" != "$VERSION" ]; then
+            echo "tag $GITHUB_REF_NAME does not match package.json version $VERSION" >&2
+            exit 1
+          fi
+          echo "publishing $VERSION"
+
+      - name: Skip a version that is already on the registry
+        id: check
+        run: |
+          VERSION="$(node -p 'require("./package.json").version')"
+          NAME="$(node -p 'require("./package.json").name')"
+          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+            echo "already published: $NAME@$VERSION"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - run: bun install --frozen-lockfile
+        if: steps.check.outputs.publish == 'true'
+
+      - name: Publish
+        if: steps.check.outputs.publish == 'true'
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Report
+        run: |
+          if [ "${{ steps.check.outputs.publish }}" = "true" ]; then
+            echo "published $(node -p 'require("./package.json").name')@$(node -p 'require("./package.json").version')"
+          else
+            echo "nothing to publish"
+          fi
