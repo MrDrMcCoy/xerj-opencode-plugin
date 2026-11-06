@@ -54,7 +54,10 @@ cheap half ships first.
 4. **Scope is the project.** Every new runtime reads only files under the
    canonical project root. A path outside it is refused, exactly as the
    indexer refuses one today.
-5. **No silent outbound traffic.** Anything that leaves the machine,
+5. **The plugin stays read-only.** It locates, explains, and cites; the host's
+   tools and the model write. No tool in this plan opens a project file for
+   writing, so a bug here can cost a bad citation but not a file.
+6. **No silent outbound traffic.** Anything that leaves the machine,
    including the engine's own field report, is opt-in and off by default.
 
 ## Capability gates
@@ -81,8 +84,7 @@ build flag: the same published package carries the capability.
           "idleMs": 300000,
           "maxServers": 2,
           "timeoutMs": 2000
-        },
-        "edits": { "enabled": false }
+        }
       }
     }
   }]
@@ -99,7 +101,6 @@ build flag: the same published package carries the capability.
 | `analysis.lsp.idleMs` | 5 min | Stop a server that answered nothing for this long |
 | `analysis.lsp.maxServers` | 2 | Cap concurrent servers, so one project cannot fill memory |
 | `analysis.lsp.timeoutMs` | 2 s | Per-request deadline; a miss returns no result rather than delaying a turn |
-| `analysis.edits.enabled` | `false` | Writes. Requires checkpoints, and requires one of the two gates above |
 
 Defaults are closed because each capability adds weight a retrieval plugin
 should not impose: 52 to 100 MB of grammars, or a process holding hundreds of
@@ -115,7 +116,6 @@ gate keeps that true.
 | `xerj_complexity`, structural search | tree-sitter | Tool not registered |
 | `xerj_callers`, `xerj_impact` | LSP | Tool not registered |
 | `xerj_inspect` | LSP, tree-sitter | Registered with the index-only part (TODOs); diagnostics and unused exports are omitted and named as gated |
-| Edit family | tree-sitter or LSP, plus edits | Tool not registered |
 | Retrieval, injection, memory, docs corpora | Nothing gated | Identical with every gate closed |
 
 Five rules make the gates trustworthy:
@@ -183,6 +183,7 @@ Ship these first. None adds a runtime, a grammar, or a write path.
 |---|---|---|---|---|
 | Import graph and cycles | AFT inspect | Parse import lines from indexed text, report cycles | None | None: index only |
 | Regex and glob search | AFT search | Literal and pattern search over project files | A local matcher; the engine has no regex query | None |
+| Structural search | AFT `ast_grep_search` | AST pattern search with metavariables, read only | `ast-grep` on `PATH`; the tool reports absence and nothing else | None; no write path |
 | tree-sitter layer, one language | AFT | Lazy grammar download, per-file cache, symbol ranges | TypeScript first | `analysis.treeSitter.enabled` |
 | Complexity and duplicates | AFT inspect | Node counts per function, structural hashing | The tree-sitter layer | `analysis.treeSitter.enabled` |
 | `xerj_code` | XERJ engine | Retrieval over reference corpora (`corpus add/index/list`) | A corpus lifecycle view in the panel | None |
@@ -205,7 +206,6 @@ Ship these first. None adds a runtime, a grammar, or a write path.
 
 | Item | Source | What it does | Gate | Precondition |
 |---|---|---|---|---|
-| Edit family: `xerj_edit`, `xerj_import`, `xerj_move`, `xerj_safety`, `xerj_conflicts` | AFT | Symbol-bounded edits, import management, moves, checkpoints, conflict resolution | `analysis.edits.enabled`, plus one of the two above | Checkpoints and undo must exist and be tested before any write ships |
 | Dreamer child sessions | Magic Context | Idle-time curation, doc maintenance, primer refresh | `memory.curate` | Memory curation shipped and stable |
 | Notes and smart notes | Magic Context | Deferred intentions with surface conditions | `context.notes` | A scheduler the plugin does not have yet |
 
@@ -220,6 +220,7 @@ Ship these first. None adds a runtime, a grammar, or a write path.
 | Bundling grammars in the npm package | 50 to 100 MB and a per-platform native build matrix |
 | Enabling `analysis.*` by default | The gate exists so an install that wants retrieval pays nothing for a parser or a server |
 | A gate that silently widens | A gate covers one capability and one key; no key controls two capabilities, and no build flag changes what is registered |
+| Edit family: symbol edit, import write, move, delete, checkpoints, conflict resolution, AST replace | A plugin that writes can lose work: a partial write, a wrong range, or a concurrent writer is unrecoverable, and a checkpoint stack beside git gives two recovery stories that disagree. The benefit is real for one feature (bulk AST replace) and the read-only routes cover the rest: `xerj_zoom` supplies exact text for the host's `edit`, `xerj_refs` shows every site first, and `ast-grep` search lists matches for the model to edit |
 | Compaction engine: compartments, `ctx_reduce`, `/ctx-recomp`, cache-TTL mutation scheduling | The host already compacts. Rewriting messages duplicates that work, thrashes the prompt cache, and carries the plan's highest data risk for no retrieval gain. Revisit only if the host exposes a compaction API a plugin may drive |
 | Rewriting `read` or `grep` inputs | Silent semantic changes break debugging |
 
@@ -229,12 +230,11 @@ Ship these first. None adds a runtime, a grammar, or a write path.
 |---|---|
 | Language server processes leak | One pool per project, pidfile, idle stop, and a test that asserts no process survives teardown. This plugin has leaked processes before; the check is mandatory |
 | Grammar cache corrupts | Verify against a checksum before use, as the binary path does; a bad grammar is a logged skip, not a crash |
-| Edit tools lose work | No write ships before checkpoints and undo; every write is atomic and reports the backup path |
 | Host compaction hides an injected passage | The dedupe set resets on `session.compaction.ended`, so the next turn may re-inject what the summary dropped |
 | The turn archive grows without bound | `context.archive.maxBytes` (64 MB) prunes oldest turns at startup, and the panel reports the size |
 | An archive surprises a user | It is local, mode 0700, inside the project's own `.xerj`, and `context.archive.enabled: false` removes it |
 | Retrieval slows down | Every new query path is measured against the 400 ms budget; a path that misses it becomes a tool, not an injection |
-| Scope creep | One plugin owning search, edits, archive, and memory is large; each tier lands as a release with its own coverage gate |
+| Scope creep | One plugin owning search, analysis, archive, and memory is large; each tier lands as a release with its own coverage gate |
 | A gate opens without a decision | Gates default to closed, an upgrade never turns one on, and the panel prints the key that is closed |
 | A gate is open but its toolchain is missing | One probe at enable time; a missing server or grammar logs once, names the key, and leaves the capability off rather than retrying per call |
 | A gated tool leaks memory or processes | The LSP pool has an idle stop and a server cap; a test asserts zero surviving processes after teardown |
@@ -251,9 +251,8 @@ Ship these first. None adds a runtime, a grammar, or a write path.
    time is unchanged with it closed.
 3. **Tier L**, one language at a time. Gate: a week of live use with no
    process count growth, and a test that a closed gate starts no server.
-4. **Tier XL**, edits and curation. Gate: checkpoints proven by an
-   interrupted write before any other write ships, and curation proven by a
-   dry run that names what it would change.
+4. **Tier XL**, curation depth and notes. Gate: curation proven by a dry run
+   that names what it would change before it changes anything.
 5. Every tier ships with its gates closed by default, and the release notes
    name each key. Opening a gate is the user's decision per project, not a
    default that arrives with an upgrade.
@@ -262,14 +261,11 @@ Ship these first. None adds a runtime, a grammar, or a write path.
 
 ## Open decisions for the user
 
-Three remain, each with a safe default, so none blocks work:
+Two remain, each with a safe default, so neither blocks work:
 
 1. **Share**: allow `xerj_share` at all, given it opens a listener. Default:
    the tool is absent until invoked with consent.
 2. **Hub packs**: allow network access for `xerj ask`. Default: offline; the
    first request asks and remembers the answer.
-3. **Edits**: whether this plugin writes to files. Default:
-   `analysis.edits.enabled` closed, so the plugin stays read-only.
-
-Compaction is no longer an open question. The host keeps it, and this plugin
-keeps an archive so its own recall survives it.
+Compaction and file writes are settled. The host keeps compaction, and this
+plugin stays read-only: it locates and explains, the host and the model write.

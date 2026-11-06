@@ -339,6 +339,20 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: Edits are a non-goal (0.7.0 plan). The roadmap's edit family is
+  gone from the tiers, the config block, the gate table, the closed-behaviour
+  matrix, the risks, and the open decisions. A sixth constraint states the
+  invariant: the plugin is read-only, so a bug costs a bad citation rather than
+  a file. The reasons are recorded in non-goals: a plugin that writes can lose
+  work through a partial write, a wrong range, or a concurrent writer, and a
+  checkpoint stack beside git gives two recovery stories that disagree. Only
+  one edit feature had a unique benefit (bulk AST replace), and the read-only
+  routes cover the rest: `xerj_zoom` supplies exact text for the host's `edit`,
+  `xerj_refs` shows every site first, and `ast-grep` search lists matches. A
+  read-only structural search joined Tier M, gated on the binary being on
+  `PATH`. Tier XL now holds only dreamer curation and notes; two open decisions
+  remain, share and hub network access. Tier S and M are unchanged in order.
+
 - 2026-11-06: Roadmap change: the host keeps compaction (0.7.0 plan). Constraint
   2 now states that compaction belongs to the harness, so the plugin keeps an
   append-only turn archive and reads the host's summary from
