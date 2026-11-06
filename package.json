@@ -36,8 +36,9 @@
     "test:unit": "bun test test/unit",
     "test:integration": "bun test test/integration",
     "build:tui": "bun scripts/build-tui.ts",
-    "prepack": "bun run build:tui",
-    "eval": "bun scripts/eval.ts"
+    "prepack": "bun run build:tui && bun run build:mcp",
+    "eval": "bun scripts/eval.ts",
+    "build:mcp": "bun scripts/build-mcp.ts"
   },
   "devDependencies": {
     "@opencode/theme": "^2.2.5",
@@ -61,5 +62,8 @@
     "@opentui/core": "^0.8.0",
     "@opentui/solid": "^0.8.0",
     "solid-js": "^1.9.17"
+  },
+  "bin": {
+    "xerj-mcp": "./dist/mcp.js"
   }
 }

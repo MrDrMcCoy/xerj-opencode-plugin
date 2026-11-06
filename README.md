@@ -367,6 +367,55 @@ Eager mode is off by default because it costs model calls and network traffic.
 Measured on `docs.solidjs.com` with the heuristic judge: 25 pages and 169 KB in
 9 s, reaching pages three levels below the entry.
 
+## Standalone MCP server
+
+Agents that do not run OpenCode can use the same index over MCP. The package
+ships an `xerj-mcp` executable that speaks JSON-RPC on stdio:
+
+```json
+{
+  "mcpServers": {
+    "xerj": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@mrdrmccoy/xerj-opencode-plugin",
+        "xerj-mcp",
+        "--project",
+        "/path/to/repo"
+      ]
+    }
+  }
+}
+```
+
+Run it directly to try it:
+
+```
+bun dist/mcp.js --project /path/to/repo
+```
+
+Tools: `search`, `def`, `status`, `remember`, `recall`, `forget`, `index`,
+`anomaly`, `reindex`, `sysdocs`, and `prjdocs`. They are the same tools the
+OpenCode plugin registers, plus the three corpus runners the plugin exposes
+only as commands.
+
+The handshake touches nothing: `initialize` and `tools/list` answer
+immediately, and the binary download, node start, and index pass happen behind
+the first call that needs them. Diagnostics go to stderr, so every line of
+stdout is JSON-RPC.
+
+Settings come from the environment because there are no plugin options:
+
+| Variable | Meaning |
+| --- | --- |
+| `XERJ_BIN` | Use this XERJ binary and never download one. |
+| `XERJ_STORAGE_ROOT` | Project state directory; defaults to `<project>/.xerj`. |
+| `XERJ_NODE_URL` | Attach to a running node instead of spawning one. |
+
+The server runs one node per project, exactly as the plugin does, so an
+OpenCode session and an MCP client on the same project share it.
+
 ## Releasing
 
 Pushing a tag that matches `package.json` publishes to npm:
