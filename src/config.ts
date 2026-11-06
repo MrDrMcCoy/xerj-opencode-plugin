@@ -50,6 +50,12 @@ export interface IndexOptions {
   readonly hidden: ReadonlyArray<string>;
   readonly hiddenMaxBytes: number;
   readonly semantic: boolean;
+  /**
+   * Index the project as a graph (a "super brain"): one corpus with sections,
+   * symbols, `path:line`, and edges, refreshed by the plugin's own watcher
+   * because the engine refuses `--watch` in graph mode.
+   */
+  readonly graph: boolean;
   /** Embed passages with the node's neural model; false serves lexical only. */
   readonly neural: boolean;
   readonly maxBytes: number;
@@ -142,6 +148,7 @@ export const DEFAULT_CONFIG: Config = {
     hidden: [],
     hiddenMaxBytes: 256 * 1024,
     semantic: true,
+    graph: true,
     neural: true,
     maxBytes: 2 * 1024 ** 3,
     maxMinutes: 10,
@@ -249,6 +256,12 @@ export function loadConfig(
         1_024,
         Number.MAX_SAFE_INTEGER,
         "index.hiddenMaxBytes",
+        warnings,
+      ),
+      graph: readBoolean(
+        index.graph,
+        DEFAULT_CONFIG.index.graph,
+        "index.graph",
         warnings,
       ),
       semantic: readBoolean(

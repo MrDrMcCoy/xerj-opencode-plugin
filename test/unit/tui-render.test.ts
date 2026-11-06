@@ -82,8 +82,8 @@ const SNAPSHOT: StatusSnapshot = {
   brains: [],
   disk: { engineBytes: 1024, logBytes: 2048 },
   corpora: [
-    { name: "project", state: "watching", docs: 42, lastRunAt: 1, records: 42, error: null },
-    { name: "hidden", state: "error", docs: 0, lastRunAt: 1, records: null, error: "timed out" },
+    { name: "project", state: "watching", docs: 42, lastRunAt: 1, records: 42, edges: null, error: null },
+    { name: "hidden", state: "error", docs: 0, lastRunAt: 1, records: null, edges: null, error: "timed out" },
   ],
   counters: {
     rpcCalls: 1,

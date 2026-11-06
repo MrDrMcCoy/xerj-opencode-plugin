@@ -32,6 +32,7 @@ import {
   memoryNamespace,
   nodeDataDir,
   nodeLogPath,
+  projectBrainName,
   projectNodeDir,
   projectPath,
   projectStateDir,
@@ -300,9 +301,17 @@ export default Plugin.define({
 
       try {
         const client = new XerjClient(runtime.node.baseUrl, undefined, observer);
-        const [indices, summary] = await Promise.all([
+        const [indices, summary, overview] = await Promise.all([
           client.indices(),
           client.memorySummary(memoryNs).catch(() => null),
+          config.index.graph
+            ? client
+                .get(
+                  `/_graph/${encodeURIComponent(projectBrainName(projectRoot))}/overview`,
+                  "graph overview failed",
+                )
+                .catch(() => null)
+            : Promise.resolve(null),
         ]);
         const datasets = datasetRows(
           indices,
@@ -316,9 +325,22 @@ export default Plugin.define({
 
         // Fill document counts from the same listing, so each corpus row shows
         // what is actually stored rather than only whether the service runs.
+        // The graph's live edge total comes from its own overview; a run
+        // document counts edges written, not edges that still exist.
+        const edgeTotal =
+          overview !== null &&
+          typeof overview === "object" &&
+          "edges" in overview &&
+          typeof (overview as { edges: unknown }).edges === "object" &&
+          (overview as { edges: { total?: unknown } }).edges?.total;
+
         const corpora = base.corpora.map((row) => ({
           ...row,
           docs: datasets.find((dataset) => dataset.name === row.name)?.docs ?? 0,
+          edges:
+            row.name === "project" && typeof edgeTotal === "number"
+              ? edgeTotal
+              : row.edges,
         }));
 
         return {
@@ -767,7 +789,26 @@ export default Plugin.define({
         ],
         logger,
         projectRoot,
-        new BrainGraph({ client, brains: runtime.brains, logger }),
+        new BrainGraph({
+          client,
+          // Graph mode makes the project corpus itself a brain, so its hits get
+          // the same one-hop expansion. Shadowing stays on the configured
+          // brains: a hidden whole file is only replaced by a section from the
+          // same folder, and projecting that onto the whole repo would drop
+          // notes that the project corpus legitimately does not cover.
+          brains: config.index.graph
+            ? [
+                ...runtime.brains,
+                {
+                  name: projectBrainName(projectRoot),
+                  label: ".",
+                  directory: projectRoot,
+                  prefix,
+                },
+              ]
+            : runtime.brains,
+          logger,
+        }),
         runtime.brains,
         runtime.hiddenRoots.length > 0 ? `${prefix}-hidden-docs` : null,
       );
@@ -913,6 +954,7 @@ function corpusHealth(runtime: Runtime): CorpusHealth[] {
       docs: null,
       lastRunAt: runtime.corpus?.snapshot().lastRun?.at ?? null,
       records: runtime.corpus?.snapshot().lastRun?.records ?? null,
+      edges: null,
       error: runtime.corpus?.snapshot().lastError ?? null,
     },
   ];
@@ -925,6 +967,7 @@ function corpusHealth(runtime: Runtime): CorpusHealth[] {
       docs: null,
       lastRunAt: run.lastRun?.at ?? null,
       records: run.lastRun?.records ?? null,
+      edges: null,
       error: run.lastError,
     });
   }
@@ -942,7 +985,8 @@ function corpusHealth(runtime: Runtime): CorpusHealth[] {
             : "watching",
       docs: brain.docs,
       lastRunAt: brain.lastRunAt,
-      records: brain.edges,
+      records: null,
+      edges: brain.edges,
       error: brain.error,
     });
   }
@@ -960,6 +1004,7 @@ function corpusHealth(runtime: Runtime): CorpusHealth[] {
       docs: hidden.docs,
       lastRunAt: hidden.lastRunAt,
       records: null,
+      edges: null,
       error: hidden.error,
     });
   }

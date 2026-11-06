@@ -61,7 +61,12 @@ export class BrainGraph {
   }
 
   private specFor(index: string): BrainSpec | undefined {
-    return this.options.brains.find((spec) => index.startsWith(`${spec.prefix}-`));
+    return this.options.brains.find((spec) => {
+      // A project-wide brain shares its prefix with the hidden corpus, whose
+      // documents are not graph nodes and cannot be expanded.
+      if (index.startsWith(`${spec.prefix}-hidden-`)) return false;
+      return index.startsWith(`${spec.prefix}-`);
+    });
   }
 
   private async expand(

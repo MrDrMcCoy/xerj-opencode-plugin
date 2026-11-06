@@ -119,6 +119,8 @@ export interface CorpusHealth {
   readonly docs: number | null;
   readonly lastRunAt: number | null;
   readonly records: number | null;
+  /** Live graph edges, for a corpus indexed as a brain. */
+  readonly edges: number | null;
   readonly error: string | null;
 }
 
@@ -276,6 +278,7 @@ const definition = {
             docs: { type: ["number", "null"] },
             lastRunAt: { type: ["number", "null"] },
             records: { type: ["number", "null"] },
+            edges: { type: ["number", "null"] },
             error: { type: ["string", "null"] },
           }),
         },

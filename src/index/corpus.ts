@@ -4,13 +4,15 @@
 // Verified against v1.0.0-rc.100:
 // - `--watch` requires `--no-graph` and emits one run document per pass on
 //   stdout when `--json` is set.
+// - `--brain <name>` writes docs under the given prefix and edges to
+//   `.xerj-memory-<name>-edges`, and it reconciles deletions.
 // - exit 3 is success with junk recorded; exit 4 is a decision request with a
 //   JSON body on stdout.
 
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Config } from "../config.ts";
-import { projectStateDir } from "../paths.ts";
+import { projectBrainName, projectStateDir } from "../paths.ts";
 
 export interface CorpusLayout {
   readonly projectRoot: string;
@@ -77,13 +79,22 @@ export function autoindexArgs(options: AutoindexOptions): ReadonlyArray<string> 
     layout.prefix,
     "--state-dir",
     layout.stateDir,
-    "--no-graph",
-    "--json",
-    "--progress",
-    "none",
   ];
 
-  if (watch) {
+  // Graph mode turns the project corpus into one super brain: sections,
+  // symbols, path:line and edges in a single index. The engine refuses
+  // `--watch` in that mode, so the plugin's own watcher runs one-shot passes
+  // instead, which it already does for project-local storage.
+  const graph = config.index.graph;
+  if (graph) {
+    args.push("--brain", projectBrainName(layout.projectRoot));
+  } else {
+    args.push("--no-graph");
+  }
+
+  args.push("--json", "--progress", "none");
+
+  if (watch && !graph) {
     args.push("--watch", "--debounce", String(config.index.debounceMs));
   }
 

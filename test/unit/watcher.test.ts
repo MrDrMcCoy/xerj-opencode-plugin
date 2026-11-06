@@ -65,7 +65,10 @@ function service(
   binaryPath: string,
   stateRoot: string,
   projectRoot = "/tmp/project",
-  config = DEFAULT_CONFIG,
+  config: typeof DEFAULT_CONFIG = {
+    ...DEFAULT_CONFIG,
+    index: { ...DEFAULT_CONFIG.index, graph: false },
+  },
 ): CorpusService {
   return new CorpusService({
     binaryPath,
@@ -297,4 +300,44 @@ echo '{"doc_kind":"run","generation":1,"records_total":5}'
     expect(owner.snapshot().lastError).toContain("exited");
     expect(owner.snapshot().state).not.toBe("idle");
   });
+});
+
+describe("graph mode refresh", () => {
+  test("a graph project never spawns the resident watcher", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "xerj-project-"));
+    const argsLog = join(projectRoot, "args");
+    const script = `#!/bin/sh
+echo "$@" >> ${JSON.stringify(argsLog)}
+echo '{"doc_kind":"run","generation":1,"records_total":4}'
+`;
+    const graphConfig: typeof DEFAULT_CONFIG = {
+      ...DEFAULT_CONFIG,
+      index: {
+        ...DEFAULT_CONFIG.index,
+        watch: true,
+        graph: true,
+        periodicMs: 60_000,
+      },
+    };
+    // A state root outside the project would otherwise pick the resident route.
+    const instance = service(
+      fakeBinary(script),
+      mkdtempSync(join(tmpdir(), "xerj-data-")),
+      projectRoot,
+      graphConfig,
+    );
+    running.push(instance);
+
+    await instance.start();
+    for (let waited = 0; waited < 5_000; waited += 100) {
+      if (instance.snapshot().lastRun) break;
+      await Bun.sleep(100);
+    }
+
+    const runs = readFileSync(argsLog, "utf8").trim().split("\n");
+    expect(runs[0]).toContain("--brain");
+    expect(runs[0]).not.toContain("--watch");
+    expect(runs[0]).not.toContain("--no-graph");
+    expect(instance.snapshot().lastRun?.records).toBe(4);
+  }, 15_000);
 });

@@ -287,6 +287,16 @@ export function brainSpecs(
   });
 }
 
+/**
+ * Graph name for the project corpus itself. The project is indexed as a brain,
+ * so its edges need a name that is unique per project on a shared node, the
+ * same reason a configured brain carries a folder hash.
+ */
+export function projectBrainName(projectRoot: string): string {
+  const root = resolve(projectRoot);
+  return `${slug(basename(root), 12)}-${pathHash(root, 4)}`;
+}
+
 /** Memory namespaces are their own index; the project hash keeps them apart. */
 export function memoryNamespace(directory: string): string {
   return `proj-${slug(basename(resolve(directory)))}-${pathHash(directory)}`;

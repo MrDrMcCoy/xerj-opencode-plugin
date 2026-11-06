@@ -160,3 +160,46 @@ describe("BrainGraph expansion", () => {
     expect(calls.filter((call) => call === "search")).toHaveLength(2);
   });
 });
+
+describe("project-wide brain", () => {
+  test("hidden documents are not expanded as graph nodes", async () => {
+    const queried: string[] = [];
+    const client = {
+      get: async (path: string) => {
+        queried.push(path);
+        return null;
+      },
+      search: async () => ({ hits: { hits: [] } }),
+    } as never;
+
+    const graph = new BrainGraph({
+      client,
+      brains: [
+        {
+          name: "proj",
+          label: ".",
+          directory: "/proj",
+          prefix: "xop-proj",
+        },
+      ],
+      logger,
+    });
+
+    const related = await graph.related([
+      {
+        index: "xop-proj-hidden-docs",
+        id: "abc",
+        passage: 0,
+        path: ".agents/plan.md",
+        line: 1,
+        title: "plan",
+        kind: "hidden",
+        score: 1,
+        text: "hidden",
+      },
+    ]);
+
+    expect(related).toEqual([]);
+    expect(queried).toEqual([]);
+  });
+});

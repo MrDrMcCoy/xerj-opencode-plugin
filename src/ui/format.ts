@@ -174,6 +174,9 @@ export function panelSections(snapshot: StatusSnapshot, now: number): PanelSecti
               [
                 `${corpus.name}  ${corpus.state}`,
                 corpus.docs === null ? null : `${formatCount(corpus.docs)} docs`,
+                corpus.edges === null
+                  ? null
+                  : `${formatCount(corpus.edges)} edges`,
                 corpus.error === null ? null : `error: ${corpus.error}`,
               ]
                 .filter((part) => part !== null)

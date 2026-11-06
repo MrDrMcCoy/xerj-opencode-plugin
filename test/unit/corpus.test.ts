@@ -20,11 +20,11 @@ describe("corpusLayout", () => {
 });
 
 describe("autoindexArgs", () => {
-  test("always indexes with the non-graph reconciling path", () => {
+  test("the non-graph reconciling path when graph mode is off", () => {
     const args = autoindexArgs({
       layout,
       nodeUrl: "http://127.0.0.1:9200",
-      config: config(),
+      config: config({ graph: false }),
       watch: false,
     });
 
@@ -38,11 +38,11 @@ describe("autoindexArgs", () => {
     expect(args).not.toContain("--watch");
   });
 
-  test("watch mode adds the debounce window", () => {
+  test("watch mode adds the debounce window in non-graph mode", () => {
     const args = autoindexArgs({
       layout,
       nodeUrl: "http://127.0.0.1:9200",
-      config: config({ debounceMs: 1500 }),
+      config: config({ debounceMs: 1500, graph: false }),
       watch: true,
     });
 

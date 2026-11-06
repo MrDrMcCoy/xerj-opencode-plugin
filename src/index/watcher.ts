@@ -203,7 +203,12 @@ export class CorpusService {
       isPathInside(this.options.projectRoot, this.options.stateRoot) ||
       isPathInside(this.options.projectRoot, this.layout.stateDir);
 
-    if (this.options.config.index.watch && !stateInsideProject) {
+    // Graph mode cannot use the engine's resident watcher, so a graph project
+    // always refreshes through the plugin's own directory watcher. That is the
+    // same route a state dir inside the project already takes.
+    const graphMode = this.options.config.index.graph;
+
+    if (this.options.config.index.watch && !stateInsideProject && !graphMode) {
       this.spawn(true);
       return;
     }
