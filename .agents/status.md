@@ -339,6 +339,31 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: Automation ecosystems, eager keywords, and the panel's new
+  figures (0.7.0). Detection covers Ansible (`ansible.cfg`, `site.yml`,
+  `roles/`, `hosts:`/`become:` markers, `ansible.*` modules), community
+  collections (`requirements.yml` with `collections:`, `community.*`
+  references), NetBox (`pynetbox`, `netboxcommunity/netbox` images,
+  `NETBOX_*`), and the HashiCorp products (Terraform blocks and `.tf`,
+  `.tfvars`; Vault `path` blocks and `VAULT_*`; Consul `service`/`connect`
+  blocks; Nomad `job` blocks and `.nomad`; Packer `source` blocks and
+  `.pkr.hcl`; Vagrant `Vagrant.configure` and `Vagrantfile`; Boundary and
+  Waypoint from their environment and CLI markers). New module
+  `src/prjdocs/ecosystems.ts`. Each has a source bounded to its own path.
+  Measured documents: Ansible 60, collections 80, NetBox 24, Terraform 56,
+  Vault 50, Consul 50, Nomad 50, Packer 40, Vagrant 30, Boundary 30,
+  Waypoint 20.
+  Eager mode accepts `prjdocs.eagerKeywords` and a `keywords` argument on
+  `xerj_prjdocs` and the MCP tool: each term is searched through the
+  discovery path and crawled even when the project does not use it.
+  The panel reports datasets by size with their share, documented
+  frameworks with documents and bytes, the node's CPU and RSS (sampled from
+  `/proc`, `src/process-stats.ts`), and whether embeddings are being built;
+  the sidebar appends `embedding` during a pass. Project-doc documents now
+  store `bytes`, so the framework sizes are measured rather than estimated;
+  existing documents show 0 until the next run. 834 unit and 12 integration
+  tests pass.
+
 - 2026-11-06: GPU stack coverage raised from a front page to the collections
   (0.7.0). Sources can name component seeds: CUDA's cuBLAS, cuFFT, cuSPARSE,
   cuSOLVER, cuRAND, NPP, libdevice, maths API, cudla, best practices, compiler
