@@ -340,6 +340,22 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-05: Coverage pass (0.7.0). Measured across unit and integration:
+  85.55% to 88.69% lines, 92.62% to 94.96% functions, 698 tests. New suites:
+  counters, the latest-version resolver, and the MCP host (settings, paths, the
+  static tool list, and a boot that attaches to a stand-in node instead of
+  spawning). New branches: memory-index repair with a refused list or delete,
+  hidden indexing of an oversized document, the empty-folder warning firing
+  once and clearing, a run queued during a run, a mapping error that is not
+  400/409, crawler plain-text and markdown extraction plus size and status
+  limits, a discovered URL cached across a restart, project-doc ingest failure
+  and re-ingest after a change, system-doc extraction failure and a failed
+  prune, supervisor lock contention with a held and a stale lock, an
+  out-of-range preferred port, and the Node runtime's detect,
+  missing-binary, invalidate, and stop paths. The MCP host stays at 55%
+  because its boot path runs in a subprocess coverage cannot see; the two
+  integration tests drive it for real.
+
 - 2026-11-05: Standalone MCP server (0.7.0). `xerj-mcp` speaks JSON-RPC over
   stdio so agents that do not run OpenCode reach the same services:
   `src/mcp/protocol.ts` handles initialize, ping, tools/list, and tools/call;
