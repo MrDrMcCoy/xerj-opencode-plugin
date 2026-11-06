@@ -2,6 +2,7 @@
 // No I/O, no RPC, so the TUI stays thin and the formatting stays testable.
 
 import type { StatusSnapshot } from "../rpc.ts";
+import { stateGlyph } from "../telemetry/state.ts";
 
 export interface PanelSection {
   readonly title: string;
@@ -74,6 +75,23 @@ export function formatAge(now: number, at: number | null): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+/** Elapsed time: "1.4s", "48s", "12m", "6h 12m", "2d". */
+export function formatDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return "0s";
+  const seconds = ms / THOUSAND;
+  if (seconds < 10) return `${seconds.toFixed(1)}s`;
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return minutes % 60 === 0 ? `${hours}h` : `${hours}h ${minutes % 60}m`;
+  }
+  return `${Math.floor(hours / 24)}d`;
+}
+
 /** Time until a future deadline: "in 45m", "in 12s". */
 function formatUntil(now: number, at: number): string {
   const seconds = Math.max(0, Math.round((at - now) / THOUSAND));
@@ -105,6 +123,8 @@ export interface SidebarSectionView {
 export interface SidebarView {
   readonly label: string;
   readonly version: string;
+  /** `● ready` or `◐ busy · indexing`, for the header. */
+  readonly badge: string;
   /** Three rows that fit in a collapsed sidebar. */
   readonly collapsed: ReadonlyArray<SidebarRow>;
   readonly sections: ReadonlyArray<SidebarSectionView>;
@@ -144,6 +164,48 @@ export function sidebarView(
       (snapshot.memory.stale > 0 ? ` · ${formatCount(snapshot.memory.stale)} stale` : "") +
       (snapshot.memory.exists ? "" : " · missing"),
     tone: snapshot.memory.exists ? "ok" : "bad",
+  };
+
+  const state = snapshot.state;
+  const stateSection: SidebarSectionView = {
+    title: "State",
+    rows: [
+      {
+        label: "now",
+        value:
+          `${state.name}` +
+          (state.detail === null ? "" : ` · ${state.detail}`),
+        tone:
+          state.name === "degraded"
+            ? "bad"
+            : state.name === "busy" || state.name === "starting"
+              ? "warn"
+              : "ok",
+      },
+      ...(state.jobs.length === 0
+        ? []
+        : [
+            {
+              label: "jobs",
+              value: state.jobs
+                .map(
+                  (job) =>
+                    `${job.label} ${formatDuration(now - job.startedAt)}`,
+                )
+                .join(" · "),
+              tone: "warn" as const,
+            },
+          ]),
+      {
+        label: "today",
+        value:
+          `ready ${formatDuration(state.today.readyMs)} · ` +
+          `busy ${formatDuration(state.today.busyMs)}` +
+          (state.today.degradedMs > 0
+            ? ` · degraded ${formatDuration(state.today.degradedMs)}`
+            : ""),
+      },
+    ],
   };
 
   const corpora: SidebarSectionView = {
@@ -231,8 +293,11 @@ export function sidebarView(
   return {
     label: "XERJ",
     version: snapshot.pluginVersion,
+    badge: `${stateGlyph(state.name)} ${state.name}` +
+      (state.detail === null ? "" : ` · ${state.detail}`),
     collapsed: [indexRow, savedRow, memoryRow],
     sections: [
+      stateSection,
       ...(sections.corpora ? [corpora] : []),
       ...(sections.session ? [session] : []),
       ...(sections.savings ? [savings] : []),
@@ -253,9 +318,12 @@ export function sidebarLines(snapshot: StatusSnapshot, now: number): string[] {
       : index.lastFiles === null
         ? `${formatCount(index.lastRecords ?? 0)} records`
         : `${formatCount(index.lastFiles)} files`;
+  const state = snapshot.state;
 
   return [
-    `XERJ  ${marker(snapshot)} ${headline(snapshot)}`,
+    `XERJ  ${stateGlyph(state.name)} ${state.name}` +
+      (state.detail === null ? "" : ` · ${state.detail}`) +
+      ` · ${formatCount(index.docs)} docs`,
     [
       `q ${formatCount(usage.queries)}`,
       `hit ${formatPercent(usage.hitRate)}`,
@@ -272,9 +340,27 @@ export function sidebarLines(snapshot: StatusSnapshot, now: number): string[] {
 
 /** Every block of the details panel, in display order. */
 export function panelSections(snapshot: StatusSnapshot, now: number): PanelSection[] {
-  const { node, binary, index, memory, usage } = snapshot;
+  const { node, binary, index, memory, usage, state } = snapshot;
 
   return [
+    {
+      title: "State",
+      lines: [
+        `${state.name}${state.detail === null ? "" : ` · ${state.detail}`}` +
+          ` · ${formatDuration(now - state.since)} in this state`,
+        ...(state.jobs.length === 0
+          ? ["no jobs running"]
+          : state.jobs.map(
+              (job) =>
+                `${job.kind}  ${job.label} · ` +
+                `${formatDuration(now - job.startedAt)}`,
+            )),
+        `today  ready ${formatDuration(state.today.readyMs)} · ` +
+          `busy ${formatDuration(state.today.busyMs)} · ` +
+          `degraded ${formatDuration(state.today.degradedMs)} · ` +
+          `starting ${formatDuration(state.today.startingMs)}`,
+      ],
+    },
     {
       title: "Node",
       lines: [
@@ -404,9 +490,31 @@ export function panelSections(snapshot: StatusSnapshot, now: number): PanelSecti
           ? "no counters on this platform"
           : `${snapshot.process.cpuPercent.toFixed(1)}% cpu · ` +
             `${formatBytes(snapshot.process.memoryBytes)} rss`,
+        ...(snapshot.telemetry.process === null
+          ? []
+          : [
+              `peak ` +
+                `${formatBytes(snapshot.telemetry.process.peakRssBytes)} · ` +
+                `p95 ${formatBytes(snapshot.telemetry.process.rssP95)}` +
+                (snapshot.telemetry.process.cpuBusy === null
+                  ? ""
+                  : ` · busy ` +
+                    `${snapshot.telemetry.process.cpuBusy.toFixed(1)}% cpu`),
+              `growth ` +
+                (snapshot.telemetry.process.growthMbPerDay >= 0 ? "+" : "") +
+                `${snapshot.telemetry.process.growthMbPerDay} MB/day`,
+            ]),
         snapshot.embeddings ? "building embeddings now" : "not embedding",
       ],
     },
+    ...(snapshot.telemetry.enabled
+      ? [
+          {
+            title: "Telemetry",
+            lines: telemetryLines(snapshot),
+          },
+        ]
+      : []),
     {
       title: "Memory",
       lines: [
@@ -467,6 +575,46 @@ export function panelSections(snapshot: StatusSnapshot, now: number): PanelSecti
       lines: healthLines(snapshot),
     },
   ];
+}
+
+/**
+ * The five busiest operation types, the last boot's figures, and the promise
+ * that matters most: these files stay on this machine.
+ */
+function telemetryLines(snapshot: StatusSnapshot): string[] {
+  const telemetry = snapshot.telemetry;
+  const last = telemetry.starts[0] ?? null;
+
+  return [
+    ...(telemetry.ops.length === 0
+      ? ["no operations recorded yet"]
+      : telemetry.ops
+          .slice(0, 5)
+          .map(
+            (row) =>
+              `${row.op} ${formatCount(row.count)}× · ` +
+              `p50 ${row.p50}ms · p95 ${row.p95}ms` +
+              (row.errors > 0 ? ` · ${row.errors} err` : ""),
+          )),
+    last === null
+      ? "no boot recorded yet"
+      : `last boot setup ${formatDuration(last.bootMs)}` +
+        (last.readyMs === null
+          ? ""
+          : ` · ready ${formatDuration(last.readyMs)}`) +
+        (last.indexedMs === null
+          ? ""
+          : ` · indexed ${formatDuration(last.indexedMs)}`) +
+        (last.crashed ? " · previous run crashed" : ""),
+    `${formatCount(telemetry.crashes)} crashes · ` +
+      `${formatCount(telemetry.restarts)} restarts · ` +
+      `${formatBytes(telemetry.storeBytes)} store` +
+      (telemetry.disabled === null ? "" : ` · ${telemetry.disabled}`),
+    `local only · never sent` +
+      (telemetry.historyStart === null
+        ? ""
+        : ` · since ${telemetry.historyStart}`),
+  ].flat();
 }
 
 function healthLines(snapshot: StatusSnapshot): string[] {

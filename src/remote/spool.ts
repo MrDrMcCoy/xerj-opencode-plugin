@@ -10,6 +10,7 @@ import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises"
 import { basename, extname, join, relative, resolve, sep } from "node:path";
 import type { Logger } from "../log.ts";
 import { NodeRequestError, type XerjClient } from "../node/client.ts";
+import { redact } from "../redact.ts";
 
 export interface SpoolOptions {
   readonly root: string;
@@ -230,24 +231,4 @@ export function truncate(text: string, maxBytes: number): string {
   return buffer.toString("utf8").replace(/\uFFFD$/, "");
 }
 
-const SENSITIVE_KEY =
-  "pass(?:word|wd)?|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret|auth|credential";
-
-/** Best effort: fetched pages and external files can carry keys in prose, URLs, or config. */
-export function redact(text: string): string {
-  return text
-    .replace(
-      /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
-      "[redacted private key]",
-    )
-    .replace(
-      new RegExp(`((?:["']?(?:${SENSITIVE_KEY})["']?)\\s*[:=]\\s*["'])([^"'\\s]{4,})`, "gi"),
-      "$1[redacted]",
-    )
-    .replace(new RegExp(`^\\s*(${SENSITIVE_KEY})\\s*:\\s*\\S+`, "gim"), "$1: [redacted]")
-    .replace(/(Bearer\s+)[A-Za-z0-9._-]{8,}/g, "$1[redacted]")
-    .replace(/\bsk-[A-Za-z0-9_-]{16,}/g, "sk-[redacted]")
-    .replace(/\bghp_[A-Za-z0-9]{20,}/g, "ghp_[redacted]")
-    .replace(/\bxox[baprs]-[A-Za-z0-9-]{10,}/g, "xox[redacted]")
-    .replace(/\bAKIA[0-9A-Z]{16}\b/g, "AKIA[redacted]");
-}
+export { redact } from "../redact.ts";

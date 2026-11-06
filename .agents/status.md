@@ -283,8 +283,16 @@ test/unit/*.test.ts    pure-function tests
 
 ## Work in progress
 
-Local telemetry is designed in `roadmap.md` (Tier S, about 12 h) and not
-started. It records every operation's type, duration, outcome, idle/busy load,
+Local telemetry is implemented (Tier S, done). Every operation, boot phase,
+crash, restart, service-state transition, and CPU/RSS sample lands in bounded
+NDJSON files under `<data root>/telemetry`. The five-state model
+(`starting`, `ready`, `busy`, `degraded`, `stopped`) drives the sidebar badge,
+the panel `State` section, and the `xerj_telemetry` report. Tool and RPC calls
+are timed generically at registration. Next: restart OpenCode, confirm the
+directory appears with `ops.ndjson` and boot records, and check that retrieval
+p50/p95 with telemetry on stay within noise of off.
+
+Originally: design in `roadmap.md` (Tier S, about 12 h). It records every operation's type, duration, outcome, idle/busy load,
 and up to 160 characters of redacted caller text into bounded NDJSON files
 under `<data root>/telemetry`, keeps a per-type ring of samples plus a per-day
 rollup, tracks boot phases, crashes, and restarts through a per-instance

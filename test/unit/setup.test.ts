@@ -150,9 +150,10 @@ describe("server setup wiring", () => {
         "search",
         "status",
         "sysdocs",
+        "telemetry",
         "zoom",
       ]);
-      expect(host.tools.length).toBe(19);
+      expect(host.tools.length).toBe(20);
       expect(host.toolHooks).toContain("execute.after");
       expect(host.sessionHooks).toContain("prompt");
       expect(host.sessionHooks).toContain("context");

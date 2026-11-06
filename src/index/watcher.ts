@@ -60,6 +60,12 @@ export interface CorpusServiceOptions {
   readonly cpus?: CpuSpec | null;
   readonly onChange?: () => void;
   readonly onRun?: (run: CorpusRun) => void;
+  /** Short name for the job badge; "indexing" by default. */
+  readonly label?: string;
+  /** True while a pass runs, false when it ends, so the UI can say `busy`. */
+  readonly onBusy?: (busy: boolean) => void;
+  /** An unrequested death; `uptimeMs` is how long the process lived. */
+  readonly onCrash?: (uptimeMs: number) => void;
 }
 
 const STORAGE_KEY = "index/lastRun";
@@ -185,6 +191,7 @@ export class CorpusService {
   private spawning = false;
   private lastStderr = "";
   private spawnedAt = 0;
+  private busy = false;
 
   constructor(private readonly options: CorpusServiceOptions) {
     this.layout = corpusLayout(
@@ -241,6 +248,7 @@ export class CorpusService {
     this.clearTimer();
     this.closeLocalWatch();
     await this.stopChild();
+    this.endBusy();
     this.state = "idle";
   }
 
@@ -281,6 +289,23 @@ export class CorpusService {
       failures: this.failures,
       lastError: this.lastError,
     };
+  }
+
+  /** Pid of the resident or one-shot pass, for the telemetry sampler. */
+  get pid(): number | null {
+    return this.child?.pid ?? null;
+  }
+
+  private beginBusy(): void {
+    if (this.busy) return;
+    this.busy = true;
+    this.options.onBusy?.(true);
+  }
+
+  private endBusy(): void {
+    if (!this.busy) return;
+    this.busy = false;
+    this.options.onBusy?.(false);
   }
 
   private spawn(watch: boolean): ChildProcess | null {
@@ -331,6 +356,7 @@ export class CorpusService {
     this.lastStderr = "";
     this.spawnedAt = Date.now();
     if (watch) this.state = "starting";
+    this.beginBusy();
 
     // Indexing is background work: keep it below the editor's own processes.
     if (this.options.priority !== undefined) {
@@ -351,6 +377,7 @@ export class CorpusService {
     this.attachOutput(child);
     child.once("close", (code, signal) => {
       this.child = null;
+      this.endBusy();
       // A one-shot run must not release the local watcher's ownership: it
       // shares the same key but did not claim it.
       if (watch) RESIDENT_WATCHERS.delete(watcherKey);
@@ -380,6 +407,7 @@ export class CorpusService {
         this.runs += 1;
         this.restarts = 0;
         this.options.onRun?.(run);
+        this.endBusy();
         this.state = "watching";
         void this.persist(run);
         this.options.onChange?.();
@@ -438,6 +466,7 @@ export class CorpusService {
     }
 
     this.failures += 1;
+    this.options.onCrash?.(Date.now() - this.spawnedAt);
     this.lastError = `autoindex watcher exited (${code ?? signal ?? "signal"})`;
     this.options.logger.warn(this.lastError);
 

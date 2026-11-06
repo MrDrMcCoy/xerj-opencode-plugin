@@ -79,6 +79,30 @@ function snapshot(overrides: Partial<StatusSnapshot> = {}): StatusSnapshot {
     frameworks: [],
     process: null,
     embeddings: false,
+  state: {
+    name: "ready",
+    since: Date.now() - 5_000,
+    detail: null,
+    jobs: [],
+    today: {
+      startingMs: 0,
+      readyMs: 1_000,
+      busyMs: 0,
+      degradedMs: 0,
+      stoppedMs: 0,
+    },
+  },
+  telemetry: {
+    enabled: true,
+    ops: [],
+    starts: [],
+    crashes: 0,
+    restarts: 0,
+    process: null,
+    storeBytes: 0,
+    historyStart: null,
+    disabled: null,
+  },
     corpora: [
       { name: "project", state: "watching", docs: 12, lastRunAt: 1, records: 40, edges: null, error: null },
       { name: "hidden", state: "watching", docs: 4, lastRunAt: 1, records: null, edges: null, error: null },
@@ -151,11 +175,14 @@ describe("sidebarLines", () => {
   });
 
   test("reports a node that is still starting", () => {
+    const base = snapshot();
     const lines = sidebarLines(
-      snapshot({
-        node: { ...snapshot().node, phase: "starting" },
-        index: { ...snapshot().index, docs: 0 },
-      }),
+      {
+        ...base,
+        node: { ...base.node, phase: "starting" },
+        index: { ...base.index, docs: 0 },
+        state: { ...base.state, name: "starting" },
+      },
       NOW,
     );
 
@@ -178,12 +205,14 @@ describe("panelSections", () => {
     const body = sections.flatMap((section) => section.lines).join("\n");
 
     expect(titles).toEqual([
+      "State",
       "Node",
       "Binary",
       "Index",
       "Corpora",
       "Datasets",
       "Node load",
+      "Telemetry",
       "Memory",
       "Usage",
       "Counters",
@@ -602,7 +631,14 @@ describe("sidebarView", () => {
     const view = sidebarView(snapshot(), NOW, all);
     const titles = view.sections.map((section) => section.title);
 
-    expect(titles).toEqual(["Corpora", "Session", "Savings", "Runtime", "Health"]);
+    expect(titles).toEqual([
+      "State",
+      "Corpora",
+      "Session",
+      "Savings",
+      "Runtime",
+      "Health",
+    ]);
     const session = view.sections.find((section) => section.title === "Session");
     expect(session?.rows.map((row) => row.label)).toContain("skipped");
     const savings = view.sections.find((section) => section.title === "Savings");
@@ -613,6 +649,7 @@ describe("sidebarView", () => {
     const view = sidebarView(snapshot(), NOW, { ...all, savings: false, health: false });
 
     expect(view.sections.map((section) => section.title)).toEqual([
+      "State",
       "Corpora",
       "Session",
       "Runtime",

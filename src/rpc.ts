@@ -157,6 +157,77 @@ export interface DiskStatus {
   readonly logBytes: number;
 }
 
+/** One running job that keeps the service busy. */
+export interface JobStatus {
+  readonly kind: string;
+  readonly label: string;
+  readonly startedAt: number;
+}
+
+/**
+ * What the service is doing right now. Five states, one source: a node that
+ * answers while the indexer runs is ready to serve and busy doing work.
+ */
+export interface ServiceStateStatus {
+  readonly name: "starting" | "ready" | "busy" | "degraded" | "stopped";
+  /** Epoch milliseconds when this state began. */
+  readonly since: number;
+  readonly detail: string | null;
+  readonly jobs: ReadonlyArray<JobStatus>;
+  /** Time spent in each state today. */
+  readonly today: Readonly<{
+    startingMs: number;
+    readyMs: number;
+    busyMs: number;
+    degradedMs: number;
+    stoppedMs: number;
+  }>;
+}
+
+/** One operation type's figures over the report window. */
+export interface TelemetryOpStatus {
+  readonly op: string;
+  readonly count: number;
+  readonly errors: number;
+  readonly p50: number;
+  readonly p95: number;
+  readonly max: number;
+  readonly totalMs: number;
+}
+
+export interface TelemetryStartStatus {
+  readonly at: number;
+  readonly bootMs: number;
+  readonly readyMs: number | null;
+  readonly indexedMs: number | null;
+  readonly crashed: boolean;
+}
+
+export interface TelemetryProcessStatus {
+  readonly cpuPct: number | null;
+  readonly rssBytes: number | null;
+  readonly peakRssBytes: number;
+  readonly rssP50: number;
+  readonly rssP95: number;
+  readonly cpuBusy: number | null;
+  readonly cpuReady: number | null;
+  readonly growthMbPerDay: number;
+}
+
+/** Local telemetry, read from the plugin's own files. Never sent anywhere. */
+export interface TelemetryStatus {
+  readonly enabled: boolean;
+  readonly ops: ReadonlyArray<TelemetryOpStatus>;
+  readonly starts: ReadonlyArray<TelemetryStartStatus>;
+  readonly crashes: number;
+  readonly restarts: number;
+  readonly process: TelemetryProcessStatus | null;
+  readonly storeBytes: number;
+  readonly historyStart: string | null;
+  /** Why the store stopped recording, if it did. */
+  readonly disabled: string | null;
+}
+
 export interface StatusSnapshot {
   readonly pluginVersion: string;
   readonly updatedAt: number;
@@ -178,6 +249,10 @@ export interface StatusSnapshot {
   readonly process: ProcessStatus | null;
   /** True while an index pass is building embeddings. */
   readonly embeddings: boolean;
+  /** What the service is doing now, for the badge and the State section. */
+  readonly state: ServiceStateStatus;
+  /** Local operation, boot, and process figures. */
+  readonly telemetry: TelemetryStatus;
   readonly counters: CounterStatus;
   readonly recent: ReadonlyArray<string>;
   readonly warnings: ReadonlyArray<string>;
@@ -334,6 +409,83 @@ const definition = {
             error: { type: ["string", "null"] },
           }),
         },
+        state: object({
+          name: {
+            type: "string",
+            enum: ["starting", "ready", "busy", "degraded", "stopped"],
+          },
+          since: { type: "number" },
+          detail: { type: ["string", "null"] },
+          jobs: {
+            type: "array",
+            items: object({
+              kind: { type: "string" },
+              label: { type: "string" },
+              startedAt: { type: "number" },
+            }),
+          },
+          today: object({
+            startingMs: { type: "number" },
+            readyMs: { type: "number" },
+            busyMs: { type: "number" },
+            degradedMs: { type: "number" },
+            stoppedMs: { type: "number" },
+          }),
+        }),
+        telemetry: object({
+          enabled: { type: "boolean" },
+          ops: {
+            type: "array",
+            items: object({
+              op: { type: "string" },
+              count: { type: "number" },
+              errors: { type: "number" },
+              p50: { type: "number" },
+              p95: { type: "number" },
+              max: { type: "number" },
+              totalMs: { type: "number" },
+            }),
+          },
+          starts: {
+            type: "array",
+            items: object({
+              at: { type: "number" },
+              bootMs: { type: "number" },
+              readyMs: { type: ["number", "null"] },
+              indexedMs: { type: ["number", "null"] },
+              crashed: { type: "boolean" },
+            }),
+          },
+          crashes: { type: "number" },
+          restarts: { type: "number" },
+          process: {
+            type: ["object", "null"],
+            properties: {
+              cpuPct: { type: ["number", "null"] },
+              rssBytes: { type: ["number", "null"] },
+              peakRssBytes: { type: "number" },
+              rssP50: { type: "number" },
+              rssP95: { type: "number" },
+              cpuBusy: { type: ["number", "null"] },
+              cpuReady: { type: ["number", "null"] },
+              growthMbPerDay: { type: "number" },
+            },
+            required: [
+              "cpuPct",
+              "rssBytes",
+              "peakRssBytes",
+              "rssP50",
+              "rssP95",
+              "cpuBusy",
+              "cpuReady",
+              "growthMbPerDay",
+            ],
+            additionalProperties: false,
+          },
+          storeBytes: { type: "number" },
+          historyStart: { type: ["string", "null"] },
+          disabled: { type: ["string", "null"] },
+        }),
         counters: object({
           rpcCalls: { type: "number" },
           injectedTurns: { type: "number" },

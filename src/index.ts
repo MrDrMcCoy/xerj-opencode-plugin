@@ -2,6 +2,10 @@
 // and registers tools, hooks, and RPC. Nothing here blocks plugin load: a slow
 // download or a missing node must not delay OpenCode startup.
 
+// Boot clock first: every later import's cost belongs to this boot's timing.
+import { BOOT_AT, bootMs } from "./telemetry/boot-clock.ts";
+
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, stat, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
@@ -56,7 +60,7 @@ import {
   type DatasetStatus,
   type StatusSnapshot,
 } from "./rpc.ts";
-import { PrjdocsIndexer } from "./prjdocs/index.ts";
+import { PrjdocsIndexer, type PrjdocsSummary } from "./prjdocs/index.ts";
 import { LatestVersions } from "./prjdocs/latest.ts";
 import { SysdocIndexer } from "./sysdocs/index.ts";
 import { MemoryStore } from "./memory/store.ts";
@@ -91,6 +95,18 @@ import { formatAge } from "./ui/format.ts";
 import { Ledger } from "./stats/ledger.ts";
 import { Counters } from "./stats/counters.ts";
 import { AnomalyService } from "./telemetry/anomaly.ts";
+import {
+  BootTracker,
+  CrashKind,
+  noteNodeCrash,
+} from "./telemetry/lifecycle.ts";
+import { ProcessSampler, type SampleTarget } from "./telemetry/sampler.ts";
+import { JobRegistry, serviceState } from "./telemetry/state.ts";
+import {
+  TelemetryStore,
+  type TelemetryReport,
+} from "./telemetry/store.ts";
+import { JobKind, type OpType, type ServiceState } from "./telemetry/types.ts";
 import { buildTools } from "./tools/search.ts";
 
 interface Runtime {
@@ -134,6 +150,51 @@ export default Plugin.define({
       key: scopedStorageKey("log/ring", prefix, ctx.location.directory),
     });
     for (const warning of warnings) logger.warn(warning);
+
+    // Long jobs make the service busy; one registry means the badge, the load
+    // recorded on every operation, and the panel cannot disagree.
+    const jobs = new JobRegistry({
+      onStale: (job) =>
+        logger.warn("a telemetry job outlived its deadline", {
+          kind: job.kind,
+          label: job.label,
+        }),
+    });
+    // Local only: these files stay on this machine and nothing reads them over
+    // the network. An instance id keys this process's marker and rollup, so two
+    // plugin instances in one server never overwrite each other.
+    const instance = createHash("sha256")
+      .update(`${prefix}:${ctx.location.directory}:${process.pid}`)
+      .digest("hex")
+      .slice(0, 12);
+    const telemetry = new TelemetryStore({
+      directory: join(root, "telemetry"),
+      prefix,
+      instance,
+      enabled: config.telemetry.enabled,
+      maxBytes: config.telemetry.maxBytes,
+      samplesPerType: config.telemetry.samplesPerType,
+      rotateBytes: config.telemetry.rotateBytes,
+      rotations: config.telemetry.rotations,
+      flushMs: config.telemetry.flushMs,
+      maxText: config.telemetry.maxText,
+      logger,
+      bootMs,
+    });
+    telemetry.setLoadProvider(() => jobs.load);
+    telemetry.setJobsProvider(() => jobs.jobs());
+    await telemetry.init();
+
+    const boot = new BootTracker({
+      store: telemetry,
+      bootId: instance,
+      logger,
+      onCrashedBoot: () =>
+        logger.warn(
+          "the previous run ended without a clean shutdown; " +
+            "the next start will report it",
+        ),
+    });
 
     const overbroad = isOverbroadRoot(projectRoot);
     const indexWarnings = [...warnings];
@@ -195,6 +256,19 @@ export default Plugin.define({
       logger,
     });
 
+    /** One job per pass, so overlapping corpora keep the service busy. */
+    const busyHook = (kind: JobKind, label: string) => {
+      let end: (() => void) | null = null;
+      return (busy: boolean): void => {
+        if (busy) {
+          end = jobs.begin(kind, label);
+          return;
+        }
+        end?.();
+        end = null;
+      };
+    };
+
     const counters = new Counters();
     const observer = { onResponse: (status: number) => {
       if (status === 429) counters.note429();
@@ -206,12 +280,14 @@ export default Plugin.define({
       writeTimeoutMs: config.node.writeTimeoutMs,
     } as const;
 
-    const host = await detectRuntime({
-      libc: config.binary.libc,
-      target: config.binary.target,
-      timeoutMs: config.binary.detectTimeoutMs,
-      env: process.env,
-    });
+    const host = await telemetry.span("binary.detect", () =>
+      detectRuntime({
+        libc: config.binary.libc,
+        target: config.binary.target,
+        timeoutMs: config.binary.detectTimeoutMs,
+        env: process.env,
+      }),
+    );
     const info = host.info;
     if (!info && !config.binary.path) {
       runtime.phase = "disabled";
@@ -259,6 +335,107 @@ export default Plugin.define({
       return idle?.idleAt ?? null;
     };
 
+    // The current state and when it began; a transition is recorded even when
+    // it lasts a second, so the day's dwell split is not guesswork.
+    const stateNow: { name: ServiceState; since: number } = {
+      name: "starting",
+      since: Date.now(),
+    };
+
+    /** Maps the report store's shape onto the RPC status shape. */
+    const telemetryStatus = async (): Promise<StatusSnapshot["telemetry"]> => {
+      const empty = {
+        ops: [],
+        starts: [],
+        crashes: 0,
+        restarts: 0,
+        process: null,
+        storeBytes: 0,
+        historyStart: null,
+        disabled: telemetry.disabled,
+      };
+
+      if (!telemetry.enabled) return { enabled: false, ...empty };
+
+      const report = await telemetry.report({ window: "day", limit: 20 })
+        .catch(() => null);
+      if (report === null) return { enabled: true, ...empty };
+
+      return {
+        enabled: true,
+        ops: report.rows.map((row) => ({
+          op: row.op,
+          count: row.count,
+          errors: row.errors,
+          p50: row.p50,
+          p95: row.p95,
+          max: row.max,
+          totalMs: row.totalMs,
+        })),
+        starts: report.starts.map((start) => ({
+          at: start.at,
+          bootMs: start.bootMs,
+          readyMs: start.readyMs,
+          indexedMs: start.indexedMs,
+          crashed: start.crashed,
+        })),
+        crashes: report.crashes,
+        restarts: report.restarts,
+        process: report.process,
+        storeBytes: report.storeBytes,
+        historyStart: report.historyStart,
+        disabled: telemetry.disabled,
+      };
+    };
+
+    /**
+     * One source for the badge. Precedence lives in `serviceState`, so the
+     * sidebar, the panel, and the report read the same answer.
+     */
+    const stateStatus = (
+      corpora: ReadonlyArray<CorpusHealth>,
+      memoryExists: boolean,
+      nodePhase: "starting" | "ready" | "error" | "disabled",
+      nodeState: "stopped" | "starting" | "running" | "error",
+    ): StatusSnapshot["state"] => {
+      const active = jobs.jobs();
+      const result = serviceState({
+        nodePhase,
+        nodeState,
+        corpora: corpora.map((corpus) => ({
+          name: corpus.name,
+          state: corpus.state,
+          docs: corpus.docs,
+          records: corpus.records,
+          error: corpus.error,
+        })),
+        memoryExists,
+        jobs: active,
+      });
+
+      const now = Date.now();
+      if (result.name !== stateNow.name) {
+        const from = stateNow.name;
+        stateNow.name = result.name;
+        stateNow.since = now;
+        telemetry.noteState(from, result.name, now);
+      }
+
+      return {
+        name: result.name,
+        since: stateNow.since,
+        detail: result.detail,
+        jobs: active,
+        today: {
+          startingMs: telemetry.dwellFor("starting"),
+          readyMs: telemetry.dwellFor("ready"),
+          busyMs: telemetry.dwellFor("busy"),
+          degradedMs: telemetry.dwellFor("degraded"),
+          stoppedMs: telemetry.dwellFor("stopped"),
+        },
+      };
+    };
+
     const snapshot = async (): Promise<StatusSnapshot> => {
       const usage = ledger.snapshot();
       // Only probe the node directory when no live handle exists: a healthy
@@ -266,6 +443,11 @@ export default Plugin.define({
       // whether another OpenCode process has since started the node.
       const detection = runtime.node === null ? await runtime.nodes?.detect() : null;
       const runtimeState = runtime.nodes?.snapshot.state ?? "stopped";
+      const nodeState =
+        runtimeState === "stopped" && detection?.running
+          ? "running"
+          : runtimeState;
+      const baseCorpora = corpusHealth(runtime);
       const base: StatusSnapshot = {
         pluginVersion: PLUGIN_VERSION,
         updatedAt: Date.now(),
@@ -274,8 +456,7 @@ export default Plugin.define({
           baseUrl: runtime.node?.baseUrl ?? null,
           serverVersion: runtime.node?.version ?? null,
           spawned: runtime.node?.spawned ?? false,
-          state:
-            runtimeState === "stopped" && detection?.running ? "running" : runtimeState,
+          state: nodeState,
           pid: runtime.node?.pid ?? detection?.pid ?? null,
           idleAt: idleSnapshot(),
           sessions: runtime.lifecycle?.snapshot().sessions ?? 0,
@@ -318,7 +499,9 @@ export default Plugin.define({
         },
         memory: { namespace: memoryNs, count: 0, exists: false, stale: 0 },
         brains: brainStatus(runtime.brain, runtime.brains),
-        corpora: corpusHealth(runtime),
+        corpora: baseCorpora,
+        state: stateStatus(baseCorpora, false, runtime.phase, nodeState),
+        telemetry: await telemetryStatus(),
         // The engine data and the node log were invisible before: a project
         // could occupy gigabytes with only document counts to show for it.
         disk: {
@@ -411,6 +594,12 @@ export default Plugin.define({
         return {
           ...base,
           corpora,
+          state: stateStatus(
+            corpora,
+            memoryExists(summary, datasets),
+            runtime.phase,
+            nodeState,
+          ),
           map,
           frameworks,
           process: usageNow === null ? null : { cpuPercent: usageNow.cpuPercent, memoryBytes: usageNow.memoryBytes },
@@ -440,7 +629,16 @@ export default Plugin.define({
           },
         };
       } catch (error) {
-        return { ...base, errors: [...base.errors, String(error)] };
+        return {
+          ...base,
+          state: stateStatus(
+            base.corpora,
+            base.memory.exists,
+            runtime.phase,
+            nodeState,
+          ),
+          errors: [...base.errors, String(error)],
+        };
       }
     };
 
@@ -586,8 +784,8 @@ export default Plugin.define({
         runtime.hidden?.reindex(),
       ]);
       void runtime.brain?.runAll();
-      void runCommits();
-      void runArchive();
+      void runCommitsJob();
+      void runArchiveJob();
       // The pass ran before this returns, so the caller can report real
       // completion instead of a queue-only toast.
       const status = corpusStatus(runtime.corpus);
@@ -637,7 +835,36 @@ export default Plugin.define({
         return summary;
     };
 
-    const registration = await ctx.rpc.register(XerjRpc, {
+    /** One busy job and one telemetry span around a slow, on-demand run. */
+    const asJob = <T>(
+      kind: JobKind,
+      label: string,
+      op: OpType,
+      body: () => Promise<T>,
+    ): Promise<T> => {
+      const end = jobs.begin(kind, label);
+      return telemetry.span(op, body).finally(end);
+    };
+
+    const runPrjdocsJob = (input: unknown): Promise<PrjdocsSummary> =>
+      asJob(JobKind.Prjdocs, "project docs", "index.prjdocs", () =>
+        runPrjdocs(input),
+      );
+
+    const runSysdocsJob = () =>
+      asJob(JobKind.Sysdocs, "system docs", "index.sysdocs", () =>
+        runSysdocs(),
+      );
+
+    const runCommitsJob = () =>
+      asJob(JobKind.Git, "git history", "index.git", () => runCommits());
+
+    const runArchiveJob = () =>
+      asJob(JobKind.Archive, "turn archive", "index.archive", () =>
+        runArchive(),
+      );
+
+    const handlers = {
       status: async () => {
         counters.noteRpc();
         runtime.lifecycle?.touch();
@@ -646,7 +873,7 @@ export default Plugin.define({
       prjdocs: async (input: unknown) => {
         counters.noteRpc();
         runtime.lifecycle?.touch();
-        return runPrjdocs(input).catch((error: unknown) => {
+        return runPrjdocsJob(input).catch((error: unknown) => {
           logger.warn("project docs failed", errorText(error));
           throw error;
         });
@@ -656,7 +883,7 @@ export default Plugin.define({
         runtime.lifecycle?.touch();
         // A command that fails in another project has to leave a trace: the
         // toast is the user's only other view of it.
-        return runSysdocs().catch((error: unknown) => {
+        return runSysdocsJob().catch((error: unknown) => {
           logger.warn("system docs failed", errorText(error));
           throw error;
         });
@@ -669,14 +896,14 @@ export default Plugin.define({
           throw error;
         });
       },
-      remember: async (input) => {
+      remember: async (input: unknown) => {
         counters.noteRpc();
         runtime.lifecycle?.touch();
         if (!runtime.memory) throw new Error("XERJ memory is not available yet");
         const args = input as { text: string };
         return runtime.memory.remember({ text: args.text });
       },
-      search: async (input) => {
+      search: async (input: unknown) => {
         counters.noteRpc();
         runtime.lifecycle?.touch();
         if (!runtime.search) throw new Error("XERJ search is not available yet");
@@ -686,7 +913,7 @@ export default Plugin.define({
       },
       // Compaction belongs to the host; this only asks for it now instead of
       // waiting for the harness to decide. Nothing is rewritten here.
-      wrapup: async (input) => {
+      wrapup: async (input: unknown) => {
         counters.noteRpc();
         runtime.lifecycle?.touch();
         const args = input as { sessionID?: string };
@@ -704,7 +931,22 @@ export default Plugin.define({
           return { compacted: false, sessionID, detail };
         }
       },
-    });
+    };
+
+    // Every registered method is timed without touching its body, so a method
+    // added later is measured for free. The cast is the RPC boundary.
+    const registration = await ctx.rpc.register(
+      XerjRpc,
+      Object.fromEntries(
+        Object.entries(handlers).map(([name, handler]) => [
+          name,
+          (input: unknown) =>
+            telemetry.span(`rpc.${name}` as OpType, () =>
+              (handler as (value: unknown) => Promise<unknown>)(input),
+            ),
+        ]),
+      ) as never,
+    );
 
     const summarize = async (): Promise<string> => {
       const status = await snapshot();
@@ -761,7 +1003,7 @@ export default Plugin.define({
         input: { type: "object", properties: {}, additionalProperties: false },
         options: { namespace: "xerj" },
         execute: async () => {
-          const summary = await runSysdocs();
+          const summary = await runSysdocsJob();
           return {
             content:
               `system docs: ${summary.indexed} indexed, ${summary.skipped} unchanged, ` +
@@ -792,7 +1034,7 @@ export default Plugin.define({
           additionalProperties: false,
         },
         execute: async (input: unknown) => {
-          const summary = await runPrjdocs(input);
+          const summary = await runPrjdocsJob(input);
           return {
             content:
               `project docs: ${summary.indexed} indexed, ${summary.skipped} unchanged, ` +
@@ -801,26 +1043,99 @@ export default Plugin.define({
           };
         },
       },
+      {
+        name: "telemetry",
+        description:
+          "Report this plugin's local operation timings, boot phases, " +
+          "crashes, service state, and CPU/RSS. The files are local only " +
+          "and are never sent anywhere.",
+        input: {
+          type: "object",
+          properties: {
+            op: {
+              type: "string",
+              description:
+                "An operation type, a prefix such as `tool.`, or omitted " +
+                "for all.",
+            },
+            window: {
+              type: "string",
+              enum: ["session", "day", "all"],
+              description: "Session, today, or all history. Defaults to today.",
+            },
+            sort: {
+              type: "string",
+              enum: ["count", "p95", "total", "errors"],
+              description: "Row order. Defaults to count.",
+            },
+            limit: {
+              type: "number",
+              description: "Rows to return; 20 by default.",
+            },
+          },
+          additionalProperties: false,
+        },
+        options: { namespace: "xerj" },
+        execute: async (input: unknown) => {
+          const args = (input ?? {}) as {
+            op?: string;
+            window?: "session" | "day" | "all";
+            sort?: "count" | "p95" | "total" | "errors";
+            limit?: number;
+          };
+          const report = await telemetry.report({
+            op: args.op,
+            window: args.window ?? "day",
+            sort: args.sort ?? "count",
+            limit: Math.max(1, Math.min(args.limit ?? 20, 200)),
+          });
+          return {
+            content: formatReport(report),
+            metadata: {
+              xerj: {
+                rows: report.rows.length,
+                crashes: report.crashes,
+              },
+            },
+          };
+        },
+      },
     ];
+
+    // Every tool is timed at registration, so a tool added later needs no
+    // instrumentation of its own and a slow one shows up in the report.
+    const measured = [...tools, ...docsTools].map((tool) => ({
+      ...tool,
+      execute: (input: unknown) =>
+        telemetry.span(
+          `tool.${tool.name}` as OpType,
+          () => (tool.execute as (value: unknown) => Promise<unknown>)(input),
+          (result) => (typeof result === "object" && result !== null
+            ? { bytes: Buffer.byteLength(JSON.stringify(result), "utf8") }
+            : undefined),
+        ),
+    }));
 
     await ctx.tool.transform((editor) => {
       editor.namespace({
         name: "xerj",
         description: "Local XERJ search over this project. Prefer it to reading whole files.",
       });
-      for (const tool of [...tools, ...docsTools]) editor.add(tool as never);
+      for (const tool of measured) editor.add(tool as never);
     });
 
     await ctx.tool.hook("execute.after", (event) =>
-      handleToolResult(event as ToolResultEvent, {
-        projectRoot,
-        logger,
-        spool: runtime.spool,
-        invalidate: () => runtime.search?.invalidate(),
-        touch: (sessionID) => runtime.lifecycle?.touch(sessionID),
-        recordRead: (sessionID, path, bytes) =>
-          ledger.recordRead(sessionID, path, bytes),
-      }),
+      telemetry.span("hook.tool", () =>
+        handleToolResult(event as ToolResultEvent, {
+          projectRoot,
+          logger,
+          spool: runtime.spool,
+          invalidate: () => runtime.search?.invalidate(),
+          touch: (sessionID) => runtime.lifecycle?.touch(sessionID),
+          recordRead: (sessionID, path, bytes) =>
+            ledger.recordRead(sessionID, path, bytes),
+        }),
+      ),
     );
 
     // Prompts this instance saw; scopes the server-wide event stream to this
@@ -835,7 +1150,11 @@ export default Plugin.define({
       getMemory: () => runtime.memory,
       summarize,
       onActivity: (sessionID) => runtime.lifecycle?.touch(sessionID),
-      onInject: () => counters.noteInjection(),
+      measure: (op, body) => telemetry.span(op, body),
+      onInject: () => {
+        counters.noteInjection();
+        telemetry.record("inject", 0, true);
+      },
       onNoiseSkip: () => counters.noteNoiseSkip(),
       onCost: (_sessionID, bytes) => void ledger.recordInjection(bytes),
       onPrompt: (sessionID, text) => prompts.note(sessionID, text),
@@ -922,14 +1241,23 @@ export default Plugin.define({
         logger,
         priority: config.node.priority,
         cpus: config.node.cpus,
-        onRun: () => counters.noteIndexRun(),
+        label: "indexing",
+        onRun: (run) => {
+          counters.noteIndexRun();
+          void boot.indexed({ corpus: "project", records: run.records ?? 0 });
+        },
+        onBusy: busyHook(JobKind.Index, "indexing"),
+        onCrash: (uptimeMs) => {
+          void boot.crash(CrashKind.Watcher, uptimeMs, { corpus: "project" });
+          void boot.restart("crash", 0, { reason: "watcher" });
+        },
         onChange: publishChange,
       });
       await runtime.corpus.start();
       // History and the turn archive are small and independent of the project
       // corpus, so they start after it and never delay it.
-      void runCommits();
-      void runArchive();
+      void runCommitsJob();
+      void runArchiveJob();
     };
 
     const startWebIndexer = async (handle: NodeHandle): Promise<void> => {
@@ -946,7 +1274,16 @@ export default Plugin.define({
         logger,
         priority: config.node.priority,
         cpus: config.node.cpus,
-        onRun: () => counters.noteIndexRun(),
+        label: "web index",
+        onRun: (run) => {
+          counters.noteIndexRun();
+          void boot.indexed({ corpus: "web", records: run.records ?? 0 });
+        },
+        onBusy: busyHook(JobKind.Web, "web index"),
+        onCrash: (uptimeMs) => {
+          void boot.crash(CrashKind.Watcher, uptimeMs, { corpus: "web" });
+          void boot.restart("crash", 0, { reason: "watcher" });
+        },
         onChange: publishChange,
       });
       await runtime.web.start();
@@ -964,10 +1301,20 @@ export default Plugin.define({
         roots: runtime.hiddenRoots,
         maxBytes: config.index.hiddenMaxBytes,
         logger,
-        onRun: () => counters.noteIndexRun(),
+        onRun: () => {
+          counters.noteIndexRun();
+          void boot.indexed({ corpus: "hidden" });
+        },
         onChange: publishChange,
       });
-      if (config.index.auto && !overbroad) await runtime.hidden.start();
+      if (config.index.auto && !overbroad) {
+        const end = jobs.begin(JobKind.Hidden, "hidden docs");
+        try {
+          await runtime.hidden.start();
+        } finally {
+          end();
+        }
+      }
     };
 
     const startBrainIndexer = (handle: NodeHandle): void => {
@@ -983,13 +1330,19 @@ export default Plugin.define({
         priority: config.node.priority,
         cpus: config.node.cpus,
         observer,
-        onRun: () => counters.noteIndexRun(),
+        onRun: () => {
+          counters.noteIndexRun();
+          void boot.indexed({ corpus: "brain" });
+        },
         onChange: publishChange,
       });
 
       // One-shot: graph indexing cannot run in watch mode. `index.auto` gates
       // startup runs only; an explicit reindex still works.
-      if (config.index.auto) void runtime.brain.runAll();
+      if (config.index.auto) {
+        const end = jobs.begin(JobKind.Brain, "brain index");
+        void runtime.brain.runAll().finally(end);
+      }
     };
 
     /** Starts the indexers for a live node; idempotent per node lifetime. */
@@ -1047,6 +1400,13 @@ export default Plugin.define({
         // A start counts as activity; otherwise an immediate idle check would
         // shut down a node that was just brought up for a request.
         runtime.lifecycle?.touch();
+        telemetry.record(
+          handle.spawned ? "node.spawn" : "node.attach",
+          0,
+          true,
+          { port: handle.port },
+        );
+        void boot.ready({ port: handle.port, spawned: handle.spawned });
         void startIndexers(handle);
       },
     });
@@ -1064,12 +1424,34 @@ export default Plugin.define({
 
         await stopIndexers();
         await nodes.stop("idle");
+        void boot.restart("idle", 0);
         await registration.events
           .emit("updated", { updatedAt: Date.now() })
           .catch(() => {});
       },
     });
     runtime.lifecycle = lifecycle;
+
+    // CPU and RSS of each XERJ process. The first sample of a pid has a null
+    // CPU share because there is no earlier tick count to subtract.
+    const sampler = new ProcessSampler({
+      store: telemetry,
+      logger,
+      intervalMs: config.telemetry.sampleMs,
+      targets: () => {
+        const targets: SampleTarget[] = [];
+        const nodePid = runtime.node?.pid ?? null;
+        if (nodePid !== null) targets.push({ kind: "node", pid: nodePid });
+        const projectPid = runtime.corpus?.pid ?? null;
+        if (projectPid !== null) {
+          targets.push({ kind: "watcher", pid: projectPid });
+        }
+        const webPid = runtime.web?.pid ?? null;
+        if (webPid !== null) targets.push({ kind: "index", pid: webPid });
+        return targets;
+      },
+      load: () => jobs.load,
+    });
 
     // The startup sequence is long because each step depends on the one above
     // it owning something (a node, a spool, a journal). Each step is named here
@@ -1190,22 +1572,24 @@ export default Plugin.define({
         commandMs: config.binary.commandTimeoutMs,
         requestMs: config.binary.requestTimeoutMs,
       };
-      const binary = config.binary.path
-        ? await externalBinary(
-            config.binary.path,
-            logger,
-            config.binary.commandTimeoutMs,
-          )
-        : info
-          ? await ensureBinary({
-              root,
-              requested: config.binary.version,
-              platform: process.platform,
-              info,
+      const binary = await telemetry.span("binary.install", async () =>
+        config.binary.path
+          ? await externalBinary(
+              config.binary.path,
               logger,
-              timeouts: binaryTimeouts,
-            })
-          : null;
+              config.binary.commandTimeoutMs,
+            )
+          : info
+            ? await ensureBinary({
+                root,
+                requested: config.binary.version,
+                platform: process.platform,
+                info,
+                logger,
+                timeouts: binaryTimeouts,
+              })
+            : null,
+      );
       if (!binary) return;
       runtime.binary = binary;
 
@@ -1344,7 +1728,15 @@ export default Plugin.define({
       await startRemoteSpool(client);
       await migrateMemory();
 
-      runtime.node = await nodes.ensure();
+      // A pidfile whose process is gone is the only evidence a detached node
+      // died; record it once before the next start overwrites the pidfile.
+      await noteNodeCrash(telemetry, nodeDir, logger);
+      const endSpawn = jobs.begin(JobKind.Spawn, "starting the node");
+      try {
+        runtime.node = await nodes.ensure();
+      } finally {
+        endSpawn();
+      }
       await repairMemory(client);
       await startIndexers(runtime.node);
 
@@ -1374,6 +1766,11 @@ export default Plugin.define({
       }
     };
 
+    // Record this boot after tools, hooks, and RPC exist, so a failure here
+    // cannot block load, and a crash during bootstrap is attributed correctly.
+    void boot.start({ phase: "setup", bootAt: BOOT_AT });
+    sampler.start();
+
     void bootstrap();
 
     return () => {
@@ -1383,6 +1780,7 @@ export default Plugin.define({
         try {
           await runtime.lifecycle?.stop();
           await stopIndexers();
+          sampler.stop();
 
           // This process's sessions are over. Stop the node only when no peer
           // process is still serving the project; otherwise its own idle timer
@@ -1391,8 +1789,10 @@ export default Plugin.define({
           if (peers === 0) await runtime.nodes?.stop("shutdown");
 
           await ledger.flush();
+          await boot.shutdown();
           await logger.flush();
           await registration.dispose();
+          await telemetry.close();
         } catch {
           // Shutdown must never throw into the host.
         }
@@ -1470,6 +1870,61 @@ async function recordKinds(
       docs: typeof bucket.doc_count === "number" ? bucket.doc_count : 0,
     }))
     .sort((left, right) => right.docs - left.docs);
+}
+
+/**
+ * Whether the memory index exists. The node's own count is authoritative; the
+ * dataset listing is the fallback when that request failed.
+ */
+function memoryExists(
+  summary: { readonly exists: boolean } | null,
+  datasets: ReadonlyArray<DatasetStatus>,
+): boolean {
+  if (summary !== null) return summary.exists;
+  return datasets.some((dataset) => dataset.name === "memory");
+}
+
+/** The report as plain lines: no JSON, no prompt text, no file bodies. */
+function formatReport(report: TelemetryReport): string {
+  const duration = (ms: number): string =>
+    ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
+  const states = report.states;
+  const last = report.starts[0] ?? null;
+
+  return [
+    `operations (${report.rows.length} types)`,
+    ...report.rows.map(
+      (row) =>
+        `  ${row.op}  ${row.count}x · p50 ${duration(row.p50)} · ` +
+        `p95 ${duration(row.p95)} · max ${duration(row.max)} · ` +
+        `idle ${duration(row.idleP50)} · busy ${duration(row.busyP50)}` +
+        (row.errors > 0 ? ` · ${row.errors} errors` : ""),
+    ),
+    last === null
+      ? "no boot recorded yet"
+      : `last boot: setup ${duration(last.bootMs)}` +
+        (last.readyMs === null ? "" : ` · ready ${duration(last.readyMs)}`) +
+        (last.indexedMs === null
+          ? ""
+          : ` · indexed ${duration(last.indexedMs)}`) +
+        (last.crashed ? " · previous run crashed" : ""),
+    `crashes ${report.crashes} · restarts ${report.restarts} · ` +
+      `store ${Math.round(report.storeBytes / 1024)} KiB` +
+      (report.historyStart === null ? "" : ` · since ${report.historyStart}`),
+    `today: starting ${duration(states.startingMs)} · ` +
+      `ready ${duration(states.readyMs)} · ` +
+      `busy ${duration(states.busyMs)} · ` +
+      `degraded ${duration(states.degradedMs)} · ` +
+      `stopped ${duration(states.stoppedMs)}`,
+    report.process === null
+      ? "no CPU or RSS samples yet"
+      : `process: ${report.process.cpuPct ?? 0}% cpu · ` +
+        `${Math.round((report.process.rssBytes ?? 0) / (1024 * 1024))} MB ` +
+        `rss · peak ` +
+        `${Math.round(report.process.peakRssBytes / (1024 * 1024))} MB · ` +
+        `growth ${report.process.growthMbPerDay} MB/day`,
+    "local only · never sent",
+  ].join("\n");
 }
 
 /** One line of an error, for the log ring. */

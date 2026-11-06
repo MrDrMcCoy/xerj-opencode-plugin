@@ -256,7 +256,15 @@ This is the complete set with its defaults, in
           "maxBaselineBytes": 131072     // 128 KiB
         },
         "telemetry": {
-          "anomaly": false
+          "anomaly": false,             // reserved; on-demand tool only
+          "enabled": true,              // local files only; never sent
+          "maxBytes": 134217728,        // 128 MiB for the whole directory
+          "samplesPerType": 256,        // ring length per operation type
+          "rotateBytes": 8388608,       // 8 MiB before ops.ndjson rotates
+          "rotations": 4,               // rotated operation files kept
+          "flushMs": 5000,              // queue drain period
+          "sampleMs": 15000,            // CPU and RSS period; 0 disables
+          "maxText": 160                // caller text characters; 0 none
         }
       }
     }
@@ -329,7 +337,19 @@ The same entry works with a checkout path instead of the package name; see
 | `context.rehydrateTokens` | Ceiling for the post-compaction recall, in tokens; 0 disables it. |
 | `memory.captureTurns` | Store each substantive turn's final answer (400+ characters) as a `summary` memory, paired with its prompt. Needs `context.enabled`, which records the prompts. |
 | `stats.maxBaselineBytes` | Cap on the baseline credited per cited file. |
-| `telemetry.anomaly` | Reserved; background telemetry is not implemented. |
+| `telemetry.anomaly` | Reserved; on-demand anomaly scoring only. |
+| `telemetry.enabled` | Record local operation, boot, crash, and process figures. The files stay on this machine and are never sent anywhere. |
+| `telemetry.maxBytes` | Cap for the whole telemetry directory. |
+| `telemetry.samplesPerType` | Samples kept per operation type. |
+| `telemetry.rotateBytes` | Size at which `ops.ndjson` rotates. |
+| `telemetry.rotations` | Rotated operation files kept. |
+| `telemetry.flushMs` | How often the in-memory queue drains to disk. |
+| `telemetry.sampleMs` | CPU and RSS sample period; `0` disables sampling. |
+| `telemetry.maxText` | Characters of caller text kept in a record; `0` records none. |
+
+### Local telemetry
+
+The plugin measures its own cost. Every operation, boot phase, crash, restart, service-state transition, and CPU/RSS sample goes into bounded NDJSON files under `/telemetry` at the XERJ data root. The files are local to this machine, the plugin has no network path for them, and `telemetry.enabled: false` leaves no trace. `xerj_telemetry` reports operation counts, p50 and p95 split by idle and busy, the last ten boots with setup, ready, and indexed figures, crash and restart counts, the day's dwell split, and each XERJ process's CPU and RSS. The sidebar badge distinguishes `ready` from `busy` from `degraded` from `starting` from `stopped`.
 
 ## Tools
 
@@ -719,7 +739,11 @@ spawns a command over stdio works the same way; point it at `xerj-mcp`.
 | `--url <node url>` | Attach to a running node instead of spawning one. |
 | `--help`, `-h` | Print usage on stderr and exit. |
 
-### Tools
+#### Local telemetry
+
+The plugin measures its own cost. Every operation, boot phase, crash, restart, service-state transition, and CPU/RSS sample goes into bounded NDJSON files under `/telemetry` at the XERJ data root. The files are local to this machine, the plugin has no network path for them, and `telemetry.enabled: false` leaves no trace. `xerj_telemetry` reports operation counts, p50 and p95 split by idle and busy, the last ten boots with setup, ready, and indexed figures, crash and restart counts, the day's dwell split, and each XERJ process's CPU and RSS. The sidebar badge distinguishes `ready` from `busy` from `degraded` from `starting` from `stopped`.
+
+## Tools
 
 The MCP server exposes twelve tools, the same set the OpenCode plugin
 registers, so a prompt written for one works in the other:

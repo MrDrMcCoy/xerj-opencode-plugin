@@ -198,6 +198,22 @@ export interface StatsOptions {
 
 export interface TelemetryOptions {
   readonly anomaly: boolean;
+  /** Local operation records; nothing is ever sent anywhere. */
+  readonly enabled: boolean;
+  /** Cap for the whole telemetry directory, in bytes. */
+  readonly maxBytes: number;
+  /** Samples kept per operation type. */
+  readonly samplesPerType: number;
+  /** Size at which `ops.ndjson` rotates. */
+  readonly rotateBytes: number;
+  /** Rotated operation files kept. */
+  readonly rotations: number;
+  /** Queue drain period. */
+  readonly flushMs: number;
+  /** CPU and RSS sample period; 0 disables sampling. */
+  readonly sampleMs: number;
+  /** Characters of caller text kept; 0 records none. */
+  readonly maxText: number;
 }
 
 export interface StorageOptions {
@@ -308,7 +324,17 @@ export const DEFAULT_CONFIG: Config = {
     retain: { days: 0, maxCount: 0, maxBytes: 2 * 1024 ** 3 },
   },
   stats: { enabled: true, bytesPerToken: 4, maxBaselineBytes: 128 * 1024 },
-  telemetry: { anomaly: false },
+  telemetry: {
+    anomaly: false,
+    enabled: true,
+    maxBytes: 128 * 1024 ** 2,
+    samplesPerType: 256,
+    rotateBytes: 8 * 1024 ** 2,
+    rotations: 4,
+    flushMs: 5_000,
+    sampleMs: 15_000,
+    maxText: 160,
+  },
 };
 
 type Raw = Record<string, unknown>;
@@ -787,6 +813,68 @@ export function loadConfig(
         telemetry.anomaly,
         DEFAULT_CONFIG.telemetry.anomaly,
         "telemetry.anomaly",
+        warnings,
+      ),
+      enabled: readBoolean(
+        telemetry.enabled,
+        DEFAULT_CONFIG.telemetry.enabled,
+        "telemetry.enabled",
+        warnings,
+      ),
+      maxBytes: readInteger(
+        telemetry.maxBytes,
+        DEFAULT_CONFIG.telemetry.maxBytes,
+        0,
+        10_000_000_000,
+        "telemetry.maxBytes",
+        warnings,
+      ),
+      samplesPerType: readInteger(
+        telemetry.samplesPerType,
+        DEFAULT_CONFIG.telemetry.samplesPerType,
+        8,
+        10_000,
+        "telemetry.samplesPerType",
+        warnings,
+      ),
+      rotateBytes: readInteger(
+        telemetry.rotateBytes,
+        DEFAULT_CONFIG.telemetry.rotateBytes,
+        65_536,
+        10_000_000_000,
+        "telemetry.rotateBytes",
+        warnings,
+      ),
+      rotations: readInteger(
+        telemetry.rotations,
+        DEFAULT_CONFIG.telemetry.rotations,
+        1,
+        20,
+        "telemetry.rotations",
+        warnings,
+      ),
+      flushMs: readInteger(
+        telemetry.flushMs,
+        DEFAULT_CONFIG.telemetry.flushMs,
+        100,
+        60_000,
+        "telemetry.flushMs",
+        warnings,
+      ),
+      sampleMs: readInteger(
+        telemetry.sampleMs,
+        DEFAULT_CONFIG.telemetry.sampleMs,
+        0,
+        3_600_000,
+        "telemetry.sampleMs",
+        warnings,
+      ),
+      maxText: readInteger(
+        telemetry.maxText,
+        DEFAULT_CONFIG.telemetry.maxText,
+        0,
+        4_096,
+        "telemetry.maxText",
         warnings,
       ),
     },

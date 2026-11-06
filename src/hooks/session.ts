@@ -25,6 +25,11 @@ export interface SessionHookOptions {
   readonly getSearch: () => SearchService | null;
   readonly getMemory: () => MemoryStore | null;
   readonly summarize: () => Promise<string>;
+  /** Times one retrieval leg; omitted leaves the pass unmeasured. */
+  readonly measure?: <T>(
+    op: "retrieve" | "recall" | "hint" | "hook.prompt" | "hook.context",
+    body: () => Promise<T>,
+  ) => Promise<T>;
   readonly onInject?: () => void;
   /**
    * Reports bytes the plugin placed into context beyond the passages already
@@ -142,6 +147,12 @@ export async function registerSessionHooks(
 
   // Every per-session record is bounded: a server can run for days and see
   // thousands of sessions, so nothing here may grow without limit.
+  const measure = <T>(
+    op: "retrieve" | "recall" | "hint" | "hook.prompt" | "hook.context",
+    body: () => Promise<T>,
+  ): Promise<T> =>
+    options.measure === undefined ? body() : options.measure(op, body);
+
   const prepared = new Map<string, Prepared>();
   const lastInjected = new Map<string, string>();
   const memoriesShown = new Map<string, Set<string>>();
@@ -168,18 +179,24 @@ export async function registerSessionHooks(
 
     try {
       const already = seen.get(event.sessionID);
-      const result = await retrieve(search, text, options, (hit) =>
-        already?.has(locationKey(hit)) ?? false,
+      const result = await measure("retrieve", () =>
+        retrieve(search, text, options, (hit) =>
+          already?.has(locationKey(hit)) ?? false,
+        ),
       );
       const paths = result.hits.flatMap((hit) => (hit.path ? [hit.path] : []));
       await options.recordQuery(event.sessionID, paths, result.bytes, result.hits.length);
 
       const shown = memoriesShown.get(event.sessionID) ?? new Set<string>();
-      const memory = await recallMemories(text, options, shown);
+      const memory = await measure("recall", () =>
+        recallMemories(text, options, shown),
+      );
       if (memory.length > 0) forgetOldest(memoriesShown, event.sessionID, shown);
 
       if (result.hits.length === 0 && memory.length === 0) {
-        const hint = await retrieveHint(search, text, options, already);
+        const hint = await measure("hint", () =>
+          retrieveHint(search, text, options, already),
+        );
         if (hint === null) {
           options.onNoiseSkip?.();
           return;
