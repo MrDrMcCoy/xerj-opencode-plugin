@@ -734,6 +734,12 @@ be honoured on every call:
   not survive a restart either.
 - Surface the failure text in the sidebar and in the empty panel. A fixed
   "not loaded" line hid the real reason for both faults above.
+- Declare an input property as optional in `src/rpc.ts` when a caller may omit
+  it. The host validates the call against that schema before the handler runs:
+  a required key the TUI does not send fails with `rpc.invalid_input`, which is
+  logged nowhere and looks like a broken command. `test/unit/rpc-inputs.test.ts`
+  pins the exact payloads the TUI sends, and the TUI's stub client validates
+  every call against the definition.
 
 ## 12. Telemetry and anomaly detection
 
