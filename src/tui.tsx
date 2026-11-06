@@ -165,7 +165,7 @@ export default Plugin.define({
         });
       } catch (error) {
         context.ui.toast.show({
-          message: `XERJ is not available: ${describe(error)}`,
+          message: `XERJ wrapup failed: ${describe(error)}`,
           variant: "error",
         });
       }
@@ -616,8 +616,15 @@ function statusText(
 
 // Short, single-line failure reason for the sidebar and the empty panel.
 function describe(error: unknown): string {
-  const text = error instanceof Error ? error.message : String(error);
-  const first = text.split("\n")[0]?.trim();
+  // The RPC client rejects with a plain `{ type, message }` object, not an
+  // `Error`, so both shapes have to be read.
+  const raw =
+    error instanceof Error
+      ? error.message
+      : typeof error === "object" && error !== null && "message" in error
+        ? String((error as { message: unknown }).message)
+        : String(error);
+  const first = raw.split("\n")[0]?.trim();
   if (!first) return "the XERJ server part did not answer";
   return first.length > 72 ? `${first.slice(0, 71)}…` : first;
 }

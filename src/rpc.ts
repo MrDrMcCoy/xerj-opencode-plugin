@@ -187,17 +187,28 @@ export interface StatusSnapshot {
 type ValueSchema = Rpc.PortableValueSchema;
 type EventSchema = Rpc.PortableEventDefinition["schema"];
 
-function object(properties: Record<string, unknown>): Record<string, unknown> {
+/**
+ * An object schema. Every property is required unless it is named as optional:
+ * the host validates the call against this, and a required key that a caller
+ * has no way to know about fails the call before the handler runs.
+ */
+function object(
+  properties: Record<string, unknown>,
+  optional: ReadonlyArray<string> = [],
+): Record<string, unknown> {
   return {
     type: "object",
     properties,
-    required: Object.keys(properties),
+    required: Object.keys(properties).filter((key) => !optional.includes(key)),
     additionalProperties: false,
   };
 }
 
-function valueSchema(properties: Record<string, unknown>): ValueSchema {
-  return object(properties) as unknown as ValueSchema;
+function valueSchema(
+  properties: Record<string, unknown>,
+  optional: ReadonlyArray<string> = [],
+): ValueSchema {
+  return object(properties, optional) as unknown as ValueSchema;
 }
 
 function eventSchema(properties: Record<string, unknown>): EventSchema {
@@ -344,7 +355,7 @@ const definition = {
       }),
     },
     wrapup: {
-      input: valueSchema({ sessionID: { type: "string" } }),
+      input: valueSchema({ sessionID: { type: "string" } }, ["sessionID"]),
       output: valueSchema({
         compacted: { type: "boolean" },
         sessionID: { type: ["string", "null"] },
@@ -352,10 +363,13 @@ const definition = {
       }),
     },
     prjdocs: {
-      input: valueSchema({
-        eager: { type: "boolean" },
-        keywords: { type: "array", items: { type: "string" } },
-      }),
+      input: valueSchema(
+        {
+          eager: { type: "boolean" },
+          keywords: { type: "array", items: { type: "string" } },
+        },
+        ["eager", "keywords"],
+      ),
       output: valueSchema({
         techs: { type: "array", items: { type: "string" } },
         targets: { type: "number" },

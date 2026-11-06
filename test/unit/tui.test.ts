@@ -2,6 +2,8 @@
 // location, so this drives the real plugin against a stub host and asserts the
 // properties a live terminal cannot show in a test.
 import { describe, expect, test } from "bun:test";
+import { XerjRpc } from "../../src/rpc.ts";
+import { validate, type Schema } from "./rpc-schema.ts";
 import TuiPlugin from "../../src/tui.tsx";
 import type { StatusSnapshot } from "../../src/rpc.ts";
 
@@ -108,6 +110,7 @@ interface Host {
   setSearch(handler: () => Promise<unknown>): void;
   setSysdocs(handler: () => Promise<unknown>): void;
   setPrjdocs(handler: () => Promise<unknown>): void;
+  setWrapup(handler: () => Promise<unknown>): void;
   setDialogAnswer(answer: string): void;
   setPanelOpenResult(opens: boolean): void;
   readonly slots: Array<{ append: string; render: (input?: Record<string, unknown>) => unknown }>;
@@ -143,6 +146,7 @@ function makeHost(): Host {
     bytes: 0,
     unsupported: [],
   });
+  let wrapup = async (): Promise<unknown> => ({ compacted: true, sessionID: "ses_1" });
   let sysdocs = async (): Promise<unknown> => ({
     discovered: 400,
     indexed: 12,
@@ -155,32 +159,43 @@ function makeHost(): Host {
 
   const rpc = () => {
     const tag = generation;
-    const record = (method: string, options?: CallOptions): void => {
+    // The host validates every call against the declared schema, so the stub
+    // does too: a payload the TUI cannot send fails here, not in production.
+    const record = (method: string, options?: CallOptions, input?: unknown): void => {
       calls.push({ method: `${method}#${tag}`, options: options ?? {} });
+      const schema = XerjRpc.methods[method as keyof typeof XerjRpc.methods].input as Schema;
+      const problems = validate(schema, input ?? {});
+      if (problems.length > 0) {
+        throw new Error(`${method} input is invalid: ${problems.join(", ")}`);
+      }
     };
     return {
       status: async (_input: unknown, options?: CallOptions) => {
-        record("status", options);
+        record("status", options, _input);
         return status();
       },
       reindex: async (_input: unknown, options?: CallOptions) => {
-        record("reindex", options);
+        record("reindex", options, _input);
         return reindex();
       },
       remember: async (_input: unknown, options?: CallOptions) => {
-        record("remember", options);
+        record("remember", options, _input);
         return remember();
       },
       search: async (_input: unknown, options?: CallOptions) => {
-        record("search", options);
+        record("search", options, _input);
         return search();
       },
       sysdocs: async (_input: unknown, options?: CallOptions) => {
-        record("sysdocs", options);
+        record("sysdocs", options, _input);
         return sysdocs();
       },
+      wrapup: async (_input: unknown, options?: CallOptions) => {
+        record("wrapup", options, _input);
+        return wrapup();
+      },
       prjdocs: async (_input: unknown, options?: CallOptions) => {
-        record("prjdocs", options);
+        record("prjdocs", options, _input);
         prjdocsInputs.push(_input);
         return prjdocs();
       },
@@ -281,6 +296,9 @@ function makeHost(): Host {
     },
     setPrjdocs: (handler) => {
       prjdocs = handler;
+    },
+    setWrapup: (handler) => {
+      wrapup = handler;
     },
     setRemember: (handler) => {
       remember = handler;
@@ -427,6 +445,53 @@ describe("tui commands", () => {
     expect(host.toasts.at(-1)).toEqual({
       message: "XERJ indexing is disabled",
       variant: "info",
+    });
+  });
+
+  test("wrapup asks the host to compact and reports the result", async () => {
+    const host = makeHost();
+    const { dispose } = await setup(host);
+    await flush();
+
+    await byId(host, "xerj.wrapup").run();
+    dispose();
+
+    expect(host.toasts.at(-1)).toEqual({
+      message: "XERJ · the host compacted this session",
+      variant: "success",
+    });
+  });
+
+  test("wrapup reports why the host did not compact", async () => {
+    const host = makeHost();
+    host.setWrapup(async () => ({ compacted: false, detail: "the session is too short" }));
+    const { dispose } = await setup(host);
+    await flush();
+
+    await byId(host, "xerj.wrapup").run();
+    dispose();
+
+    expect(host.toasts.at(-1)).toEqual({
+      message: "XERJ · the session is too short",
+      variant: "info",
+    });
+  });
+
+  test("wrapup names the reason when the call fails", async () => {
+    const host = makeHost();
+    // A real RPC rejection is a plain object, not an Error.
+    host.setWrapup(async () => {
+      throw { type: "rpc.internal", message: "the host refused to compact" };
+    });
+    const { dispose } = await setup(host);
+    await flush();
+
+    await byId(host, "xerj.wrapup").run();
+    dispose();
+
+    expect(host.toasts.at(-1)).toEqual({
+      message: "XERJ wrapup failed: the host refused to compact",
+      variant: "error",
     });
   });
 
