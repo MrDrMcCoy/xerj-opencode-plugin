@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_CONFIG, loadConfig } from "../../src/config.ts";
+import { Priority } from "../../src/node/priority.ts";
 
 describe("loadConfig", () => {
   test("returns defaults for undefined options", () => {
@@ -111,5 +112,24 @@ describe("loadConfig", () => {
     const { config, warnings } = loadConfig({ index: { brain: ["docs", 3] } });
     expect(config.index.brain).toEqual(["docs"]);
     expect(warnings).toHaveLength(1);
+  });
+});
+
+describe("node.priority", () => {
+  test("defaults to low so indexing stays out of the way", () => {
+    expect(DEFAULT_CONFIG.node.priority).toBe(Priority.Low);
+    expect(loadConfig({}).config.node.priority).toBe(Priority.Low);
+  });
+
+  test("accepts low, normal, and high", () => {
+    for (const priority of [Priority.Low, Priority.Normal, Priority.High]) {
+      expect(loadConfig({ node: { priority } }).config.node.priority).toBe(priority);
+    }
+  });
+
+  test("warns and falls back on an unknown value", () => {
+    const loaded = loadConfig({ node: { priority: "urgent" } });
+    expect(loaded.config.node.priority).toBe(Priority.Low);
+    expect(loaded.warnings.join("\n")).toContain("node.priority must be one of");
   });
 });

@@ -148,8 +148,9 @@ This is the complete set with its defaults, in
         "binary":  { "version": "auto", "path": null, "target": null,
                      "libc": "musl" },
         "storage": { "root": null },
-        "node":    { "url": null, "port": 9200, "dataDir": null,
-                     "idleMs": 1800000, "shutdownOnIdle": true },
+        "node":    { "url": null, "priority": "low", "port": 9200,
+                     "dataDir": null, "idleMs": 1800000,
+                     "shutdownOnIdle": true },
         "index":   { "auto": true, "watch": true, "debounceMs": 800,
                      "periodicMs": 900000, "workers": null, "brain": [],
                      "hidden": [], "hiddenMaxBytes": 262144,
@@ -179,13 +180,14 @@ The same entry works with a checkout path instead of the package name; see
 | `binary.libc` | `musl` (default) or `gnu` on Linux. |
 | `storage.root` | Per-project XERJ root. Defaults to `<project>/.xerj`; relative paths resolve inside the project, absolute paths may point elsewhere. |
 | `node.url` | Attach to this node and never spawn one. |
+| `node.priority` | CPU and I/O priority for every XERJ process: `low` (default), `normal`, or `high`. `low` is nice 19 plus idle-class I/O on Linux, the idle priority class on Windows. |
 | `node.port` | Preferred port. The supervisor advances it if taken. |
 | `node.idleMs` | Stop this project's node after this long with no session activity. |
 | `node.shutdownOnIdle` | Set false to keep the node up after the last session closes. |
 | `index.auto` | Run project, hidden, and brain indexing on startup. |
 | `index.watch` | Refresh on file changes. Project-local state forces the plugin's own watcher with one-shot index runs; set false for polling only. |
 | `index.brain` | Folders to index as second brains, e.g. `[".agents"]`. |
-| `index.hidden` | Hidden folders to index as plain documents, e.g. `[".agents"]`. |
+| `index.hidden` | Hidden folders to index as plain documents. Empty means "the docs folders that exist": `.agents`, `.github`, `.claude`. Set a list to choose exactly what is indexed. |
 | `index.hiddenMaxBytes` | Per-file ceiling for hidden documents. |
 | `index.semantic` | Include the semantic retrieval leg. |
 | `index.neural` | Embed passages with the node's neural model (`--embed-mode neural`). Set `false` for lexical embeddings. Changing it rebuilds the project index once; neural indexing is roughly ten times slower than lexical. |

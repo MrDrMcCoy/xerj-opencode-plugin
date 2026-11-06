@@ -17,6 +17,7 @@ import {
   type NodeDetection,
   type NodeHandle,
 } from "./supervisor.ts";
+import type { Priority } from "./priority.ts";
 
 export type RuntimeNodeState = "stopped" | "starting" | "running" | "error";
 
@@ -31,6 +32,8 @@ export interface NodeRuntimeOptions {
   /** Attach to this URL and never spawn or stop anything. */
   readonly explicitUrl: string | null;
   readonly embedMode: EmbedMode;
+  /** CPU and I/O priority for a spawned node; omitted leaves it alone. */
+  readonly priority?: Priority;
   readonly logger: Logger;
   readonly binary: () => InstalledBinary | null;
   readonly onSpawned?: () => void;
@@ -120,6 +123,7 @@ export class NodeRuntime {
         persistedPort: await readPersistedPort(this.options.nodeDir),
         explicitUrl: this.options.explicitUrl,
         embedMode: this.options.embedMode,
+        priority: this.options.priority,
         onPort: (port) => persistPort(this.options.nodeDir, port),
         logger: this.options.logger,
       });

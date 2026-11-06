@@ -52,7 +52,7 @@ import {
   startCompactionCapture,
   startTurnCapture,
 } from "./memory/capture.ts";
-import { unindexedDocsHint } from "./index/hint.ts";
+import { detectDocsFolders, unindexedDocsHint } from "./index/hint.ts";
 import { recoverMemoryIndex } from "./memory/health.ts";
 import { migrateMemoryIndex, migrateProjectStorage } from "./memory/migrate.ts";
 import { RemoteSpool } from "./remote/spool.ts";
@@ -107,16 +107,6 @@ export default Plugin.define({
 
     const overbroad = isOverbroadRoot(projectRoot);
     const indexWarnings = [...warnings];
-    if (!overbroad) {
-      const docsHint = unindexedDocsHint(
-        (folder) => existsSync(join(projectRoot, folder)),
-        [...config.index.hidden, ...config.index.brain],
-      );
-      if (docsHint !== null) {
-        indexWarnings.push(docsHint);
-        logger.warn(docsHint);
-      }
-    }
     if (overbroad) {
       const refusal =
         `refusing to index ${projectRoot}: the home directory and filesystem roots are too broad. Open OpenCode inside a project.`;
@@ -124,7 +114,22 @@ export default Plugin.define({
       logger.warn(refusal);
     }
     const brains = brainSpecs(projectRoot, config.index.brain);
-    const hiddenRoots = documentRoots(projectRoot, config.index.hidden);
+    // Project notes live in dot-directories, which the engine skips. Index the
+    // ones that exist unless the configuration names its own list.
+    const hiddenFolders = config.index.hidden.length > 0
+      ? config.index.hidden
+      : detectDocsFolders((folder) => existsSync(join(projectRoot, folder)));
+    const hiddenRoots = documentRoots(projectRoot, hiddenFolders);
+    if (!overbroad) {
+      const docsHint = unindexedDocsHint(
+        (folder) => existsSync(join(projectRoot, folder)),
+        [...hiddenFolders, ...config.index.brain],
+      );
+      if (docsHint !== null) {
+        indexWarnings.push(docsHint);
+        logger.warn(docsHint);
+      }
+    }
     const runtime: Runtime = {
       phase: "starting",
       binary: null,
@@ -516,6 +521,7 @@ export default Plugin.define({
             config,
             storage,
             logger,
+            priority: config.node.priority,
             onRun: () => counters.noteIndexRun(),
             onChange: () => {
               runtime.search?.invalidate();
@@ -537,6 +543,7 @@ export default Plugin.define({
             config,
             storage,
             logger,
+            priority: config.node.priority,
             onRun: () => counters.noteIndexRun(),
             onChange: () => {
               runtime.search?.invalidate();
@@ -620,6 +627,7 @@ export default Plugin.define({
       portLockPath: join(root, "nodes", ".port-lock"),
       explicitUrl: config.node.url,
       embedMode: config.index.neural ? EmbedMode.Neural : EmbedMode.Lexical,
+      priority: config.node.priority,
       logger,
       binary: () => runtime.binary,
       onSpawned: () => counters.noteSpawn(),

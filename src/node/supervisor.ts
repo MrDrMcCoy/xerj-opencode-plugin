@@ -26,6 +26,7 @@ import {
   nodePidPath,
   nodePortPath,
 } from "../paths.ts";
+import { applyPriority, type Priority } from "./priority.ts";
 
 export type NodeState = "xerj" | "foreign" | "down";
 
@@ -61,6 +62,8 @@ export interface EnsureNodeOptions {
   readonly explicitUrl?: string | null;
   readonly startupTimeoutMs?: number;
   readonly embedMode?: EmbedMode;
+  /** CPU and I/O priority for the spawned process; omitted leaves it alone. */
+  readonly priority?: Priority;
 }
 
 /** What the pidfile and port file say, without trusting either. */
@@ -174,6 +177,8 @@ export async function ensureNode(options: EnsureNodeOptions): Promise<NodeHandle
       options.projectRoot,
       options.nodeDir,
       options.embedMode ?? EmbedMode.Neural,
+      options.priority,
+      logger,
     );
     await options.onPort?.(chosen);
 
@@ -270,6 +275,8 @@ async function spawnNode(
   projectRoot: string,
   nodeDir: string,
   embedMode: EmbedMode,
+  priority: Priority | undefined,
+  logger: Logger,
 ): Promise<number> {
   await mkdir(dataDir, { recursive: true, mode: 0o700 });
   await mkdir(nodeDir, { recursive: true, mode: 0o700 });
@@ -298,6 +305,11 @@ async function spawnNode(
   child.unref();
   await log.close().catch(() => {});
   if (child.pid === undefined) throw new NodeError("xerj exited before it had a pid");
+
+  // Priority is best effort and never blocks startup.
+  if (priority !== undefined) {
+    await applyPriority({ pid: child.pid, priority, logger });
+  }
   return child.pid;
 }
 

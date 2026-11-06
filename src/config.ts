@@ -1,3 +1,4 @@
+import { Priority as NodePriority } from "./node/priority.ts";
 import type { Libc } from "./platform.ts";
 
 // Plugin options. Every field has a default, unknown keys are ignored, and a
@@ -20,6 +21,12 @@ export interface BinaryOptions {
 export interface NodeOptions {
   /** Attach to an existing node instead of spawning one. */
   readonly url: string | null;
+  /**
+   * CPU and I/O priority for every XERJ process the plugin starts. `low`
+   * keeps indexing out of the editor's way; `high` trades responsiveness for
+   * a faster first index.
+   */
+  readonly priority: NodePriority;
   /** Preferred ES-compatible port; the supervisor may advance it. */
   readonly port: number;
   readonly dataDir: string | null;
@@ -105,6 +112,7 @@ export const DEFAULT_CONFIG: Config = {
   storage: { root: null },
   node: {
     url: null,
+    priority: NodePriority.Low,
     port: 9200,
     dataDir: null,
     idleMs: 1_800_000,
@@ -168,6 +176,7 @@ export function loadConfig(
     },
     node: {
       url: readString(node.url, null) ?? (envUrl ? envUrl : null),
+      priority: readPriority(node.priority, warnings),
       port: readInteger(node.port, DEFAULT_CONFIG.node.port, 1, 65_535, "node.port", warnings),
       dataDir: readString(node.dataDir, null),
       idleMs: readInteger(
@@ -365,6 +374,17 @@ function readLibc(value: unknown, warnings: string[]): Libc {
   if (value === "musl" || value === "gnu") return value;
   warnings.push(`binary.libc must be "musl" or "gnu"; using ${DEFAULT_CONFIG.binary.libc}`);
   return DEFAULT_CONFIG.binary.libc;
+}
+
+function readPriority(value: unknown, warnings: string[]): NodePriority {
+  const fallback = DEFAULT_CONFIG.node.priority;
+  if (value === undefined) return fallback;
+  const found = Object.values(NodePriority).find((priority) => priority === value);
+  if (found !== undefined) return found;
+  warnings.push(
+    `node.priority must be one of ${Object.values(NodePriority).join(", ")}; using ${fallback}`,
+  );
+  return fallback;
 }
 
 function readBoolean(value: unknown, fallback: boolean, key: string, warnings: string[]): boolean {

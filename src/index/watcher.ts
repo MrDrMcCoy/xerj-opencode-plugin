@@ -6,6 +6,7 @@
 // falls back to periodic one-shot runs so the index still converges.
 
 import { spawn, type ChildProcess } from "node:child_process";
+import { applyPriority, type Priority } from "../node/priority.ts";
 import { existsSync, readdirSync, watch, type FSWatcher } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import type { Config } from "../config.ts";
@@ -48,6 +49,8 @@ export interface CorpusServiceOptions {
   readonly config: Config;
   readonly storage: KeyValueStorage;
   readonly logger: Logger;
+  /** CPU and I/O priority for index processes; omitted leaves them alone. */
+  readonly priority?: Priority;
   readonly onChange?: () => void;
   readonly onRun?: (run: CorpusRun) => void;
 }
@@ -331,6 +334,15 @@ export class CorpusService {
     this.lastStderr = "";
     this.spawnedAt = Date.now();
     if (watch) this.state = "starting";
+
+    // Indexing is background work: keep it below the editor's own processes.
+    if (this.options.priority !== undefined) {
+      void applyPriority({
+        pid: child.pid,
+        priority: this.options.priority,
+        logger: this.options.logger,
+      });
+    }
 
     this.attachOutput(child);
     child.once("close", (code, signal) => {

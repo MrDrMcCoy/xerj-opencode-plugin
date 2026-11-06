@@ -4,7 +4,15 @@
 // leaving an empty search to explain itself.
 
 /** Dot-directories that commonly hold project notes. */
-const DOC_FOLDERS = [".agents", ".github", ".claude"] as const;
+export const DOC_FOLDERS = [".agents", ".github", ".claude"] as const;
+
+/**
+ * The docs folders present in this project. Used as the default hidden corpus
+ * so project notes are searchable without configuration.
+ */
+export function detectDocsFolders(exists: (folder: string) => boolean): string[] {
+  return DOC_FOLDERS.filter((folder) => exists(folder));
+}
 
 export function unindexedDocsHint(
   exists: (folder: string) => boolean,

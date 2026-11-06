@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { unindexedDocsHint } from "../../src/index/hint.ts";
+import { detectDocsFolders, unindexedDocsHint } from "../../src/index/hint.ts";
 
 describe("unindexedDocsHint", () => {
   const present = (folders: string[]) => (folder: string) => folders.includes(folder);
@@ -25,5 +25,20 @@ describe("unindexedDocsHint", () => {
     expect(hint).toContain(".agents, .github not indexed");
     expect(hint).toContain("index.hidden");
     expect(hint).toContain("index.brain");
+  });
+});
+
+describe("detectDocsFolders", () => {
+  const present = (folders: string[]) => (folder: string) => folders.includes(folder);
+
+  test("returns the docs folders that exist, in a stable order", () => {
+    expect(detectDocsFolders(present([".claude", ".agents"]))).toEqual([
+      ".agents",
+      ".claude",
+    ]);
+  });
+
+  test("returns nothing when the project has no such folder", () => {
+    expect(detectDocsFolders(present([]))).toEqual([]);
   });
 });
