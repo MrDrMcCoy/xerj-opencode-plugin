@@ -6,17 +6,16 @@
 // one still runs the rest of the suite.
 
 import { mkdtemp, rm } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, test } from "bun:test";
-import { detectRuntime } from "../../src/binary/detect.ts";
-import { ensureBinary } from "../../src/binary/manager.ts";
 import { DEFAULT_CONFIG } from "../../src/config.ts";
 import { createLogger } from "../../src/log.ts";
 import plugin from "../../src/index.ts";
 import { MemoryStore } from "../../src/memory/store.ts";
 import { pruneMemory } from "../../src/memory/retain.ts";
 import { XerjClient } from "../../src/node/client.ts";
+import { cacheRoot, quietLogger, resolveBinary } from "./support.ts";
 
 const memory = new Map<string, unknown>();
 const logger = createLogger(
@@ -37,30 +36,6 @@ function isAlive(pid: number): boolean {
   }
 }
 
-const quietLogger = {
-  debug: () => {},
-  info: () => {},
-  warn: () => {},
-  error: () => {},
-  entries: async () => [],
-  flush: async () => {},
-} as never;
-
-async function resolveBinary(root: string): Promise<string | null> {
-  const pinned = process.env.XERJ_BIN;
-  if (pinned) return pinned;
-
-  const host = await detectRuntime({ libc: "musl", target: null });
-  if (!host.info) return null;
-  const binary = await ensureBinary({
-    root,
-    requested: "auto",
-    platform: process.platform,
-    info: host.info,
-    logger,
-  }).catch(() => null);
-  return binary?.path ?? null;
-}
 
 interface Captured {
   readonly ctx: Record<string, unknown>;
@@ -173,9 +148,7 @@ afterAll(async () => {
 
 describe("plugin setup end to end", () => {
   test("indexes a project, answers a search, and stops cleanly", async () => {
-    const cacheRoot =
-      process.env.XERJ_CACHE ?? join(homedir(), ".cache", "opencode", "xerj-int");
-    const binaryPath = await resolveBinary(cacheRoot);
+    const binaryPath = await resolveBinary(cacheRoot());
     if (binaryPath === null) {
       console.warn("skipping: no xerj binary available");
       return;

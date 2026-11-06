@@ -409,21 +409,33 @@ export async function portOwnerPid(port: number): Promise<number | null> {
   return null;
 }
 
+/**
+ * Socket inodes listening on `port`, read from a `/proc/net/tcp` table. Pure
+ * so the parser can be tested on any platform without that platform's /proc.
+ */
+export function portOwnerInodes(table: string, port: number): Set<string> {
+  const inodes = new Set<string>();
+  const suffix = `:${portHex(port)}`;
+
+  for (const row of table.split("\n").slice(1)) {
+    const fields = row.trim().split(/\s+/);
+    if (fields.length < 10) continue;
+    const local = fields[1] ?? "";
+    // "0A" is LISTEN; the local address ends with the port in uppercase hex.
+    if (fields[3] !== "0A" || !local.toUpperCase().endsWith(suffix)) continue;
+    inodes.add(fields[9] ?? "");
+  }
+
+  return inodes;
+}
+
 async function linuxPortOwner(port: number): Promise<number | null> {
   const inodes = new Set<string>();
 
   for (const file of ["/proc/net/tcp", "/proc/net/tcp6"]) {
     const table = await readFile(file, "utf8").catch(() => null);
     if (table === null) continue;
-
-    for (const row of table.split("\n").slice(1)) {
-      const fields = row.trim().split(/\s+/);
-      if (fields.length < 10) continue;
-      const local = fields[1] ?? "";
-      // "0A" is LISTEN; the local address ends with the port in uppercase hex.
-      if (fields[3] !== "0A" || !local.toUpperCase().endsWith(`:${portHex(port)}`)) continue;
-      inodes.add(fields[9] ?? "");
-    }
+    for (const inode of portOwnerInodes(table, port)) inodes.add(inode);
   }
 
   if (inodes.size === 0) return null;
@@ -443,6 +455,12 @@ async function linuxPortOwner(port: number): Promise<number | null> {
   return null;
 }
 
+/** First pid in `lsof -t` output, or null when the list is empty or unusable. */
+export function firstPidOf(output: string): number | null {
+  const pid = Number(output.trim().split("\n")[0]);
+  return Number.isInteger(pid) && pid > 0 ? pid : null;
+}
+
 function darwinPortOwner(port: number): Promise<number | null> {
   return promisify(execFile)("lsof", [
     "-nP",
@@ -450,10 +468,7 @@ function darwinPortOwner(port: number): Promise<number | null> {
     "-sTCP:LISTEN",
     "-t",
   ])
-    .then(({ stdout }) => {
-      const pid = Number(stdout.trim().split("\n")[0]);
-      return Number.isInteger(pid) && pid > 0 ? pid : null;
-    })
+    .then(({ stdout }) => firstPidOf(stdout))
     .catch(() => null);
 }
 

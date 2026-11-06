@@ -479,3 +479,35 @@ describe("write timeout", () => {
     await expect(subject.get("/slow", "slow read")).rejects.toBeDefined();
   });
 });
+
+describe("parseSize units and transport codes", () => {
+  test("parses the larger units and rejects nonsense", () => {
+    expect(parseSize("1.5tb")).toBe(Math.round(1.5 * 1024 ** 4));
+    expect(parseSize("2 pb")).toBe(2 * 1024 ** 5);
+    expect(parseSize("abc")).toBe(0);
+    expect(parseSize(null)).toBe(0);
+  });
+
+  test("an unreachable network is retried like a closed socket", async () => {
+    stubFetch();
+    let attempts = 0;
+    const resolver: ClientResolver = {
+      ensure: async () => "http://127.0.0.1:9500",
+      invalidate: () => {},
+    };
+    behave = async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw Object.assign(new TypeError("fetch failed"), {
+          cause: Object.assign(new Error("net"), { code: "ENETUNREACH" }),
+        });
+      }
+      return response(200, { cluster_name: "xerj" });
+    };
+
+    const info = await client({ resolver }).info();
+
+    expect(info?.clusterName).toBe("xerj");
+    expect(attempts).toBe(2);
+  });
+});

@@ -4,11 +4,13 @@ import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  NodeError,
   detectNode,
   ensureNode,
-  NodeError,
+  firstPidOf,
   ownsNodeAt,
   persistPort,
+  portOwnerInodes,
   probeNode,
   readNodePid,
   readPersistedPort,
@@ -370,5 +372,74 @@ describe("ensureNode", () => {
         logger,
       }),
     ).rejects.toBeInstanceOf(NodeError);
+  });
+});
+
+describe("port owner parsers", () => {
+  // Two listening sockets on 9200 and one on 9300, one established connection.
+  const table = [
+    "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode",
+    "   0: 0100007F:23F0 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 11111 1",
+    "   1: 00000000:23F0 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 22222 1",
+    "   2: 0100007F:2454 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 33333 1",
+    "   3: 0100007F:23F0 0100007F:9C40 01 00000000:00000000 00:00000000 00000000  1000        0 44444 1",
+  ].join("\n");
+
+  test("collects the listening inodes for one port", () => {
+    expect([...portOwnerInodes(table, 9200)]).toEqual(["11111", "22222"]);
+    expect([...portOwnerInodes(table, 9300)]).toEqual(["33333"]);
+  });
+
+  test("ignores established sockets and other ports", () => {
+    expect(portOwnerInodes(table, 40000).size).toBe(0);
+  });
+
+  test("the first pid of an lsof list, or null", () => {
+    expect(firstPidOf("4242\n4243\n")).toBe(4242);
+    expect(firstPidOf("  7 ")).toBe(7);
+    expect(firstPidOf("")).toBeNull();
+    expect(firstPidOf("not-a-pid")).toBeNull();
+  });
+});
+
+describe("stopNode escalation", () => {
+  test("kills a process that ignores SIGTERM after the grace period", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "xerj-stop-"));
+    // Ignore SIGTERM so only the SIGKILL path can end it. The `wait` keeps the
+    // shell alive as its own process instead of exec'ing sleep, which would
+    // drop the trap.
+    const child = Bun.spawn(["sh", "-c", 'trap "" TERM; sleep 30 & wait'], {
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    await writeFile(join(dir, "node.pid"), String(child.pid));
+
+    const started = Date.now();
+    await stopNode(dir, 200);
+    const elapsed = Date.now() - started;
+
+    await Bun.sleep(100);
+    let alive = true;
+    try {
+      process.kill(child.pid, 0);
+    } catch {
+      alive = false;
+    }
+
+    expect(alive).toBe(false);
+    expect(elapsed).toBeGreaterThanOrEqual(100);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test("a process that exits on SIGTERM is not escalated", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "xerj-stop-"));
+    const child = Bun.spawn(["sleep", "30"], { stdout: "ignore", stderr: "ignore" });
+    await writeFile(join(dir, "node.pid"), String(child.pid));
+
+    const started = Date.now();
+    await stopNode(dir, 5_000);
+
+    expect(Date.now() - started).toBeLessThan(2_000);
+    await rm(dir, { recursive: true, force: true });
   });
 });

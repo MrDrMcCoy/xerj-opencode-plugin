@@ -8,14 +8,13 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { detectRuntime } from "../../src/binary/detect.ts";
-import { ensureBinary } from "../../src/binary/manager.ts";
 import { DEFAULT_CONFIG } from "../../src/config.ts";
 import { autoindexArgs, corpusLayout } from "../../src/index/corpus.ts";
 import { createLogger } from "../../src/log.ts";
 import { XerjClient } from "../../src/node/client.ts";
 import { NodeRuntime } from "../../src/node/runtime.ts";
 import { EmbedMode } from "../../src/node/supervisor.ts";
+import { resolveBinary } from "./support.ts";
 
 export interface Harness {
   readonly root: string;
@@ -51,24 +50,12 @@ function memoryStorage(): {
 
 const logger = createLogger(memoryStorage(), { echoToConsole: false });
 
-async function resolveBinary(root: string): Promise<string> {
-  const pinned = process.env.XERJ_BIN;
-  if (pinned) return pinned;
-
-  const host = await detectRuntime({ libc: "musl", target: null });
-  const info = host.info;
-  if (!info) {
-    throw new Error(`unsupported platform: ${process.platform}/${process.arch}`);
+async function resolveTestBinary(root: string): Promise<string> {
+  const path = await resolveBinary(root);
+  if (path === null) {
+    throw new Error(`no xerj binary for ${process.platform}/${process.arch}`);
   }
-
-  const binary = await ensureBinary({
-    root,
-    requested: "auto",
-    platform: process.platform,
-    info,
-    logger,
-  });
-  return binary.path;
+  return path;
 }
 
 /** Creates the fixture project the tests index. */
@@ -127,7 +114,7 @@ export async function startHarness(): Promise<Harness> {
     process.env.XERJ_CACHE ??
     join(homedir(), ".cache", "opencode", "xerj-int");
   await mkdir(cacheRoot, { recursive: true });
-  const binaryPath = await resolveBinary(cacheRoot);
+  const binaryPath = await resolveTestBinary(cacheRoot);
   const nodeDir = join(root, "node");
   const runtimeOptions = {
     nodeDir,
