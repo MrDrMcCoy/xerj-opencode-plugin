@@ -340,6 +340,20 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-05: Answerability measured, node-layer tests, and shared integration
+  setup. The benchmark now pins an anchor token for twenty prompts and reports
+  how often the answer text itself is in the block: 14 of 20, with 3 citing the
+  file while cutting the answer and 3 never citing it. Raising the per-file
+  section cap changes neither number, so the loss is file selection, not
+  section selection. Search latency on the live corpus is p50 2.5 ms, p95
+  82 ms against the 400 ms injection deadline. Two ranking experiments were
+  measured and reverted: preferring code over prose for implementation
+  questions (no gain, 20% more noise bytes) and demoting plan documents (no
+  gain). The `/proc/net/tcp` and `lsof` port parsers are now pure functions
+  with fixture tests, and the SIGKILL escalation is tested against a process
+  that traps SIGTERM. Integration tests share one binary resolver and logger.
+  543 unit and 10 integration tests pass; 86% lines, 94% functions.
+
 - 2026-11-05: Log rotation, disk reporting, failure-path tests, retrieval
   docs, and a bigger benchmark. `node.logMaxBytes` (8 MiB default, 0 off)
   rotates the engine log to `node.log.1` at spawn; it had reached 3.9 MB in
