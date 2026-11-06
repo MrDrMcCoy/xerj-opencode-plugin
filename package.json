@@ -36,7 +36,8 @@
     "test:unit": "bun test test/unit",
     "test:integration": "bun test test/integration",
     "build:tui": "bun scripts/build-tui.ts",
-    "prepack": "bun run build:tui"
+    "prepack": "bun run build:tui",
+    "eval": "bun scripts/eval.ts"
   },
   "devDependencies": {
     "@opencode/theme": "^2.2.5",

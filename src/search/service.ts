@@ -19,6 +19,7 @@ import {
   dropDuplicateLocations,
   dropGenerated,
   dropUncovered,
+  limitPerFile,
   preferSources,
 } from "./rank.ts";
 
@@ -77,6 +78,10 @@ const MAPPING_TTL_MS = 60_000;
 const RRF_K = 60;
 /** Semantic-leg hits allowed past the word-coverage gate. */
 const TRUSTED_SEMANTIC_HITS = 3;
+/** Share of the prompt's terms a trusted hit must still carry. */
+const TRUST_FLOOR = 0.5;
+/** How many sections one file may contribute to an injected block. */
+const MAX_HITS_PER_FILE = 1;
 const MAX_RESOLVED_FILE_BYTES = 512 * 1024;
 const SOURCE_FIELDS = [
   "ax_path",
@@ -174,7 +179,9 @@ export class SearchService {
         ? preferSources(dropUncovered(dropGenerated(ranked, trimmed), trimmed, trusted), trimmed)
         : ranked;
     const resolved = dropDuplicateLocations(await this.resolveLines(located, trimmed));
-    const candidates = dropShadowedWholeFiles(resolved, this.hiddenIndex, this.brainSpecs);
+    const shadowed = dropShadowedWholeFiles(resolved, this.hiddenIndex, this.brainSpecs);
+    const candidates =
+      options.surface === "context" ? limitPerFile(shadowed, MAX_HITS_PER_FILE) : shadowed;
     const exclude = options.exclude;
     const hits = (exclude ? candidates.filter((hit) => !exclude(hit)) : candidates).slice(0, k);
     const related = this.brains ? await this.brains.related(hits, options.signal) : [];

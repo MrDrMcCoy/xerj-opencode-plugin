@@ -7,8 +7,10 @@ import {
   dropGenerated,
   dropDuplicateLocations,
   dropUncovered,
+  isChroniclePath,
   isGeneratedPath,
   isTestPath,
+  limitPerFile,
   preferSources,
 } from "../../src/search/rank.ts";
 import type { ParsedHit } from "../../src/search/service.ts";
@@ -233,5 +235,51 @@ describe("dropDuplicateLocations", () => {
       at("src/b.ts", null, "y"),
     ]);
     expect(kept.map((entry) => entry.id)).toEqual(["file", "other", "x", "y"]);
+  });
+});
+
+describe("limitPerFile", () => {
+  test("keeps the first hits of a file and drops its extras", () => {
+    const hits = [
+      hit("README.md", 3),
+      hit("README.md", 2),
+      hit("README.md", 1),
+      hit("src/config.ts", 1),
+      hit(null, 1),
+      hit(null, 1),
+    ];
+
+    expect(limitPerFile(hits, 2).map((entry) => entry.score)).toEqual([3, 2, 1, 1, 1]);
+  });
+
+  test("a cap of zero means no cap", () => {
+    const hits = [hit("README.md", 3), hit("README.md", 2)];
+    expect(limitPerFile(hits, 0)).toHaveLength(2);
+  });
+
+  test("a file that appears once is untouched", () => {
+    const single = [hit("a.ts", 1)];
+    expect(limitPerFile(single, 1)).toEqual(single);
+  });
+});
+
+describe("isChroniclePath", () => {
+  test("recognizes changelogs and status logs", () => {
+    expect(isChroniclePath("CHANGELOG.md")).toBe(true);
+    expect(isChroniclePath("docs/changelog-2026.md")).toBe(true);
+    expect(isChroniclePath(".agents/status.md")).toBe(true);
+    expect(isChroniclePath("notes/journal.md")).toBe(true);
+    expect(isChroniclePath("HISTORY.md")).toBe(true);
+  });
+
+  test("leaves ordinary documents alone", () => {
+    expect(isChroniclePath("README.md")).toBe(false);
+    expect(isChroniclePath("src/config.ts")).toBe(false);
+    expect(isChroniclePath(".agents/plan.md")).toBe(false);
+  });
+
+  test("a chronicle is demoted like a generated file", () => {
+    const hits = [hit(".agents/status.md", 10), hit("src/config.ts", 9)];
+    expect(demoteGenerated(hits, "how is the node stopped")[0]?.path).toBe("src/config.ts");
   });
 });

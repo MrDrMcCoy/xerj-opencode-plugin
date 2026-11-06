@@ -61,12 +61,24 @@ const STOPWORDS = new Set([
 const GENERATED_DIRS = ["dist/", "build/", "vendor/", "coverage/"];
 const MINIFIED_SUFFIXES = [".min.js", ".min.css", ".map"];
 
+/**
+ * True when the file is a chronicle: a changelog, a status log, or a journal.
+ * These mention every feature by name because they describe the whole project,
+ * so they match almost any question while answering none of them.
+ */
+export function isChroniclePath(path: string): boolean {
+  const name = path.split("/").pop()?.toLowerCase() ?? "";
+  if (name.startsWith("changelog") || name.startsWith("history")) return true;
+  if (name === "news.md" || name === "releases.md") return true;
+  return ["status.md", "progress.md", "journal.md", "log.md"].includes(name);
+}
+
 /** True when the path looks generated rather than authored. */
 export function isGeneratedPath(path: string): boolean {
   const normalized = path.split(sep).join("/").toLowerCase();
   const name = normalized.slice(normalized.lastIndexOf("/") + 1);
 
-  if (GENERATED_NAMES.has(name)) return true;
+  if (GENERATED_NAMES.has(name) || isChroniclePath(normalized)) return true;
   if (MINIFIED_SUFFIXES.some((suffix) => name.endsWith(suffix))) return true;
   return GENERATED_DIRS.some(
     (dir) => normalized.startsWith(dir) || normalized.includes(`/${dir}`),
@@ -203,6 +215,30 @@ function stemOf(term: string): string {
 const TEST_DIRS = /(^|\/)(test|tests|__tests__|spec|specs)\//;
 const TEST_NAMES = /(\.(test|spec)\.[a-z0-9]+$)|(_test\.[a-z0-9]+$)/;
 const TEST_QUERY = /\b(test|tests|testing|spec|specs|fixture|fixtures)\b/;
+
+/**
+ * Caps how many hits one file may contribute. A long document such as a README
+ * matches many questions on generic words, and its sections would otherwise
+ * take most of the turn budget from the file that actually answers.
+ */
+export function limitPerFile<T extends { readonly path: string | null }>(
+  hits: ReadonlyArray<T>,
+  perFile: number,
+): T[] {
+  if (perFile <= 0) return [...hits];
+
+  const counts = new Map<string, number>();
+  const kept: T[] = [];
+  for (const hit of hits) {
+    const key = hit.path ?? "";
+    const used = counts.get(key) ?? 0;
+    if (key.length > 0 && used >= perFile) continue;
+
+    counts.set(key, used + 1);
+    kept.push(hit);
+  }
+  return kept;
+}
 
 /** True when the path is a test file or lives under a test directory. */
 export function isTestPath(path: string): boolean {

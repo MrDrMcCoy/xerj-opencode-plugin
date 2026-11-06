@@ -148,7 +148,7 @@ export const DEFAULT_CONFIG: Config = {
     enabled: true,
     maxTokens: 1500,
     memoryTokens: 400,
-    maxPassages: 6,
+    maxPassages: 8,
     timeoutMs: 400,
   },
   memory: {
