@@ -81,6 +81,11 @@ export interface EagerOptions {
   readonly maxModelCalls?: number;
   /** Search queries per run. */
   readonly maxQueries?: number;
+  /**
+   * Terms to document even though the project does not use them. Eager mode
+   * only: an eager run is the one that may reach beyond what detection sees.
+   */
+  readonly keywords?: ReadonlyArray<string>;
 }
 
 export interface PrjdocsSummary {
@@ -160,6 +165,24 @@ export class PrjdocsIndexer {
         version: source.version,
         collect: source.collect,
       });
+    }
+
+    // Eager mode can be handed terms the project does not use yet: a library
+    // the user intends to adopt, or one detection cannot see. Each is searched
+    // like an unknown dependency, so the answer is cached after the first run.
+    const extra = eager === undefined ? [] : (eager.keywords ?? []);
+    const known = new Set(techs.map((ref) => ref.id));
+    for (const keyword of extra) {
+      const id = keyword.trim().toLowerCase();
+      if (id.length < 2 || known.has(id)) continue;
+      known.add(id);
+
+      const discovered = discovery === null ? null : await discovery.find(id);
+      if (discovered === null) {
+        unsupported.push(id);
+        continue;
+      }
+      targets.push({ id, url: discovered, version: "latest" });
     }
 
     for (const ref of techs.slice(0, this.options.maxTargets ?? 40)) {
@@ -263,6 +286,7 @@ export class PrjdocsIndexer {
               body: page.body,
               tech: target.id,
               version: target.version,
+              bytes: page.bytes,
               fetched_at: new Date().toISOString(),
             },
           };
@@ -415,6 +439,7 @@ export class PrjdocsIndexer {
               url: { type: "keyword" },
               tech: { type: "keyword" },
               version: { type: "keyword" },
+              bytes: { type: "long" },
               fetched_at: { type: "date" },
             },
           },

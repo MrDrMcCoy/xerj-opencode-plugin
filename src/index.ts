@@ -73,6 +73,7 @@ import {
   type ToolResultEvent,
 } from "./hooks/tool-results.ts";
 import { memoryIndexMissing, recoverMemoryIndex } from "./memory/health.ts";
+import { sampleProcess } from "./process-stats.ts";
 import { startRetention } from "./memory/retain.ts";
 import { migrateMemoryIndex, migrateProjectStorage } from "./memory/migrate.ts";
 import { RemoteSpool } from "./remote/spool.ts";
@@ -302,6 +303,9 @@ export default Plugin.define({
         recent: await recentMessages(logger),
         warnings: runtime.warnings,
         errors: runtime.error ? [runtime.error] : [],
+        frameworks: [],
+        process: null,
+        embeddings: false,
       };
 
       if (!runtime.node) return base;
@@ -362,9 +366,23 @@ export default Plugin.define({
           };
         });
 
+        const frameworks = await frameworkRows(client, prjdocsPrefix(projectRoot)).catch(
+          () => [] as StatusSnapshot["frameworks"],
+        );
+        const pid = runtime.node?.pid ?? null;
+        const usageNow = pid === null ? null : await sampleProcess(pid).catch(() => null);
+
         return {
           ...base,
           corpora,
+          frameworks,
+          process: usageNow === null ? null : { cpuPercent: usageNow.cpuPercent, memoryBytes: usageNow.memoryBytes },
+          // The node embeds only while a pass runs, and only when the index was
+          // built with the semantic field set.
+          // A pass reports `starting` while it runs; the node embeds only when
+          // the index carries a semantic field, which is why semantics gates it.
+          embeddings:
+            config.index.semantic && corpusStatus(runtime.corpus).state === "starting",
           index: {
             prefix,
             docs: corpus.reduce((total, dataset) => total + dataset.docs, 0),
@@ -404,12 +422,23 @@ export default Plugin.define({
           typeof input === "object" && input !== null && "eager" in input
             ? (input as { eager?: unknown }).eager
             : undefined;
+        const askedKeywords =
+          typeof input === "object" && input !== null && "keywords" in input
+            ? (input as { keywords?: unknown }).keywords
+            : undefined;
+        const keywords = [
+          ...config.prjdocs.eagerKeywords,
+          ...(Array.isArray(askedKeywords)
+            ? askedKeywords.filter((entry): entry is string => typeof entry === "string")
+            : []),
+        ];
         const eagerMode =
           (typeof wanted === "boolean" ? wanted : config.prjdocs.eager)
             ? {
                 maxPages: config.prjdocs.eagerMaxPages,
                 maxDepth: config.prjdocs.eagerMaxDepth,
                 maxModelCalls: config.prjdocs.eagerModelCalls,
+                keywords,
                 generate: (prompt: string) =>
                   ctx.experimental.generate.text({ prompt }).then((answer) => answer.text),
                 search: ctx.websearch,
@@ -606,6 +635,12 @@ export default Plugin.define({
               type: "boolean",
               description:
                 "Remove the depth and page-type limits, judge pages with the model, and search for unknown technologies.",
+            },
+            keywords: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "Extra terms to document even though the project does not use them, for example a library you plan to adopt. Eager mode only.",
             },
           },
           additionalProperties: false,
@@ -1140,6 +1175,43 @@ async function ensureProjectState(projectRoot: string): Promise<void> {
   const directory = projectStateDir(projectRoot);
   await mkdir(directory, { recursive: true });
   await writeFile(join(directory, ".gitignore"), "*\n", { flag: "wx" }).catch(() => {});
+}
+
+/**
+ * Documentation per technology from the project-docs corpus. A `terms`
+ * aggregation on `tech` counts documents; a `sum` of the stored body size
+ * gives each technology its bytes, so the panel can show what each costs.
+ */
+async function frameworkRows(
+  client: XerjClient,
+  prefix: string,
+): Promise<StatusSnapshot["frameworks"]> {
+  const response = await client.post(
+    `/${prefix}-docs/_search`,
+    {
+      size: 0,
+      aggs: {
+        techs: {
+          terms: { field: "tech", size: 100 },
+          aggs: { size: { sum: { field: "bytes" } } },
+        },
+      },
+    },
+    "could not read the documentation breakdown",
+  );
+
+  const buckets =
+    (response as {
+      aggregations?: { techs?: { buckets?: Array<{ key?: unknown; doc_count?: unknown; size?: { value?: unknown } }> } };
+    }).aggregations?.techs?.buckets ?? [];
+
+  return buckets
+    .map((bucket) => ({
+      tech: typeof bucket.key === "string" ? bucket.key : String(bucket.key ?? "unknown"),
+      docs: typeof bucket.doc_count === "number" ? bucket.doc_count : 0,
+      bytes: typeof bucket.size?.value === "number" ? Math.round(bucket.size.value) : 0,
+    }))
+    .sort((left, right) => right.bytes - left.bytes);
 }
 
 function corpusStatus(corpus: CorpusService | null): Pick<

@@ -111,7 +111,8 @@ export function sidebarLines(snapshot: StatusSnapshot, now: number): string[] {
         : []),
       `${formatTokens(usage.tokensSaved)} tok saved`,
     ].join("  "),
-    `idx ${formatAge(now, index.lastRunAt)} · ${records}`,
+    `idx ${formatAge(now, index.lastRunAt)} · ${records}` +
+      (snapshot.embeddings ? " · embedding" : ""),
     "▸ /xerj for details",
   ];
 }
@@ -185,15 +186,32 @@ export function panelSections(snapshot: StatusSnapshot, now: number): PanelSecti
     },
     {
       title: "Datasets",
-      lines:
-        index.datasets.length === 0
-          ? ["none yet"]
-          : index.datasets.map(
-              (dataset) =>
-                `${dataset.name}  ${formatCount(dataset.docs)} docs · ` +
-                `${formatBytes(dataset.bytes)}`,
-            ),
+      lines: datasetLines(index.datasets),
     },
+    ...(snapshot.frameworks.length === 0
+      ? []
+      : [
+          {
+            title: "Frameworks",
+            lines: [
+              `${formatCount(snapshot.frameworks.length)} documented in ` +
+                `${formatBytes(snapshot.frameworks.reduce((total, row) => total + row.bytes, 0))}`,
+              ...[...snapshot.frameworks]
+                .sort((left, right) => right.bytes - left.bytes)
+                .slice(0, FRAMEWORK_ROWS)
+                .map((row) =>
+                  [
+                    `${row.tech}  ${formatCount(row.docs)} docs`,
+                    // Documents indexed before the byte field existed sum to
+                    // zero; the count is still true, so show only that.
+                    row.bytes > 0 ? formatBytes(row.bytes) : null,
+                  ]
+                    .filter((part) => part !== null)
+                    .join(" · "),
+                ),
+            ],
+          },
+        ]),
     ...(snapshot.brains.length === 0
       ? []
       : [
@@ -211,6 +229,16 @@ export function panelSections(snapshot: StatusSnapshot, now: number): PanelSecti
             ),
           },
         ]),
+    {
+      title: "Node load",
+      lines: [
+        snapshot.process === null
+          ? "no counters on this platform"
+          : `${snapshot.process.cpuPercent.toFixed(1)}% cpu · ` +
+            `${formatBytes(snapshot.process.memoryBytes)} rss`,
+        snapshot.embeddings ? "building embeddings now" : "not embedding",
+      ],
+    },
     {
       title: "Memory",
       lines: [
@@ -303,6 +331,29 @@ function headline(snapshot: StatusSnapshot): string {
 
 function targetSuffix(target: string | null): string {
   return target === null ? "" : ` · ${target}`;
+}
+
+/** Rows the framework list shows before it is cut. */
+const FRAMEWORK_ROWS = 12;
+
+/**
+ * Datasets largest first, each with its share of the total. A corpus's size
+ * against the rest is what tells a reader whether the Elasticsearch reference
+ * or their own project dominates the index.
+ */
+function datasetLines(datasets: ReadonlyArray<{ name: string; docs: number; bytes: number }>): string[] {
+  if (datasets.length === 0) return ["none yet"];
+  const total = datasets.reduce((sum, dataset) => sum + dataset.bytes, 0);
+
+  return [...datasets]
+    .sort((left, right) => right.bytes - left.bytes)
+    .map((dataset) => {
+      const share = total === 0 ? 0 : Math.round((dataset.bytes / total) * 100);
+      return (
+        `${dataset.name}  ${formatCount(dataset.docs)} docs · ` +
+        `${formatBytes(dataset.bytes)} · ${share}%`
+      );
+    });
 }
 
 function plural(count: number, one: string, many: string): string {

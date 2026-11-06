@@ -60,6 +60,9 @@ const SNAPSHOT: StatusSnapshot = {
   memory: { namespace: "proj-demo", count: 0, exists: true },
   brains: [],
   disk: { engineBytes: 1024, logBytes: 2048 },
+  frameworks: [],
+  process: null,
+  embeddings: false,
   corpora: [
     { name: "project", state: "watching", docs: 12, lastRunAt: 1, records: 40, edges: null, error: null },
   ],

@@ -129,6 +129,19 @@ export interface CorpusHealth {
   readonly error: string | null;
 }
 
+/** One technology's share of the documentation corpus. */
+export interface FrameworkStatus {
+  readonly tech: string;
+  readonly docs: number;
+  readonly bytes: number;
+}
+
+/** What the node process costs, sampled at status time. */
+export interface ProcessStatus {
+  readonly cpuPercent: number;
+  readonly memoryBytes: number;
+}
+
 export interface DiskStatus {
   readonly engineBytes: number;
   readonly logBytes: number;
@@ -147,6 +160,12 @@ export interface StatusSnapshot {
   readonly corpora: ReadonlyArray<CorpusHealth>;
   /** Bytes on disk for the engine data and the node log. */
   readonly disk: DiskStatus;
+  /** Documentation per technology, largest first. */
+  readonly frameworks: ReadonlyArray<FrameworkStatus>;
+  /** Node process cost; null when the platform exposes no counters. */
+  readonly process: ProcessStatus | null;
+  /** True while an index pass is building embeddings. */
+  readonly embeddings: boolean;
   readonly counters: CounterStatus;
   readonly recent: ReadonlyArray<string>;
   readonly warnings: ReadonlyArray<string>;
@@ -308,7 +327,10 @@ const definition = {
       }),
     },
     prjdocs: {
-      input: valueSchema({ eager: { type: "boolean" } }),
+      input: valueSchema({
+        eager: { type: "boolean" },
+        keywords: { type: "array", items: { type: "string" } },
+      }),
       output: valueSchema({
         techs: { type: "array", items: { type: "string" } },
         targets: { type: "number" },

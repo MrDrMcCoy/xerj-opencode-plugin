@@ -327,12 +327,22 @@ export class McpHost {
               description:
                 "Remove the depth and page-type limits, judge pages with the model, and search for unknown technologies.",
             },
+            keywords: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "Extra terms to document even though the project does not use them. Eager mode only.",
+            },
           },
           additionalProperties: false,
         },
         execute: async (raw: unknown) => {
           await this.start();
           const eager = typeof raw === "object" && raw !== null && (raw as { eager?: unknown }).eager === true;
+          const asked =
+            typeof raw === "object" && raw !== null && Array.isArray((raw as { keywords?: unknown }).keywords)
+              ? ((raw as { keywords: unknown[] }).keywords.filter((entry) => typeof entry === "string") as string[])
+              : [];
           const latest = new LatestVersions({ logger: this.logger });
           const banner = await this.requireClient().info().catch(() => null);
           const summary = await new PrjdocsIndexer({
@@ -357,6 +367,7 @@ export class McpHost {
                   maxPages: this.config.prjdocs.eagerMaxPages,
                   maxDepth: this.config.prjdocs.eagerMaxDepth,
                   maxModelCalls: this.config.prjdocs.eagerModelCalls,
+                  keywords: [...this.config.prjdocs.eagerKeywords, ...asked],
                 }
               : undefined,
           }).run();
@@ -439,6 +450,9 @@ export class McpHost {
       brains: [],
       corpora: [],
       disk: { engineBytes: 0, logBytes: 0 },
+      frameworks: [],
+      process: null,
+      embeddings: false,
       counters: {
         rpcCalls: 0,
         injectedTurns: 0,

@@ -637,3 +637,77 @@ describe("GPU project wiring", () => {
     expect(requested.every((url) => url.startsWith("https://docs.nvidia.com/"))).toBe(true);
   }, 30_000);
 });
+
+describe("eager keywords", () => {
+  test("a keyword the project does not use is searched and indexed", async () => {
+    const project = await projectWith({ react: "^18.2.0" });
+    const state = await mkdtemp(join(root, "state-"));
+    const fake = client();
+    const searched: string[] = [];
+    const indexer = new PrjdocsIndexer({
+      client: fake as never,
+      prefix: "xop-prjdoc-keywords",
+      projectRoot: project,
+      stateDir: state,
+      logger,
+      fetchImpl: (async (input: string | URL) => {
+        const url = String(input);
+        if (url.startsWith("https://react.dev")) return new Response("<html></html>", { status: 404 });
+        return new Response(html("fastapi documentation"), {
+          headers: { "content-type": "text/html" },
+        });
+      }) as unknown as typeof fetch,
+      maxTargets: 4,
+      eager: {
+        maxPages: 4,
+        maxDepth: 2,
+        keywords: ["fastapi"],
+        search: {
+          query: async ({ query }) => {
+            searched.push(query);
+            return {
+              data: { results: [{ url: "https://fastapi.test/docs", title: "FastAPI" }] },
+            } as never;
+          },
+        },
+      },
+    });
+
+    const summary = await indexer.run();
+
+    expect(searched).toContain("fastapi official documentation");
+    // React's site 404s here, so every indexed page came from the keyword.
+    expect(summary.indexed).toBeGreaterThan(0);
+    expect(fake.bulks.some((bulk) => bulk.sources.some((source) => source.tech === "fastapi"))).toBe(true);
+  });
+
+  test("keywords are ignored outside eager mode", async () => {
+    const project = await projectWith({ react: "^18.2.0" });
+    const state = await mkdtemp(join(root, "state-"));
+    const fake = client();
+    const searched: string[] = [];
+    const indexer = new PrjdocsIndexer({
+      client: fake as never,
+      prefix: "xop-prjdoc-nokeywords",
+      projectRoot: project,
+      stateDir: state,
+      logger,
+      fetchImpl: (async () => new Response("<html></html>", { status: 404 })) as unknown as typeof fetch,
+      maxTargets: 4,
+      eager: {
+        maxPages: 4,
+        maxDepth: 2,
+        search: {
+          query: async ({ query }) => {
+            searched.push(query);
+            return { data: { results: [] } } as never;
+          },
+        },
+      },
+    });
+
+    await indexer.run();
+
+    expect(searched).toEqual([]);
+  });
+});

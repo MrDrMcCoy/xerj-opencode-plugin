@@ -204,12 +204,7 @@ const SOURCES: Readonly<Record<string, DocsSource>> = {
     versioned: false,
     maxPages: 10,
   },
-  terraform: {
-    id: "terraform",
-    entry: "https://developer.hashicorp.com/terraform/docs",
-    versioned: false,
-    maxPages: 10,
-  },
+
   aws: {
     id: "aws",
     entry: "https://docs.aws.amazon.com/index.html",
@@ -344,6 +339,101 @@ const SOURCES: Readonly<Record<string, DocsSource>> = {
     fallback: "https://rocm.docs.amd.com/en/latest/",
     maxPages: 150,
     seeds: ROCM_COMPONENTS,
+  },
+  ansible: {
+    id: "ansible",
+    entry: "https://docs.ansible.com/ansible/latest/",
+    versioned: false,
+    prefix: "https://docs.ansible.com/ansible/latest/",
+    maxPages: 60,
+    seeds: [
+      "https://docs.ansible.com/ansible/latest/playbook_guide/index.html",
+      "https://docs.ansible.com/ansible/latest/inventory_guide/index.html",
+      "https://docs.ansible.com/ansible/latest/collections/index.html",
+    ],
+  },
+  "ansible-collections": {
+    id: "ansible-collections",
+    // Every collection ships its own reference under this tree.
+    entry: "https://docs.ansible.com/ansible/latest/collections/index.html",
+    versioned: false,
+    prefix: "https://docs.ansible.com/ansible/latest/collections/",
+    maxPages: 80,
+  },
+  netbox: {
+    id: "netbox",
+    entry: "https://netboxlabs.com/docs/netbox/",
+    versioned: false,
+    prefix: "https://netboxlabs.com/docs/netbox/",
+    maxPages: 60,
+  },
+  terraform: {
+    id: "terraform",
+    entry: "https://developer.hashicorp.com/terraform/docs",
+    versioned: false,
+    prefix: "https://developer.hashicorp.com/terraform/",
+    maxPages: 60,
+    seeds: [
+      "https://developer.hashicorp.com/terraform/language",
+      "https://developer.hashicorp.com/terraform/cli",
+    ],
+  },
+  // The language reference is its own corpus: HCL syntax, not CLI usage.
+  "terraform-language": {
+    id: "terraform-language",
+    entry: "https://developer.hashicorp.com/terraform/language",
+    versioned: false,
+    prefix: "https://developer.hashicorp.com/terraform/language/",
+    maxPages: 60,
+  },
+  vault: {
+    id: "vault",
+    entry: "https://developer.hashicorp.com/vault/docs",
+    versioned: false,
+    prefix: "https://developer.hashicorp.com/vault/",
+    maxPages: 50,
+  },
+  consul: {
+    id: "consul",
+    entry: "https://developer.hashicorp.com/consul/docs",
+    versioned: false,
+    prefix: "https://developer.hashicorp.com/consul/",
+    maxPages: 50,
+  },
+  nomad: {
+    id: "nomad",
+    entry: "https://developer.hashicorp.com/nomad/docs",
+    versioned: false,
+    prefix: "https://developer.hashicorp.com/nomad/",
+    maxPages: 50,
+  },
+  packer: {
+    id: "packer",
+    entry: "https://developer.hashicorp.com/packer/docs",
+    versioned: false,
+    prefix: "https://developer.hashicorp.com/packer/",
+    maxPages: 40,
+  },
+  vagrant: {
+    id: "vagrant",
+    entry: "https://developer.hashicorp.com/vagrant/docs",
+    versioned: false,
+    prefix: "https://developer.hashicorp.com/vagrant/",
+    maxPages: 30,
+  },
+  boundary: {
+    id: "boundary",
+    entry: "https://developer.hashicorp.com/boundary/docs",
+    versioned: false,
+    prefix: "https://developer.hashicorp.com/boundary/",
+    maxPages: 30,
+  },
+  waypoint: {
+    id: "waypoint",
+    entry: "https://developer.hashicorp.com/waypoint/docs",
+    versioned: false,
+    prefix: "https://developer.hashicorp.com/waypoint/",
+    maxPages: 20,
   },
   oneapi: {
     id: "oneapi",
@@ -497,10 +587,9 @@ function seedTargets(
     if (url.includes("{")) continue;
     if (seen.has(url)) continue;
     seen.add(url);
-    resolved.push({
-      url,
-      prefix: label === null ? undefined : versionPrefix(url),
-    });
+    // Every seed is bounded by its own directory, whether or not the source
+    // is versioned: one product's guide must not lead into its siblings.
+    resolved.push({ url, prefix: versionPrefix(url) });
   }
 
   return resolved;

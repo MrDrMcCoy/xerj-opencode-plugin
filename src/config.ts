@@ -92,6 +92,8 @@ export interface PrjdocsOptions {
   readonly eagerMaxDepth: number;
   /** Model judgements per run; the heuristic covers the rest. */
   readonly eagerModelCalls: number;
+  /** Terms to document even when the project does not use them (eager mode). */
+  readonly eagerKeywords: ReadonlyArray<string>;
   /**
    * Include XERJ's own documentation and the Elasticsearch reference for the
    * version this node emulates, whatever the project uses.
@@ -213,6 +215,7 @@ export const DEFAULT_CONFIG: Config = {
     eagerMaxPages: 120,
     eagerMaxDepth: 12,
     eagerModelCalls: 150,
+    eagerKeywords: [],
     builtin: true,
     builtinXerjPages: 200,
     builtinElasticsearchPages: 2500,
@@ -444,6 +447,11 @@ export function loadConfig(
         0,
         5000,
         "prjdocs.eagerModelCalls",
+        warnings,
+      ),
+      eagerKeywords: readStringList(
+        prjdocs.eagerKeywords,
+        "prjdocs.eagerKeywords",
         warnings,
       ),
       builtin: readBoolean(

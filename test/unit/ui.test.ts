@@ -73,6 +73,9 @@ function snapshot(overrides: Partial<StatusSnapshot> = {}): StatusSnapshot {
     memory: { namespace: "proj-demo-1a2b3c4d", count: 2, exists: true },
     brains: [],
     disk: { engineBytes: 1024, logBytes: 2048 },
+    frameworks: [],
+    process: null,
+    embeddings: false,
     corpora: [
       { name: "project", state: "watching", docs: 12, lastRunAt: 1, records: 40, edges: null, error: null },
       { name: "hidden", state: "watching", docs: 4, lastRunAt: 1, records: null, edges: null, error: null },
@@ -177,6 +180,7 @@ describe("panelSections", () => {
       "Index",
       "Corpora",
       "Datasets",
+      "Node load",
       "Memory",
       "Usage",
       "Counters",
@@ -368,5 +372,78 @@ describe("corpus and memory honesty", () => {
 
     expect(body).toContain("4 entries");
     expect(body).not.toContain("index missing");
+  });
+});
+
+describe("panel detail additions", () => {
+  function view(extra: Partial<StatusSnapshot>): StatusSnapshot {
+    return { ...snapshot(), ...extra };
+  }
+
+  test("datasets are ordered by size with their share", () => {
+    const base = snapshot();
+    const body = panelSections(
+      view({
+        index: {
+          ...base.index,
+          datasets: [
+            { name: "small", docs: 1, bytes: 1_000 },
+            { name: "large", docs: 10, bytes: 9_000 },
+          ],
+        },
+      }),
+      NOW,
+    )
+      .flatMap((section) => section.lines)
+      .join("\n");
+
+    const large = body.indexOf("large");
+    const small = body.indexOf("small");
+    expect(large).toBeGreaterThan(-1);
+    expect(large).toBeLessThan(small);
+    expect(body).toContain("90%");
+    expect(body).toContain("10%");
+  });
+
+  test("the node load section reports cpu, memory, and embeddings", () => {
+    const body = panelSections(
+      view({ process: { cpuPercent: 12.5, memoryBytes: 64 * 1024 * 1024 }, embeddings: true }),
+      NOW,
+    )
+      .flatMap((section) => section.lines)
+      .join("\n");
+
+    expect(body).toContain("12.5% cpu");
+    expect(body).toContain("64.0 MB rss");
+    expect(body).toContain("building embeddings now");
+  });
+
+  test("a platform without counters says so", () => {
+    const body = panelSections(view({ process: null }), NOW)
+      .flatMap((section) => section.lines)
+      .join("\n");
+
+    expect(body).toContain("no counters on this platform");
+    expect(body).toContain("not embedding");
+  });
+
+  test("frameworks list each technology with docs and size", () => {
+    const sections = panelSections(
+      view({
+        frameworks: [
+          { tech: "typescript", docs: 20, bytes: 800_000 },
+          { tech: "elasticsearch", docs: 632, bytes: 1_200_000 },
+        ],
+      }),
+      NOW,
+    );
+    const frameworks = sections.find((section) => section.title === "Frameworks");
+    const body = frameworks?.lines.join("\n") ?? "";
+
+    expect(body).toContain("2 documented in");
+    expect(body).toContain("elasticsearch  632 docs · 1.1 MB");
+    expect(body).toContain("typescript  20 docs · 781 KB");
+    // Largest first, whatever order the status returned.
+    expect(body.indexOf("elasticsearch")).toBeLessThan(body.indexOf("typescript"));
   });
 });

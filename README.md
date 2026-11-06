@@ -211,6 +211,7 @@ The same entry works with a checkout path instead of the package name; see
 | `prjdocs.eagerMaxPages` | Pages per site in eager mode. Default 120. |
 | `prjdocs.eagerMaxDepth` | Link depth in eager mode. Default 12. |
 | `prjdocs.eagerModelCalls` | Model judgements per run; the heuristic covers the rest. Default 150. |
+| `prjdocs.eagerKeywords` | Terms to document even though the project does not use them. Eager mode only. Default `[]`. |
 | `prjdocs.builtin` | Always index XERJ's own docs and the Elasticsearch reference for this node's version. Default `true`. |
 | `prjdocs.builtinXerjPages` | Markdown files taken from the XERJ repository. Default 200. |
 | `prjdocs.builtinElasticsearchPages` | Crawl budget for the Elasticsearch reference; 2500 yields about 630 API pages. Default 2500. |
@@ -269,6 +270,12 @@ freshness. Every command is also in the palette.
 | `/xerj-search <query>` | Search and show cited passages (prompts when empty). |
 | `/xerj-prjdocs [eager]` | Index official docs for the project's languages, frameworks, and cloud APIs. Add `eager` for the wider, model-judged crawl. |
 | `/xerj-sysdocs` | Index this machine's man and info pages. |
+
+The panel reports, in order: the node, the binary, the index, every corpus, the
+datasets by size with each one's share of the store, the documented frameworks
+with their document and byte counts, the node's CPU and resident memory, whether
+it is building embeddings, memory, usage, counters, the most-cited files, and
+health. The sidebar adds `embedding` while a pass is building vectors.
 
 The panel closes three ways: `escape`, the **✕ close** button in its footer, or
 running `/xerj` again.
@@ -377,6 +384,17 @@ Detection is deliberate, not clever:
   | oneAPI | `oneapi/mkl.hpp`, `mkl.h`, `dnnl.hpp`, `oneapi/tbb/*`, `level_zero/ze_api.h`, `zeInit`, `dpcpp`/`icpx`, `ONEAPI_ROOT`, `intel/oneapi-*` images, or `intel-extension-for-pytorch`/`scikit-learn-intelex`/`mkl` |
   | Vulkan | `.glsl`/`.vert`/`.frag`/`.comp`/`.slang` shaders, `vulkan/vulkan.h`, `vkCreate*`, `find_package(Vulkan)`, `glslang`/`shaderc`, or the `ash`/`vulkano` crates |
 
+  Automation and infrastructure ecosystems are detected the same way, from the
+  files they own: Ansible from `ansible.cfg`, `site.yml`, `roles/`, or the
+  `ansible.*` module names in a playbook; community collections from a
+  `requirements.yml` that lists `collections:`, or any `community.*` or
+  `ansible.*` collection reference; NetBox from `pynetbox`, a
+  `netboxcommunity/netbox` image, or `NETBOX_URL`; and the HashiCorp products
+  from their own markers, including `resource`/`provider` blocks for Terraform,
+  `path` blocks and `VAULT_*` for Vault, `job` blocks for Nomad, `source` blocks
+  for Packer, `Vagrant.configure` for Vagrant, and `.tf`, `.tfvars`, `.nomad`,
+  and `.pkr.hcl` files.
+
   A GPU stack is reported only when a header, build file, kernel extension, or
   version pin proves it. A project that merely mentions CUDA in prose does not
   get its documentation.
@@ -414,6 +432,12 @@ Two sources are indexed on every run, whatever the project uses:
   separately, because one breadth-first pass over the whole site spends its
   budget on chapter summaries and reaches no endpoints. Links outside the
   branch are not followed, so the company blog and other products stay out.
+
+Eager mode also takes keywords: `prjdocs.eagerKeywords` in configuration, or a
+`keywords` argument on `xerj_prjdocs` and the MCP tool. Each term is searched
+and its documentation crawled even when the project does not use it, which
+covers a library you plan to adopt and one detection cannot see. Keywords
+apply only in eager mode.
 
 Eager mode (`/xerj-prjdocs eager`, or `prjdocs.eager: true`) widens the
 Elasticsearch crawl from the API chapters to the whole guide, keeping the API

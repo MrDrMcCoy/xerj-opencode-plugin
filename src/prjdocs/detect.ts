@@ -5,6 +5,7 @@
 
 import { readdir, readFile } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
+import { detectEcosystems, ecosystemPackages } from "./ecosystems.ts";
 import { detectGpuStacks, gpuPackages } from "./gpu.ts";
 
 export type TechKind = "language" | "framework" | "cloud";
@@ -51,6 +52,8 @@ const EXTENSIONS: Record<string, string> = {
   ".bash": "shell",
   ".zsh": "shell",
   ".tf": "terraform",
+  ".tfvars": "terraform",
+  ".nomad": "nomad",
   ".sql": "sql",
 };
 
@@ -278,6 +281,8 @@ function dependencyId(name: string): string | null {
   // `cupy`, `pycuda`, `ash`, and their kin name a GPU toolchain directly.
   const gpu = gpuPackages().find((pattern) => pattern.test.test(name));
   if (gpu !== undefined) return gpu.id;
+  const ecosystem = ecosystemPackages().find((pattern) => pattern.test.test(name));
+  if (ecosystem !== undefined) return ecosystem.id;
   if (FRAMEWORK_IDS.has(name)) return name;
   // Scoped equivalents: `@angular/core`, `@sveltejs/kit`.
   const scoped = /^@([^/]+)\//.exec(name)?.[1];
@@ -481,9 +486,12 @@ export async function detectTech(
     add({ id, kind: "language", used: version, evidence: "runtime version" });
   }
 
-  // GPU toolchains are proved by headers and build files, not by extension
-  // alone, so they get their own pass over a bounded set of files.
+  // GPU toolchains and automation ecosystems are proved by files and markers,
+  // not by extension alone, so each gets a pass over a bounded file set.
   for (const ref of await detectGpuStacks(files, read, projectRoot)) {
+    add(ref);
+  }
+  for (const ref of await detectEcosystems(files, read, projectRoot)) {
     add(ref);
   }
 

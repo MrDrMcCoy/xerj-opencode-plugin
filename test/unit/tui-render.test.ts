@@ -81,6 +81,9 @@ const SNAPSHOT: StatusSnapshot = {
   memory: { namespace: "proj-demo", count: 1, exists: true },
   brains: [],
   disk: { engineBytes: 1024, logBytes: 2048 },
+  frameworks: [],
+  process: null,
+  embeddings: false,
   corpora: [
     { name: "project", state: "watching", docs: 42, lastRunAt: 1, records: 42, edges: null, error: null },
     { name: "hidden", state: "error", docs: 0, lastRunAt: 1, records: null, edges: null, error: "timed out" },

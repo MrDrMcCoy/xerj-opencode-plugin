@@ -140,3 +140,55 @@ describe("component guides", () => {
     expect(cuda?.seeds ?? []).toEqual([]);
   });
 });
+
+describe("automation and infrastructure sources", () => {
+  test("each ecosystem has a docs source", () => {
+    for (const id of [
+      "ansible",
+      "ansible-collections",
+      "netbox",
+      "terraform",
+      "terraform-language",
+      "vault",
+      "consul",
+      "nomad",
+      "packer",
+      "vagrant",
+      "boundary",
+      "waypoint",
+    ]) {
+      const targets = docsTargets({ id, kind: "framework", used: null, evidence: "x" }, null);
+      expect(targets).toHaveLength(1);
+      expect(targets[0]?.url.startsWith("https://")).toBe(true);
+    }
+  });
+
+  test("Ansible stays inside its own tree", () => {
+    const ansible = docsTargets(
+      { id: "ansible", kind: "framework", used: null, evidence: "site.yml" },
+      null,
+    )[0];
+
+    expect(ansible?.urlPrefix).toBe("https://docs.ansible.com/ansible/latest/");
+    expect(ansible?.seeds?.length).toBeGreaterThan(0);
+  });
+
+  test("a HashiCorp product stays inside its product path", () => {
+    const vault = docsTargets(
+      { id: "vault", kind: "framework", used: null, evidence: "policies" },
+      null,
+    )[0];
+
+    expect(vault?.url).toBe("https://developer.hashicorp.com/vault/docs");
+    expect(vault?.urlPrefix).toBe("https://developer.hashicorp.com/vault/");
+  });
+
+  test("Terraform's language reference is its own source", () => {
+    const language = docsTargets(
+      { id: "terraform-language", kind: "framework", used: null, evidence: "x" },
+      null,
+    )[0];
+
+    expect(language?.url).toBe("https://developer.hashicorp.com/terraform/language");
+  });
+});

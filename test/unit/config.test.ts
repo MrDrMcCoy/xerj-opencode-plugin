@@ -165,3 +165,26 @@ describe("memory.retain", () => {
     expect(loaded.warnings.join("\n")).toContain("memory.retain.maxCount");
   });
 });
+
+describe("prjdocs.eagerKeywords", () => {
+  test("defaults to empty", () => {
+    expect(DEFAULT_CONFIG.prjdocs.eagerKeywords).toEqual([]);
+  });
+
+  test("accepts a list of terms", () => {
+    const { config } = loadConfig({
+      prjdocs: { eagerKeywords: ["fastapi", "polars"] },
+    });
+
+    expect(config.prjdocs.eagerKeywords).toEqual(["fastapi", "polars"]);
+  });
+
+  test("warns and ignores a value that is not a list", () => {
+    const { config, warnings } = loadConfig({
+      prjdocs: { eagerKeywords: "fastapi" },
+    });
+
+    expect(config.prjdocs.eagerKeywords).toEqual([]);
+    expect(warnings.join(" ")).toContain("prjdocs.eagerKeywords");
+  });
+});
