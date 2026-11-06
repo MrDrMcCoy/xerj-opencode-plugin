@@ -276,6 +276,8 @@ Ship these first. None adds a runtime, a grammar, or a write path.
 | Turn archive | Magic Context, reduced | Append raw turns to `<project>/.xerj`, pruned by `context.archive.maxBytes` | Retention sweep at startup | `context.archive.enabled`, on by default |
 | `xerj_expand` | Magic Context, reduced | Return the original `U:`/`A:` text for an archive range | The archive | `context.archive.enabled` |
 | History search | Magic Context, reduced | `xerj_search` over archived turns as an extra corpus | A second index prefix | `context.archive.enabled` |
+| Pre-compaction window archive | Magic Context, reduced | Flatten `event.messages` from the `compaction` hook into the archive before the summary replaces them | The turn archive | `context.archive.enabled` |
+| Fact mining from the compaction window | Magic Context, reduced | Turn the same window into durable memories; heuristic first, one bounded model call as the second route | A precision measurement | `memory.extract`, off by default |
 
 ## Tier L: three to six weeks, high to medium suitability
 
@@ -369,8 +371,6 @@ measured; they include tests and the commits that carry them. A status of
 | `autoindex map` in the panel | S | Done | 0.5 h | Record kinds from a `terms` aggregation, shown as `records: function 545 · section 401`; four panel tests |
 | `prjdocs` keyword surfacing | S | Done | 0.2 h | `config.prjdocsKeywords` in the status, a panel line, and the command description |
 | Graph overview in the panel | M | Done (earlier) | 0 h this pass | Brains already report docs and live edges; the corpora list covers the rest |
-| Pre-compaction window archive | M | Not started | — | Deferred by the user; design recorded |
-| Fact mining from the compaction window | M | Not started | — | Deferred by the user; heuristic and model routes costed |
 | Import graph and cycles | M | Done | 2.0 h | `analysis/imports.ts` plus `xerj_imports`; relative, Python, Go, and Rust specifiers resolve against project files, unresolved ones are counted; ten module tests and four tool tests |
 | Regex and glob search | M | Done | 1.5 h | `analysis/find.ts` plus `xerj_find`: glob-to-regex with `**` spanning folders, line-numbered matches, secret files skipped, 200-match cap; ten module tests and three tool tests |
 | Structural search (`ast-grep`, read only) | M | Done | 1.0 h | `analysis/ast.ts` plus `xerj_ast`: probes the binary, passes the pattern and glob as arguments, parses `--json=stream`, never rewrites; seven module tests and one tool test |
@@ -397,11 +397,12 @@ indexing, where the `git log` record layout cost an extra hour and a half, and
 the auto-search hint, where the dedupe test had to distinguish the hint pass
 from the retrieval pass.
 
-Tier M so far: **7.5 h** across six of twelve items. Remaining, all deferred or
-gated: the tree-sitter layer and the complexity work it enables (grammar source
-settled, work deferred), the pre-compaction window archive and fact mining
-(deferred by the user), `xerj_code` (needs a network gate, since `corpus add`
-clones), and `xerj_ask` (gated by `hub.enabled` and `hub.network`).
+Tier M so far: **7.5 h** across six items this pass, seven of thirteen with the
+graph overview that predates it. Remaining, all deferred or gated: the
+tree-sitter layer and the complexity work it enables (grammar source settled,
+work deferred), the pre-compaction window archive and fact mining (deferred by
+the user), `xerj_code` (needs a network gate, since `corpus add` clones), and
+`xerj_ask` (gated by `hub.enabled` and `hub.network`).
 
 ## Settled decisions
 
