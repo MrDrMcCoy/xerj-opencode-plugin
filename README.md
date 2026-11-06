@@ -229,6 +229,9 @@ The same entry works with a checkout path instead of the package name; see
 | `xerj_forget` | `id` | Retract a memory. |
 | `xerj_index` | `url?` or `path?` | Index a page or external file now. |
 | `xerj_anomaly` | `index`, `time_field?`, `function?`, `field?`, `bucket_span?`, `threshold?` | Score a metric series and return flagged buckets. |
+| `xerj_reindex` | — | Run an incremental pass over the project, fetched pages, and hidden folders now. |
+| `xerj_sysdocs` | — | Index this machine's man and info pages; unchanged pages are skipped and vanished ones pruned. |
+| `xerj_prjdocs` | `eager?` | Index official docs for the project's languages, frameworks, and cloud APIs at the versions it uses. |
 
 ## TUI
 

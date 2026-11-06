@@ -23,6 +23,34 @@ jobs:
       - run: bunx tsc --noEmit
       - run: bun test test/unit
 
+  build:
+    name: Build the TUI and MCP bundles
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: bun install --frozen-lockfile
+      # The TUI bundle binds JSX through the host shim, and the MCP bundle has to
+      # run under Node rather than Bun. Neither shows up in the test suites.
+      - run: bun run build:tui
+      - run: bun run build:mcp
+      - name: The MCP server must run under Node
+        run: node dist/mcp.mjs --help
+      - name: The MCP server must answer a handshake under Node
+        run: |
+          printf '%s\n' \
+            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+            '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+            | timeout 60 node dist/mcp.mjs --project . \
+            | head -2 | tee /tmp/mcp.out
+          grep -q '"serverInfo"' /tmp/mcp.out
+          grep -q '"sysdocs"' /tmp/mcp.out
+
   integration:
     name: Integration tests against a pinned binary
     runs-on: ubuntu-latest

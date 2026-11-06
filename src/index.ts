@@ -375,15 +375,10 @@ export default Plugin.define({
       }
     };
 
-    const registration = await ctx.rpc.register(XerjRpc, {
-      status: async () => {
-        counters.noteRpc();
-        runtime.lifecycle?.touch();
-        return snapshot();
-      },
-      prjdocs: async (input: unknown) => {
-        counters.noteRpc();
-        runtime.lifecycle?.touch();
+    // Both documentation corpora are reachable as RPC methods, TUI commands,
+    // and tools, so the work lives in one place and the three surfaces only
+    // differ in how they report it.
+    const runPrjdocs = async (input: unknown) => {
         const handle = runtime.node ?? (await nodes.ensure().catch(() => null));
 
         if (handle === null) throw new Error("the XERJ node is not available");
@@ -430,10 +425,29 @@ export default Plugin.define({
           pruned: summary.pruned,
         });
         return summary;
-      },
-      sysdocs: async () => {
-        counters.noteRpc();
-        runtime.lifecycle?.touch();
+    };
+
+    const runReindex = async () => {
+      await Promise.all([
+        runtime.corpus?.reindex(),
+        runtime.web?.reindex(),
+        runtime.hidden?.reindex(),
+      ]);
+      void runtime.brain?.runAll();
+      // The pass ran before this returns, so the caller can report real
+      // completion instead of a queue-only toast.
+      const status = corpusStatus(runtime.corpus);
+      return {
+        queued:
+          runtime.corpus !== null ||
+          runtime.web !== null ||
+          runtime.hidden !== null ||
+          runtime.brain !== null,
+        records: status.lastRecords,
+      };
+    };
+
+    const runSysdocs = async () => {
         const handle = runtime.node ?? (await nodes.ensure().catch(() => null));
 
         if (handle === null || runtime.binary === null) {
@@ -457,27 +471,28 @@ export default Plugin.define({
         void registration.events.emit("updated", { updatedAt: Date.now() }).catch(() => {});
         logger.info("system docs indexed", { ...summary });
         return summary;
+    };
+
+    const registration = await ctx.rpc.register(XerjRpc, {
+      status: async () => {
+        counters.noteRpc();
+        runtime.lifecycle?.touch();
+        return snapshot();
+      },
+      prjdocs: async (input: unknown) => {
+        counters.noteRpc();
+        runtime.lifecycle?.touch();
+        return runPrjdocs(input);
+      },
+      sysdocs: async () => {
+        counters.noteRpc();
+        runtime.lifecycle?.touch();
+        return runSysdocs();
       },
       reindex: async () => {
         counters.noteRpc();
         runtime.lifecycle?.touch();
-        await Promise.all([
-          runtime.corpus?.reindex(),
-          runtime.web?.reindex(),
-          runtime.hidden?.reindex(),
-        ]);
-        void runtime.brain?.runAll();
-        // The pass ran before this returns, so the caller can report real
-        // completion instead of a queue-only toast.
-        const status = corpusStatus(runtime.corpus);
-        return {
-          queued:
-            runtime.corpus !== null ||
-            runtime.web !== null ||
-            runtime.hidden !== null ||
-            runtime.brain !== null,
-          records: status.lastRecords,
-        };
+        return runReindex();
       },
       remember: async (input) => {
         counters.noteRpc();
@@ -520,12 +535,72 @@ export default Plugin.define({
       snapshot,
     });
 
+    // The documentation corpora are also tools: an agent should not have to ask
+    // for a command to be run in the TUI.
+    const docsTools = [
+      {
+        name: "reindex",
+        description:
+          "Run an incremental index pass over the project, the fetched pages, and the hidden folders now. Use it when search looks stale after edits.",
+        input: { type: "object", properties: {}, additionalProperties: false },
+        options: { namespace: "xerj" },
+        execute: async () => {
+          const result = await runReindex();
+          return {
+            content: `reindexed · ${result.records ?? "?"} records`,
+            metadata: { xerj: { ...result } },
+          };
+        },
+      },
+      {
+        name: "sysdocs",
+        description:
+          "Index this machine's man and info pages. Skips pages already indexed, prunes pages that vanished, and makes them searchable through xerj_search.",
+        input: { type: "object", properties: {}, additionalProperties: false },
+        options: { namespace: "xerj" },
+        execute: async () => {
+          const summary = await runSysdocs();
+          return {
+            content:
+              `system docs: ${summary.indexed} indexed, ${summary.skipped} unchanged, ` +
+              `${summary.pruned} pruned (${summary.discovered} discovered)`,
+            metadata: { xerj: { ...summary } },
+          };
+        },
+      },
+      {
+        name: "prjdocs",
+        description:
+          "Index official documentation for this project's languages, frameworks, and cloud APIs at the versions it uses and the latest. Prunes pages for versions no longer used.",
+        input: {
+          type: "object",
+          properties: {
+            eager: {
+              type: "boolean",
+              description:
+                "Remove the depth and page-type limits, judge pages with the model, and search for unknown technologies.",
+            },
+          },
+          additionalProperties: false,
+        },
+        execute: async (input: unknown) => {
+          const summary = await runPrjdocs(input);
+          return {
+            content:
+              `project docs: ${summary.indexed} indexed, ${summary.skipped} unchanged, ` +
+              `${summary.pruned} pruned across ${summary.techs.length} technologies`,
+            metadata: { xerj: { ...summary } },
+          };
+        },
+      },
+    ];
+
     await ctx.tool.transform((editor) => {
       editor.namespace({
         name: "xerj",
         description: "Local XERJ search over this project. Prefer it to reading whole files.",
       });
-      for (const tool of tools) editor.add(tool as never);
+      for (const tool of [...tools, ...docsTools]) editor.add(tool as never);
     });
 
     await ctx.tool.hook("execute.after", (event) =>
