@@ -138,11 +138,15 @@ Two rules follow from the table:
 - **Enabling a gate never writes to the project.** Downloads land under the
   XERJ data root, never in `node_modules`, never in the repository.
 
-Where a grammar comes from is a Tier M decision, not an assumption: either the
-pinned `tree-sitter-wasms` pack (51.8 MB, 0.1.13, every language at once) or
-per-language release assets fetched one at a time. Whichever is chosen is
-pinned with a version and a checksum at that point, and the manifest lives
-beside the cache so an upgrade is a version change, not a silent replacement.
+**Grammar source: settled.** The full `tree-sitter-wasms` pack (0.1.13,
+51.8 MB unpacked, every language at once) is acceptable, decided 2026-11-06. It
+downloads once through the same verified path the engine binary uses, into
+`<data root>/grammars/<version>/`, pinned with a checksum recorded beside the
+cache, so an upgrade is a version change rather than a silent replacement. One
+download for all languages beats a per-language fetch matrix: fewer failure
+states, and no language left unsupported because its grammar has no release
+asset. Work on it is deferred at the user's request; `analysis.treeSitter.enabled`
+stays closed until then.
 
 ### Language servers the plugin can install
 
@@ -367,9 +371,9 @@ measured; they include tests and the commits that carry them. A status of
 | Import graph and cycles | M | Done | 2.0 h | `analysis/imports.ts` plus `xerj_imports`; relative, Python, Go, and Rust specifiers resolve against project files, unresolved ones are counted; ten module tests and four tool tests |
 | Regex and glob search | M | Done | 1.5 h | `analysis/find.ts` plus `xerj_find`: glob-to-regex with `**` spanning folders, line-numbered matches, secret files skipped, 200-match cap; ten module tests and three tool tests |
 | Structural search (`ast-grep`, read only) | M | Done | 1.0 h | `analysis/ast.ts` plus `xerj_ast`: probes the binary, passes the pattern and glob as arguments, parses `--json=stream`, never rewrites; seven module tests and one tool test |
-| tree-sitter layer, one language | M | Not started | — | Blocked on the grammar source decision |
+| tree-sitter layer, one language | M | Not started | — | Grammar source settled (the pinned `tree-sitter-wasms` pack); work deferred by the user, gate remains closed |
 | Complexity and duplicates | M | Not started | — | Needs the tree-sitter layer |
-| `xerj_code` | M | Not started | — | — |
+| `xerj_code` | M | Not started | — | The engine has `corpus add/own/build/index/list`; `add` clones a git URL, so this needs network consent and belongs behind a gate like `hub` rather than in an always-on tool |
 | `xerj_ask` and hub packs | M | Not started | — | Gated by `hub.enabled`, `hub.network` |
 | Turn archive | M | Done | 1.5 h | `archive/turns.ts`: one NDJSON file per session under `<node dir>/archive`, 4 KB per turn, oldest half dropped past `context.archive.maxBytes`; prompts and answers both archived; eight module tests |
 | `xerj_expand` | M | Done | 0.5 h | Prints `[n] U:`/`[n] A:` for a turn range, or says the archive is off; wired for the plugin and the MCP server |
@@ -389,7 +393,9 @@ the auto-search hint, where the dedupe test had to distinguish the hint pass
 from the retrieval pass.
 
 Tier M so far: **7.5 h** across six items. Remaining: the tree-sitter layer
-(and the complexity work it enables), `xerj_code`, and `xerj_ask`.
+and the complexity work it enables (grammar source settled, work deferred),
+`xerj_code` (needs a network gate, since `corpus add` clones), and `xerj_ask`
+(gated by `hub.enabled` and `hub.network`).
 
 ## Settled decisions
 

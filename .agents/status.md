@@ -339,6 +339,18 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: Grammar source decided, and the reference-corpus surface checked.
+  The user accepted the full `tree-sitter-wasms` pack (0.1.13, 51.8 MB, all
+  languages), so the tree-sitter item is no longer blocked; it downloads once
+  through the verified path into `<data root>/grammars/<version>/` with a pinned
+  checksum beside the cache. Work on it is deferred at the user's request and
+  `analysis.treeSitter.enabled` stays closed. Separately, `xerj --help` on
+  rc.100 was checked for the reference-corpus feature: `xerj corpus` exists with
+  `add`, `own`, `build`, `sign`, `keygen`, `index`, and `list`. `add` clones a
+  git URL and writes into `corpora/<name>/`, so `xerj_code` needs network
+  consent and a gate of its own; it is not an always-on tool. No code changed
+  in this entry.
+
 - 2026-11-06: History search over the turn archive (Tier M, 1.0 h). Each
   archived turn is one document in `<prefix>-archive-docs`, idempotent by a hash
   of session and ordinal, with a manifest at `<node dir>/archive/index.json` so
