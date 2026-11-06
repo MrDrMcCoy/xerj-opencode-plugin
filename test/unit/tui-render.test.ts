@@ -3,7 +3,10 @@
 // so the element tree can be inspected without a terminal. This covers the two
 // slot render bodies, which are otherwise unreachable from tests.
 
-import { afterAll, describe, expect, mock, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 interface Element {
   readonly type: unknown;
@@ -25,6 +28,20 @@ mock.module("@opentui/solid/jsx-runtime", () => ({
   jsxDEV: node,
   Fragment: "fragment",
 }));
+
+// Preferences are written to the shared TUI file, so every test points that
+// file at a scratch directory: a header click here must never edit the file the
+// developer's own TUI reads.
+const prefsDir = mkdtempSync(join(tmpdir(), "xerj-tui-prefs-"));
+const previousPrefsFile = process.env.OPENCODE_TUI_PREFERENCES_FILE;
+beforeAll(() => {
+  process.env.OPENCODE_TUI_PREFERENCES_FILE = join(prefsDir, "tui-preferences.jsonc");
+});
+afterAll(() => {
+  if (previousPrefsFile === undefined) delete process.env.OPENCODE_TUI_PREFERENCES_FILE;
+  else process.env.OPENCODE_TUI_PREFERENCES_FILE = previousPrefsFile;
+  rmSync(prefsDir, { recursive: true, force: true });
+});
 
 const TuiPlugin = (await import("../../src/tui.tsx")).default;
 type StatusSnapshot = import("../../src/rpc.ts").StatusSnapshot;
@@ -177,8 +194,19 @@ function makeHost(options: HostOptions = {}): unknown {
       toast: { show: () => {} },
     },
     theme: {
-      text: { base: "white", muted: "gray", faint: "gray" },
+      text: {
+        base: "white",
+        muted: "gray",
+        faint: "gray",
+        feedback: {
+          error: { base: "red" },
+          warning: { base: "yellow" },
+          success: { base: "green" },
+          info: { base: "blue" },
+        },
+      },
       border: { base: "gray" },
+      background: { base: "black", raised: { base: "gray" } },
     },
   };
 }
@@ -192,6 +220,29 @@ async function flush(): Promise<void> {
 }
 
 /** Collects every string in an element tree, in order. */
+/** The first handler prop of a given name, for clicking the header in tests. */
+function findHandler(tree: unknown, name: string): unknown {
+  if (typeof tree !== "object" || tree === null) return undefined;
+  if (Array.isArray(tree)) {
+    for (const child of tree) {
+      const found = findHandler(child, name);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+
+  const element = tree as { props?: Record<string, unknown>; children?: unknown[] };
+  const handler = element.props?.[name];
+  if (typeof handler === "function") return handler;
+
+  // Solid hands `children` inside props rather than as arguments, so both
+  // places have to be searched.
+  return (
+    findHandler(element.props?.children, name) ??
+    findHandler(element.children ?? [], name)
+  );
+}
+
 function textOf(tree: unknown): string {
   if (typeof tree === "string" || typeof tree === "number") return String(tree);
   if (typeof tree === "function") return "";
@@ -206,7 +257,7 @@ function textOf(tree: unknown): string {
 }
 
 describe("TUI render bodies", () => {
-  test("the sidebar renders the lines it was given", async () => {
+  test("the sidebar renders a header, sections, and a failing corpus", async () => {
     const plugin = TuiPlugin as unknown as {
       setup: (context: unknown) => Promise<() => void>;
     };
@@ -217,8 +268,33 @@ describe("TUI render bodies", () => {
     expect(sidebar).toBeDefined();
 
     const tree = textOf(sidebar?.render());
-    expect(tree).toContain("XERJ");
-    expect(tree).toContain("2 skipped");
+    expect(tree).toContain("▼  XERJ");
+    expect(tree).toContain("Corpora");
+    expect(tree).toContain("Session");
+    expect(tree).toContain("skipped");
+    expect(tree).toContain("error · timed out");
+    expect(tree).toContain("/xerj for details");
+    dispose();
+  });
+
+  test("clicking the header collapses the sidebar", async () => {
+    const plugin = TuiPlugin as unknown as {
+      setup: (context: unknown) => Promise<() => void>;
+    };
+    const dispose = await plugin.setup(makeHost());
+    await flush();
+
+    const sidebar = slots.find((slot) => slot.append === "sidebar.content");
+    const tree = sidebar?.render() as Element;
+    expect(textOf(tree)).toContain("Corpora");
+
+    const toggle = findHandler(tree, "onMouseDown");
+    expect(typeof toggle).toBe("function");
+    (toggle as () => void)();
+
+    const collapsed = textOf(sidebar?.render());
+    expect(collapsed).toContain("Index");
+    expect(collapsed).not.toContain("Corpora");
     dispose();
   });
 

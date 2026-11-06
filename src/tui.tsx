@@ -4,13 +4,32 @@
 
 /* @jsxImportSource @opentui/solid */
 
+import { createSignal } from "solid-js";
 import { Plugin } from "@opencode/plugin/tui";
 import { XerjRpc, type StatusSnapshot } from "./rpc.ts";
-import { panelSections, sidebarLines } from "./ui/format.ts";
+import { panelSections, sidebarLines, sidebarView, type SidebarRow } from "./ui/format.ts";
+import {
+  DEFAULT_PREFS,
+  readPrefs,
+  seedCollapsed,
+  writePrefs,
+  type SidebarPrefs,
+} from "./ui/prefs.ts";
 
 const PANEL_NAME = "xerj.stats";
 const FALLBACK_POLL_MS = 30_000;
 const SEARCH_CLIP = 6_000;
+/** A busy turn emits several updates; one render per burst is enough. */
+const REFRESH_DEBOUNCE_MS = 150;
+/** The TUI half has no log ring; a failed preference write is invisible. */
+const silentLogger = {
+  debug: () => {},
+  info: () => {},
+  warn: () => {},
+  error: () => {},
+  entries: async () => [],
+  flush: async () => {},
+} as const;
 
 interface TuiState {
   lines: string[];
@@ -39,8 +58,31 @@ export default Plugin.define({
     const at = () =>
       context.location ? { location: context.location } : undefined;
 
+    // The controller lives here, not in the component: the host unmounts and
+    // remounts `sidebar.content` when the user switches views, and a signal
+    // created inside the component body would reset on the way back.
+    let prefs: SidebarPrefs = DEFAULT_PREFS;
+    const [collapsed, setCollapsed] = createSignal(false);
+    void readPrefs()
+      .then((loaded) => {
+        prefs = loaded;
+        setCollapsed(seedCollapsed(loaded));
+      })
+      .catch(() => {
+        // A broken shared prefs file must not stop the sidebar from rendering.
+      });
+
+    const toggleCollapsed = (): void => {
+      const next = !collapsed();
+      setCollapsed(next);
+      if (prefs.rememberCollapsed) {
+        void writePrefs({ collapsed: next }, silentLogger);
+      }
+    };
+
     const abort = new AbortController();
     let inFlight = false;
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
     let disposed = false;
     let unsubscribe: (() => void) | null = null;
 
@@ -48,12 +90,21 @@ export default Plugin.define({
     // against the current client after each successful poll.
     const resubscribe = (): void => {
       if (disposed || unsubscribe) return;
-      unsubscribe = subscribe(rpc(), () => void refresh(), abort.signal);
+      unsubscribe = subscribe(rpc(), () => scheduleRefresh(), abort.signal);
     };
 
     const unsubscribeEvents = (): void => {
       unsubscribe?.();
       unsubscribe = null;
+    };
+
+    /** Coalesces a burst of events into one status call. */
+    const scheduleRefresh = (): void => {
+      if (refreshTimer !== null) return;
+      refreshTimer = setTimeout(() => {
+        refreshTimer = null;
+        void refresh();
+      }, REFRESH_DEBOUNCE_MS);
     };
 
     const refresh = async (): Promise<void> => {
@@ -383,16 +434,91 @@ export default Plugin.define({
 
     const detachSidebar = context.ui.slot({
       append: "sidebar.content",
-      render: () => (
-        <box flexDirection="column">
-          {state.lines.map((line) => {
-            const color = line.startsWith("XERJ")
-              ? context.theme.text.base
+      render: () => {
+        const snapshot = state.snapshot;
+        if (snapshot === null) {
+          return (
+            <box flexDirection="column">
+              <text fg={context.theme.text.muted}>{state.lines[0]}</text>
+              <text fg={context.theme.text.faint}>{state.lines[1] ?? ""}</text>
+            </box>
+          );
+        }
+
+        const view = sidebarView(snapshot, Date.now(), prefs.sections);
+        const toneColor = (tone: SidebarRow["tone"]) =>
+          tone === "bad"
+            ? context.theme.text.feedback.error.base
+            : tone === "warn"
+              ? context.theme.text.feedback.warning.base
               : context.theme.text.muted;
-            return <text fg={color}>{line}</text>;
-          })}
-        </box>
-      ),
+
+        const row = (entry: SidebarRow) => (
+          <box width="100%" flexDirection="row" justifyContent="space-between">
+            <text fg={context.theme.text.muted}>{entry.label}</text>
+            <text fg={toneColor(entry.tone)}>{entry.value}</text>
+          </box>
+        );
+
+        // Plain conditionals and `.map` rather than `Show`/`For`: the render
+        // bodies are pure functions of a signal, and plain JavaScript is both
+        // simpler and testable without a live renderer.
+        const trouble = snapshot.index.lastError ?? snapshot.warnings[0] ?? null;
+
+        return (
+          <box
+            width="100%"
+            flexDirection="column"
+            border
+            borderColor={context.theme.border.base}
+            paddingLeft={1}
+            paddingRight={1}
+          >
+            <box
+              flexDirection="row"
+              justifyContent="space-between"
+              alignItems="center"
+              onMouseDown={() => toggleCollapsed()}
+            >
+              <box
+                paddingLeft={1}
+                paddingRight={1}
+                backgroundColor={context.theme.background.raised.base}
+              >
+                <text fg={context.theme.text.base}>
+                  <b>
+                    {collapsed() ? "▶ " : "▼ "}
+                    {prefs.headerLabel}
+                  </b>
+                </text>
+              </box>
+              {prefs.showVersion ? (
+                <text fg={context.theme.text.faint}>v{view.version}</text>
+              ) : null}
+            </box>
+
+            {trouble === null ? null : (
+              <text fg={context.theme.text.feedback.warning.base}>⚠ {trouble}</text>
+            )}
+
+            {collapsed()
+              ? view.collapsed.map(row)
+              : [
+                  ...view.sections.map((section) => (
+                    <box flexDirection="column" marginTop={1}>
+                      <text fg={context.theme.text.base}>
+                        <b>{section.title}</b>
+                      </text>
+                      {section.rows.map(row)}
+                    </box>
+                  )),
+                  <box marginTop={1}>
+                    <text fg={context.theme.text.faint}>▸ /xerj for details</text>
+                  </box>,
+                ]}
+          </box>
+        );
+      },
     });
 
     const detachPanel = context.ui.slot({

@@ -8,6 +8,7 @@ import {
   formatTokens,
   panelSections,
   sidebarLines,
+  sidebarView,
 } from "../../src/ui/format.ts";
 
 const NOW = 1_120_000;
@@ -575,5 +576,77 @@ describe("data map and keywords", () => {
       .join("\n");
 
     expect(body).not.toContain("prjdocs keywords");
+  });
+});
+
+describe("sidebarView", () => {
+  const all = {
+    corpora: true,
+    session: true,
+    savings: true,
+    runtime: true,
+    health: true,
+  };
+
+  test("collapsed rows name the index, savings and memory", () => {
+    const view = sidebarView(snapshot(), NOW, all);
+
+    expect(view.label).toBe("XERJ");
+    expect(view.version).toBe("0.1.1");
+    expect(view.collapsed.map((row) => row.label)).toEqual(["Index", "Saved", "Memory"]);
+    expect(view.collapsed[0]?.value).toContain("437 docs");
+    expect(view.collapsed[1]?.value).toContain("75% hit");
+  });
+
+  test("sections carry label/value rows", () => {
+    const view = sidebarView(snapshot(), NOW, all);
+    const titles = view.sections.map((section) => section.title);
+
+    expect(titles).toEqual(["Corpora", "Session", "Savings", "Runtime", "Health"]);
+    const session = view.sections.find((section) => section.title === "Session");
+    expect(session?.rows.map((row) => row.label)).toContain("skipped");
+    const savings = view.sections.find((section) => section.title === "Savings");
+    expect(savings?.rows.map((row) => row.label)).toEqual(["saved", "cost", "net", "returned"]);
+  });
+
+  test("a disabled section is omitted", () => {
+    const view = sidebarView(snapshot(), NOW, { ...all, savings: false, health: false });
+
+    expect(view.sections.map((section) => section.title)).toEqual([
+      "Corpora",
+      "Session",
+      "Runtime",
+    ]);
+  });
+
+  test("a failing corpus is marked bad and names its error", () => {
+    const base = snapshot();
+    const view = sidebarView(
+      snapshot({
+        corpora: [
+          { name: "hidden", state: "error", docs: 0, lastRunAt: null, records: null, edges: null, error: "timed out" },
+          ...base.corpora,
+        ],
+      }),
+      NOW,
+      all,
+    );
+    const corpora = view.sections.find((section) => section.title === "Corpora");
+
+    expect(corpora?.rows[0]).toMatchObject({ label: "hidden", tone: "bad" });
+    expect(corpora?.rows[0]?.value).toContain("timed out");
+  });
+
+  test("a negative net cost is marked bad", () => {
+    const base = snapshot();
+    const view = sidebarView(
+      snapshot({ usage: { ...base.usage, netTokens: -1200 } }),
+      NOW,
+      all,
+    );
+    const savings = view.sections.find((section) => section.title === "Savings");
+    const net = savings?.rows.find((row) => row.label === "net");
+
+    expect(net?.tone).toBe("bad");
   });
 });

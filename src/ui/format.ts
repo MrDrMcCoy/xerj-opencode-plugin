@@ -89,6 +89,159 @@ function formatUntil(now: number, at: number): string {
 }
 
 /** Four lines for the sidebar slot. */
+/** One label/value row in the sidebar. */
+export interface SidebarRow {
+  readonly label: string;
+  readonly value: string;
+  /** Colour hint: a failing corpus or a warning is not muted. */
+  readonly tone?: "ok" | "warn" | "bad";
+}
+
+export interface SidebarSectionView {
+  readonly title: string;
+  readonly rows: ReadonlyArray<SidebarRow>;
+}
+
+export interface SidebarView {
+  readonly label: string;
+  readonly version: string;
+  /** Three rows that fit in a collapsed sidebar. */
+  readonly collapsed: ReadonlyArray<SidebarRow>;
+  readonly sections: ReadonlyArray<SidebarSectionView>;
+}
+
+/** Corpora shown before the list is summarised as a count. */
+const CORPORA_ROWS = 4;
+
+/**
+ * The sidebar as data, so the component only places it. Every number comes
+ * from the snapshot: the UI never computes a figure the server owns.
+ */
+export function sidebarView(
+  snapshot: StatusSnapshot,
+  now: number,
+  sections: { corpora: boolean; session: boolean; savings: boolean; runtime: boolean; health: boolean },
+): SidebarView {
+  const index = snapshot.index;
+  const usage = snapshot.usage;
+
+  const indexRow: SidebarRow = {
+    label: "Index",
+    value:
+      index.state === "watching"
+        ? `${formatCount(index.docs)} docs`
+        : `${index.state} · ${formatCount(index.docs)} docs`,
+    tone: index.lastError === null ? "ok" : "warn",
+  };
+  const savedRow: SidebarRow = {
+    label: "Saved",
+    value: `${formatTokens(usage.tokensSaved)} tok · ${formatPercent(usage.hitRate)} hit`,
+  };
+  const memoryRow: SidebarRow = {
+    label: "Memory",
+    value:
+      `${formatCount(snapshot.memory.count)}` +
+      (snapshot.memory.stale > 0 ? ` · ${formatCount(snapshot.memory.stale)} stale` : "") +
+      (snapshot.memory.exists ? "" : " · missing"),
+    tone: snapshot.memory.exists ? "ok" : "bad",
+  };
+
+  const corpora: SidebarSectionView = {
+    title: "Corpora",
+    rows: (() => {
+      if (snapshot.corpora.length === 0) return [{ label: "none", value: "no runs yet" }];
+      const shown: SidebarRow[] = snapshot.corpora.slice(0, CORPORA_ROWS).map((corpus) => ({
+        label: corpus.name,
+        value:
+          corpus.error !== null
+            ? `error · ${corpus.error}`
+            : `${corpus.state} · ${corpus.docs === null ? "—" : formatCount(corpus.docs)} docs`,
+        tone: corpus.error !== null ? "bad" : corpus.state === "watching" ? "ok" : "warn",
+      }));
+      const rest = snapshot.corpora.length - shown.length;
+      return rest > 0 ? [...shown, { label: `+${rest} more`, value: "" }] : shown;
+    })(),
+  };
+
+  const session: SidebarSectionView = {
+    title: "Session",
+    rows: [
+      { label: "queries", value: formatCount(usage.queries) },
+      { label: "hits", value: `${formatCount(usage.hits)} · ${formatPercent(usage.hitRate)}` },
+      { label: "injected", value: formatCount(snapshot.counters.injectedTurns) },
+      {
+        label: "skipped",
+        value: `${formatCount(snapshot.counters.noiseSkips)} as noise`,
+      },
+    ],
+  };
+
+  const savings: SidebarSectionView = {
+    title: "Savings",
+    rows: [
+      { label: "saved", value: `${formatTokens(usage.tokensSaved)} tok` },
+      { label: "cost", value: `${formatTokens(usage.tokensCost)} tok`, tone: "warn" },
+      {
+        label: "net",
+        value: `${formatTokens(usage.netTokens)} tok`,
+        tone: usage.netTokens < 0 ? "bad" : "ok",
+      },
+      { label: "returned", value: formatBytes(usage.bytesReturned) },
+    ],
+  };
+
+  const runtime: SidebarSectionView = {
+    title: "Runtime",
+    rows: [
+      snapshot.process === null
+        ? { label: "node", value: "no counters" }
+        : {
+            label: "node",
+            value: `${snapshot.process.cpuPercent.toFixed(1)}% · ${formatBytes(snapshot.process.memoryBytes)}`,
+          },
+      { label: "vectors", value: snapshot.embeddings ? "building" : "idle", tone: snapshot.embeddings ? "warn" : undefined },
+      { label: "sessions", value: formatCount(snapshot.node.sessions ?? 0) },
+    ],
+  };
+
+  const health: SidebarSectionView = {
+    title: "Health",
+    rows: [
+      {
+        label: "warnings",
+        value:
+          snapshot.warnings.length === 0
+            ? "none"
+            : String(snapshot.warnings.length),
+        tone: snapshot.warnings.length === 0 ? "ok" : "warn",
+      },
+      {
+        label: "last run",
+        value:
+          index.lastRunAt === null
+            ? "no runs"
+            : `${formatAge(now, index.lastRunAt)} · gen ${index.lastGeneration ?? "—"}`,
+      },
+      ...(index.lastError === null
+        ? []
+        : [{ label: "error", value: index.lastError, tone: "bad" as const }]),
+    ],
+  };
+
+  return {
+    label: "XERJ",
+    version: snapshot.pluginVersion,
+    collapsed: [indexRow, savedRow, memoryRow],
+    sections: [
+      ...(sections.corpora ? [corpora] : []),
+      ...(sections.session ? [session] : []),
+      ...(sections.savings ? [savings] : []),
+      ...(sections.runtime ? [runtime] : []),
+      ...(sections.health ? [health] : []),
+    ],
+  };
+}
+
 export function sidebarLines(snapshot: StatusSnapshot, now: number): string[] {
   const index = snapshot.index;
   const usage = snapshot.usage;

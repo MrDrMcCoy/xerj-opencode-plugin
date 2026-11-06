@@ -239,8 +239,19 @@ function makeHost(): Host {
       },
     },
     theme: {
-      text: { base: "white", muted: "gray", faint: "gray" },
+      text: {
+        base: "white",
+        muted: "gray",
+        faint: "gray",
+        feedback: {
+          error: { base: "red" },
+          warning: { base: "yellow" },
+          success: { base: "green" },
+          info: { base: "blue" },
+        },
+      },
       border: { base: "gray" },
+      background: { base: "black", raised: { base: "gray" } },
     },
   };
 
