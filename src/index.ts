@@ -606,6 +606,99 @@ export default Plugin.define({
     });
     runtime.lifecycle = lifecycle;
 
+    // The startup sequence is long because each step depends on the one above
+    // it owning something (a node, a spool, a journal). Each step is named here
+    // so the order is readable and a failure points at a step, not a line.
+
+    /** Moves project state into `<project>/.xerj` once, before anything reads it. */
+    const migrateLegacyState = async (): Promise<void> => {
+      if (resolve(storageRoot) === resolve(root)) return;
+
+      // A node still running from the old tree must stop first, or it keeps
+      // writing into the directory being moved.
+      const legacyNodeDir = projectNodeDir(root, prefix);
+      if (await pathExists(legacyNodeDir)) {
+        if ((await detectNode(legacyNodeDir)).running) {
+          await stopNode(legacyNodeDir).catch((error: unknown) => {
+            logger.warn("could not stop the legacy xerj node", String(error));
+          });
+        }
+      }
+
+      await migrateProjectStorage(
+        root,
+        storageRoot,
+        prefix,
+        webPrefix(projectRoot),
+        logger,
+      ).catch((error: unknown) => {
+        logger.warn("could not migrate project storage", String(error));
+      });
+    };
+
+    /**
+     * Builds the document spool after the move: init creates the spool
+     * directory, and an eagerly created empty target would make the migration
+     * skip the legacy pages.
+     */
+    const startRemoteSpool = async (activeClient: XerjClient): Promise<void> => {
+      if (!config.remote.enabled) return;
+
+      const spool = new RemoteSpool({
+        root: storageRoot,
+        projectRoot,
+        prefix: webPrefix(projectRoot),
+        externalPrefix: externalPrefix(projectRoot),
+        maxBytes: config.remote.maxBytes,
+        client: activeClient,
+        logger,
+      });
+      await spool.init();
+      runtime.spool = spool;
+    };
+
+    /**
+     * Memory cannot be rebuilt from the corpus, so carry it over before the
+     * first start. A node that is already up has loaded its index list, so it
+     * restarts once for the copied index to appear.
+     */
+    const migrateMemory = async (): Promise<void> => {
+      const migrated = await migrateMemoryIndex(
+        join(root, "data"),
+        engineDataDir,
+        memoryNamespace(projectRoot),
+        logger,
+      ).catch((error: unknown) => {
+        logger.warn("could not migrate project memory", String(error));
+        return false;
+      });
+      if (migrated && (await nodes.detect()).running) {
+        await nodes.stop("memory migration");
+      }
+    };
+
+    /**
+     * A memory index built by a different embedder is refused by the node and
+     * reports unhealthy rather than failing loudly, so repair it before the
+     * first recall. Automatic memory is then bounded by its age and size caps.
+     */
+    const repairMemory = async (activeClient: XerjClient): Promise<void> => {
+      if (!config.memory.enabled) return;
+
+      await recoverMemoryIndex({
+        client: activeClient,
+        nodeDir,
+        namespace: memoryNamespace(projectRoot),
+        logger,
+      }).catch((error: unknown) => {
+        logger.warn("could not check the memory index", String(error));
+      });
+
+      if (runtime.memory) {
+        startRetention(runtime.memory, config.memory.retain, shutdown.signal, logger);
+      }
+    };
+
     const bootstrapRuntime = async (): Promise<void> => {
       // An explicit path wins over download and detection: the user already
       // built or installed a binary, possibly for a platform we do not ship.
@@ -673,36 +766,14 @@ export default Plugin.define({
       }
 
       // A refused root gets no node at startup: nothing will be indexed and the
-      // process would only sit there until its idle timer. An explicit tool call
-      // still spawns one on demand through the client.
+      // process would only sit there until its idle timer.
       if (overbroad) {
         runtime.phase = "ready";
         logger.info("xerj is idle: the project root is too broad to index", { projectRoot });
         return;
       }
 
-      // Project data moved into `<project>/.xerj`. Carry the old node directory
-      // and spool over once, stopping a node still using the old tree first so
-      // it cannot keep writing to a directory we are about to move.
-      if (resolve(storageRoot) !== resolve(root)) {
-        const legacyNodeDir = projectNodeDir(root, prefix);
-        if (await pathExists(legacyNodeDir)) {
-          if ((await detectNode(legacyNodeDir)).running) {
-            await stopNode(legacyNodeDir).catch((error: unknown) => {
-              logger.warn("could not stop the legacy xerj node", String(error));
-            });
-          }
-        }
-        await migrateProjectStorage(
-          root,
-          storageRoot,
-          prefix,
-          webPrefix(projectRoot),
-          logger,
-        ).catch((error: unknown) => {
-          logger.warn("could not migrate project storage", String(error));
-        });
-      }
+      await migrateLegacyState();
 
       // Start the heartbeat only after the legacy move: its first write creates
       // the node directory, and a non-empty target would make the migration
@@ -710,64 +781,12 @@ export default Plugin.define({
       lifecycle.start();
       startSessionTracking(ctx.event, lifecycle, shutdown.signal, logger);
 
-      // Construct the spool after the move: init creates the spool directory,
-      // and an eagerly created empty target would make the migration skip the
-      // legacy pages.
-      if (config.remote.enabled) {
-        const spool = new RemoteSpool({
-          root: storageRoot,
-          projectRoot,
-          prefix: webPrefix(projectRoot),
-          externalPrefix: externalPrefix(projectRoot),
-          maxBytes: config.remote.maxBytes,
-          client,
-          logger,
-        });
-        await spool.init();
-        runtime.spool = spool;
-      }
-
-      // Memory cannot be rebuilt from the corpus, so carry it over before the
-      // first start on a node data directory that predates the move. A node
-      // that is already up has loaded its index list, so it has to restart once
-      // for the copied index to appear.
-      const migrated = await migrateMemoryIndex(
-        join(root, "data"),
-        engineDataDir,
-        memoryNamespace(projectRoot),
-        logger,
-      ).catch((error: unknown) => {
-        logger.warn("could not migrate project memory", String(error));
-        return false;
-      });
-      if (migrated && (await nodes.detect()).running) {
-        await nodes.stop("memory migration");
-      }
+      await startRemoteSpool(client);
+      await migrateMemory();
 
       runtime.node = await nodes.ensure();
-
-      // A memory index built by a different embedder is refused by the node and
-      // reports unhealthy rather than failing loudly. Repair it before the first
-      // recall so a broken store cannot pass as an empty one.
-      if (config.memory.enabled) {
-        await recoverMemoryIndex({
-          client,
-          nodeDir,
-          namespace: memoryNamespace(projectRoot),
-          logger,
-        }).catch((error: unknown) => {
-          logger.warn("could not check the memory index", String(error));
-        });
-      }
-
+      await repairMemory(client);
       await startIndexers(runtime.node);
-
-      // Automatic memory grows with every turn, so its age and size caps are
-      // enforced at startup and once an hour after that. Explicit memories are
-      // exempt; only capture-written summaries expire.
-      if (config.memory.enabled && runtime.memory) {
-        startRetention(runtime.memory, config.memory.retain, shutdown.signal, logger);
-      }
 
       runtime.phase = "ready";
       logger.info("xerj is ready", {
