@@ -339,6 +339,19 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: `/xerj-prjdocs` failed in another project with a generic toast.
+  The message was the defect: every command catch discarded the reason, so
+  "could not read project documentation" could have been an unavailable RPC, a
+  node that did not start, or a crawl error. All five catches (project docs,
+  system docs, reindex, remember, search, wrapup) now print the cause, the
+  server part logs failures into the ring so the panel shows them, and a node
+  that refuses to start reports its startup error. The indexer itself was
+  exercised against a scratch React project (715 pages), an empty folder, and a
+  folder with a malformed `package.json`: all three complete, so the failure is
+  not in detection or crawling. The most likely remaining cause is a cold node
+  on that project's first run, where the embedding model has to be fetched; the
+  next attempt will say so. 956 unit and 12 integration tests pass.
+
 - 2026-11-06: Tier S complete: the sidebar rebuild landed (3.0 h against an 8 h
   plan). `src/ui/prefs.ts` reads and writes the shared
   `tui-preferences.jsonc` under key `xerj` with a JSONC-tolerant parser and a
