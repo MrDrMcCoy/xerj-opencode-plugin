@@ -154,7 +154,7 @@ export const DEFAULT_CONFIG: Config = {
   memory: {
     enabled: true,
     captureTurns: true,
-    retain: { days: 180, maxCount: 500, maxBytes: 2 * 1024 ** 3 },
+    retain: { days: 180, maxCount: 0, maxBytes: 2 * 1024 ** 3 },
   },
   stats: { enabled: true, bytesPerToken: 4, maxBaselineBytes: 128 * 1024 },
   telemetry: { anomaly: false },

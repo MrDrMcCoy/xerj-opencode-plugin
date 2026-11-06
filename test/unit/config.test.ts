@@ -138,7 +138,8 @@ describe("memory.retain", () => {
   test("defaults bound age and size together", () => {
     const retain = DEFAULT_CONFIG.memory.retain;
     expect(retain.days).toBe(180);
-    expect(retain.maxCount).toBe(500);
+    // The count cap is off by default: age and size decide retention.
+    expect(retain.maxCount).toBe(0);
     expect(retain.maxBytes).toBe(2 * 1024 ** 3);
   });
 
@@ -153,14 +154,14 @@ describe("memory.retain", () => {
     const loaded = loadConfig({ memory: { retain: { days: 7 } } });
     expect(loaded.config.memory.retain).toEqual({
       days: 7,
-      maxCount: 500,
+      maxCount: 0,
       maxBytes: 2 * 1024 ** 3,
     });
   });
 
   test("a malformed value warns and falls back", () => {
     const loaded = loadConfig({ memory: { retain: { maxCount: "many" } } });
-    expect(loaded.config.memory.retain.maxCount).toBe(500);
+    expect(loaded.config.memory.retain.maxCount).toBe(0);
     expect(loaded.warnings.join("\n")).toContain("memory.retain.maxCount");
   });
 });
