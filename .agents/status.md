@@ -339,6 +339,23 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: Roadmap gates (0.7.0 plan change). Every capability that adds a
+  parser or a resident process now sits behind a closed configuration gate,
+  named per capability and never a build flag: `analysis.treeSitter.enabled`,
+  `analysis.lsp.enabled`, `analysis.edits.enabled`, and later
+  `context.compact`, `memory.curate`, `context.notes`. The roadmap gained a
+  Capability gates section with the config block, a key table, a per-capability
+  closed-behaviour matrix (a gated tool is not registered, `xerj_inspect`
+  degrades to its index-only part, retrieval is byte-identical), and five rules:
+  no registration when closed, no retrieval dependency, gates named in status
+  and panel, first use downloads visibly with a checksum, and no residue. Tier
+  M, L, and XL tables carry a Gate column; sequencing now requires each tier to
+  ship closed and prove both directions with a test. Risks gained rows for a
+  gate opening unnoticed, an open gate with a missing toolchain, and a gated
+  tool leaking processes; non-goals gained never enabling `analysis.*` by
+  default and never letting one key control two capabilities. The open
+  decisions lost their blocking character: each now has a safe default.
+
 - 2026-11-06: Wrote `.agents/roadmap.md`: a formal, prioritized plan for
   absorbing the CortexKit plugins and exposing more engine features. Sources
   measured from the installed packages (`opencode-magic-context` 0.49.23,
