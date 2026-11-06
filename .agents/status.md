@@ -340,6 +340,23 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-05: `/xerj-prjdocs eager` (0.7.0). Eager mode removes the two limits
+  that keep an ordinary run small - page type and link depth - and replaces
+  them with judgement. Each page goes to `ctx.experimental.generate.text` (the
+  host's stateless model call) and is kept, with its links followed, only on a
+  `yes`; the entry page is always kept so a site whose wording matches nothing
+  still seeds. Judgements cache by URL and are capped at
+  `prjdocs.eagerModelCalls` (150); past the cap or with no model, a
+  deterministic heuristic decides (name match with separators ignored,
+  documentation path, or two project terms). Unknown dependencies are searched
+  with `ctx.websearch.query` and crawled from the first documentation host,
+  cached in `prjdocs-discovered.json`. `prjdocs.eagerMaxPages` 120,
+  `eagerMaxDepth` 12, `prjdocs.eager` off by default. Measured on
+  docs.solidjs.com with the heuristic: 25 pages, 169 KB, 9 s, three levels
+  deep. Model and search paths are typechecked against the host SDK but have
+  not been exercised live (the running module predates them). 633 unit and 10
+  integration tests pass.
+
 - 2026-11-05: Project documentation corpus and `/xerj-prjdocs` (0.7.0).
   Detection reads `package.json`, `requirements.txt`, `Cargo.toml`, and
   `go.mod`, plus the runtime pins that name a version (`.nvmrc`,
