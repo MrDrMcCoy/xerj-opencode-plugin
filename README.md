@@ -383,8 +383,11 @@ never lands on the registry.
 
 The publish job stops if the tag and the manifest disagree, skips silently when
 that version is already published, and otherwise runs
-`npm publish --access public --provenance`. Provenance requires the `NPM_TOKEN`
-repository secret with publish rights for the package.
+`npm publish --access public --provenance`.
+
+`NPM_TOKEN` is read from the `npm` GitHub environment, so the job declares
+`environment: npm` and any protection rules on that environment (required
+reviewers, branch or tag restrictions) apply before it publishes.
 
 ## System documentation
 

@@ -19,6 +19,9 @@ jobs:
     name: Publish to npm
     needs: verify
     runs-on: ubuntu-latest
+    # `NPM_TOKEN` is an environment secret on `npm`, so the job has to join that
+    # environment or the token is not visible to it.
+    environment: npm
     permissions:
       # `--provenance` signs the publish with this workflow's identity.
       contents: read
