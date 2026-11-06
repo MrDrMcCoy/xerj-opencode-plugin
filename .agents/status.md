@@ -340,6 +340,15 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-05: Eager mode covers the whole Elasticsearch guide (0.7.0). In eager
+  mode the reference crawl seeds from the guide's `index.html` instead of
+  `rest-apis.html`, follows links one level deeper, and filters links, so
+  concepts, configuration, and operations pages come in. Release notes,
+  migration guides, and deprecated-API pages are excluded both as seeds and as
+  links, because they describe versions other than the one the node serves.
+  `crawlDocs` gained `urlFilter` for that. Measured: default 632 API pages in
+  38 s, eager 1437 pages in 114 s with zero excluded pages. 759 unit tests pass.
+
 - 2026-11-05: Coverage pass on this week's modules (0.7.0). New branches: the
   Elasticsearch chapter discovery plus its fallback list, a failing chapter that
   does not stop the others, the `urlPrefix` boundary, asset links never
