@@ -133,6 +133,7 @@ describe("server setup wiring", () => {
       expect(host.namespaces).toEqual(["xerj"]);
       expect([...host.tools].sort()).toEqual([
         "anomaly",
+        "dataset",
         "def",
         "forget",
         "index",
@@ -144,7 +145,7 @@ describe("server setup wiring", () => {
         "status",
         "sysdocs",
       ]);
-      expect(host.tools.length).toBe(11);
+      expect(host.tools.length).toBe(12);
       expect(host.toolHooks).toContain("execute.after");
       expect(host.sessionHooks).toContain("prompt");
       expect(host.sessionHooks).toContain("context");

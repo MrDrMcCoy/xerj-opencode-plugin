@@ -8,11 +8,17 @@ import { formatMemories } from "../memory/store.ts";
 import type { RemoteSpool } from "../remote/spool.ts";
 import { formatAnomalies, type AnomalyService } from "../telemetry/anomaly.ts";
 import type { Ledger } from "../stats/ledger.ts";
+import type { XerjClient } from "../node/client.ts";
+import { DatasetService } from "../datasets/service.ts";
+import type { Logger } from "../log.ts";
 import type { SearchService } from "../search/service.ts";
 import type { StatusSnapshot } from "../rpc.ts";
 
 export interface ToolOptions {
   readonly config: Config;
+  /** The node's HTTP client; the dataset tool manages arbitrary indexes. */
+  readonly getClient: () => XerjClient | null;
+  readonly logger: Logger;
   readonly ledger: Ledger;
   readonly getSearch: () => SearchService | null;
   readonly getMemory: () => MemoryStore | null;
@@ -115,6 +121,37 @@ const INDEX_INPUT = {
   additionalProperties: false,
 } as const;
 
+const DATASET_INPUT = {
+  type: "object",
+  properties: {
+    action: {
+      type: "string",
+      enum: ["list", "describe", "create", "delete", "export", "import"],
+      description: "What to do with the index or dataset.",
+    },
+    index: {
+      type: "string",
+      description: "Index name. For import, an optional target override.",
+    },
+    path: {
+      type: "string",
+      description: "File path for export or import (NDJSON, Elasticsearch dump format).",
+    },
+    mapping: {
+      type: "object",
+      description: "Mapping to create the index with, as an Elasticsearch `mappings` body.",
+    },
+    force: {
+      type: "boolean",
+      description: "Required to delete an index the plugin maintains.",
+    },
+    pageSize: { type: "number", description: "Documents per export request." },
+    batchSize: { type: "number", description: "Documents per import bulk request." },
+  },
+  required: ["action"],
+  additionalProperties: false,
+} as const;
+
 const FORGET_INPUT = {
   type: "object",
   properties: {
@@ -123,6 +160,12 @@ const FORGET_INPUT = {
   required: ["id"],
   additionalProperties: false,
 } as const;
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 export function buildTools(options: ToolOptions): ReadonlyArray<{
   name: string;
@@ -325,6 +368,110 @@ export function buildTools(options: ToolOptions): ReadonlyArray<{
             },
           },
         };
+      },
+    },
+    {
+      name: "dataset",
+      description:
+        "Manage extra indexes on this node and move data in and out: list, describe, create, delete, export to an Elasticsearch-compatible NDJSON dump, or import one. Use it to bring a dataset in for searching or to hand one to another tool.",
+      input: DATASET_INPUT,
+      options: { namespace: "xerj" },
+      execute: async (raw) => {
+        const input = (raw ?? {}) as Record<string, unknown>;
+        const action = typeof input.action === "string" ? input.action : "";
+        const client = options.getClient();
+        if (client === null) {
+          return { content: "the XERJ node is not available yet" };
+        }
+
+        const datasets = new DatasetService(client, options.logger);
+        const index = typeof input.index === "string" ? input.index : null;
+        const path = typeof input.path === "string" ? input.path : null;
+        const force = input.force === true;
+
+        switch (action) {
+          case "list": {
+            const rows = await datasets.list();
+            if (rows.length === 0) return { content: "no indexes on this node" };
+            return {
+              content: rows
+                .map(
+                  (row) =>
+                    `${row.index} · ${row.docs} docs · ${formatBytes(row.bytes)}` +
+                    (row.managed ? " · managed" : ""),
+                )
+                .join("\n"),
+              metadata: { xerj: { datasets: rows.length } },
+            };
+          }
+          case "describe": {
+            if (index === null) return { content: "describe needs an index" };
+            const described = await datasets.describe(index);
+            if (described.info === null) return { content: `no index named ${index}` };
+            return {
+              content:
+                `${described.info.index} · ${described.info.docs} docs · ` +
+                `${formatBytes(described.info.bytes)}\n` +
+                JSON.stringify(described.mapping, null, 2),
+              metadata: { xerj: { docs: described.info.docs } },
+            };
+          }
+          case "create": {
+            if (index === null) return { content: "create needs an index" };
+            const mapping =
+              typeof input.mapping === "object" && input.mapping !== null
+                ? (input.mapping as Record<string, unknown>)
+                : undefined;
+            const result = await datasets.create(index, mapping);
+            return {
+              content: result.created
+                ? `created ${index}`
+                : `${index} already exists; nothing changed`,
+            };
+          }
+          case "delete": {
+            if (index === null) return { content: "delete needs an index" };
+            const result = await datasets.remove(index, force);
+            return {
+              content: result.deleted ? `deleted ${index}` : (result.reason ?? "not deleted"),
+            };
+          }
+          case "export": {
+            if (index === null || path === null) return { content: "export needs index and path" };
+            const summary = await datasets.exportIndex({
+              index,
+              path,
+              pageSize: typeof input.pageSize === "number" ? input.pageSize : undefined,
+            });
+            return {
+              content:
+                `exported ${summary.docs} documents from ${index} to ${summary.path}` +
+                (summary.truncated ? " (stopped at the export limit)" : ""),
+              metadata: { xerj: { docs: summary.docs, bytes: summary.bytes } },
+            };
+          }
+          case "import": {
+            if (path === null) return { content: "import needs a path" };
+            const summary = await datasets.importDump({
+              path,
+              index: index ?? undefined,
+              mapping:
+                typeof input.mapping === "object" && input.mapping !== null
+                  ? (input.mapping as Record<string, unknown>)
+                  : undefined,
+              batchSize: typeof input.batchSize === "number" ? input.batchSize : undefined,
+            });
+            return {
+              content:
+                `imported ${summary.docs} documents into ${summary.index}` +
+                (summary.created ? " (index created)" : "") +
+                (summary.skipped > 0 ? ` · ${summary.skipped} lines skipped` : ""),
+              metadata: { xerj: { docs: summary.docs, batches: summary.batches } },
+            };
+          }
+          default:
+            return { content: `unknown dataset action: ${action || "(none)"}` };
+        }
       },
     },
     {

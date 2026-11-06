@@ -163,6 +163,8 @@ export class McpHost {
     const options: ToolOptions = {
       config: this.config,
       ledger: this.requireLedger(),
+      logger: this.logger,
+      getClient: () => this.client,
       getSearch: () => this.search,
       getMemory: () => this.memory,
       getSpool: () => this.spool,

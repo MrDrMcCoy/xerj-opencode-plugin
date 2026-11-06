@@ -82,6 +82,7 @@ describe("McpHost", () => {
 
     expect(tools.map((tool) => tool.name).sort()).toEqual([
       "anomaly",
+      "dataset",
       "def",
       "forget",
       "index",

@@ -229,6 +229,7 @@ The same entry works with a checkout path instead of the package name; see
 | `xerj_forget` | `id` | Retract a memory. |
 | `xerj_index` | `url?` or `path?` | Index a page or external file now. |
 | `xerj_anomaly` | `index`, `time_field?`, `function?`, `field?`, `bucket_span?`, `threshold?` | Score a metric series and return flagged buckets. |
+| `xerj_dataset` | `action` (`list`, `describe`, `create`, `delete`, `export`, `import`), `index?`, `path?`, `mapping?`, `force?`, `pageSize?`, `batchSize?` | Manage extra indexes and move data in or out as an Elasticsearch-compatible NDJSON dump. |
 | `xerj_reindex` | — | Run an incremental pass over the project, fetched pages, and hidden folders now. |
 | `xerj_sysdocs` | — | Index this machine's man and info pages; unchanged pages are skipped and vanished ones pruned. |
 | `xerj_prjdocs` | `eager?` | Index official docs for the project's languages, frameworks, and cloud APIs at the versions it uses. |
@@ -369,6 +370,38 @@ reach:
 Eager mode is off by default because it costs model calls and network traffic.
 Measured on `docs.solidjs.com` with the heuristic judge: 25 pages and 169 KB in
 9 s, reaching pages three levels below the entry.
+
+## Extra indexes and dumps
+
+`xerj_dataset` manages the indexes on this node beyond the plugin's own
+corpora, and moves data in and out in the format `_bulk` and `elasticdump`
+use.
+
+```
+xerj_dataset  action=list
+xerj_dataset  action=create index=notes mapping='{"properties":{"body":{"type":"text"}}}'
+xerj_dataset  action=export index=notes path=/tmp/notes.ndjson
+xerj_dataset  action=import path=/tmp/notes.ndjson index=notes-copy
+xerj_dataset  action=delete  index=notes-copy
+```
+
+A dump is one action line and one source line per document, which is what
+`_bulk` reads back:
+
+```
+{"index":{"_index":"notes","_id":"1"}}
+{"body":"alpha note","n":1}
+```
+
+Export pages through `_search` (`pageSize`, 500 by default) and stops at
+500,000 documents. Import streams the file line by line, creates the target
+index if it is missing, writes in batches (`batchSize`, 500 by default), and
+counts malformed lines as skipped rather than failing the run. Documents
+without `_id` get a generated id.
+
+Indexes the plugin maintains (`xop-*`, `.xerj-*`, `.xerj_*`) are marked
+`managed` in `list`, and `delete` refuses them unless `force` is true: dropping
+one loses a corpus the plugin rebuilds only on a full reindex.
 
 ## Standalone MCP server
 

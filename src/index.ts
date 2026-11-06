@@ -528,6 +528,9 @@ export default Plugin.define({
     const tools = buildTools({
       config,
       ledger,
+      logger,
+      getClient: () =>
+        runtime.node === null ? null : new XerjClient(runtime.node.baseUrl),
       getSearch: () => runtime.search,
       getMemory: () => runtime.memory,
       getSpool: () => runtime.spool,

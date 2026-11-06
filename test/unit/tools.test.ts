@@ -41,6 +41,8 @@ function toolFor(
   const recorded: Array<{ paths: string[]; bytes: number; hits: number }> = [];
   const tools = buildTools({
     config: DEFAULT_CONFIG,
+    logger: { debug() {}, info() {}, warn() {}, error() {}, entries: async () => [], flush: async () => {} },
+    getClient: () => null,
     getSearch: () => search,
     getMemory: () => (overrides.memory ?? null) as never,
     getSpool: () => (overrides.spool ?? null) as never,
@@ -128,6 +130,8 @@ describe("the rest of the tool surface", () => {
   } = {}) {
     const tools = buildTools({
       config: DEFAULT_CONFIG,
+    logger: { debug() {}, info() {}, warn() {}, error() {}, entries: async () => [], flush: async () => {} },
+    getClient: () => null,
       getSearch: () => overrides.search ?? null,
       getMemory: () => (overrides.memory ?? null) as never,
       getSpool: () => (overrides.spool ?? null) as never,
@@ -264,5 +268,126 @@ describe("the rest of the tool surface", () => {
       const result = await run(name, input);
       expect(result.content).toContain("not ready");
     }
+  });
+});
+
+describe("dataset tool", () => {
+  /** A client good enough for the dataset actions under test. */
+  function datasetClient(): {
+    calls: string[];
+    client: unknown;
+  } {
+    const calls: string[] = [];
+    const client = {
+      indices: async () => [
+        { index: "my-notes", docs: 3, bytes: 2048 },
+        { index: "xop-project-1234-docs", docs: 9, bytes: 4096 },
+      ],
+      mappings: async () => ({ "my-notes": { properties: { body: { type: "text" } } } }),
+      put: async (path: string) => void calls.push(`put ${path}`),
+      deleteIndex: async (index: string) => void calls.push(`delete ${index}`),
+      search: async () => ({
+        hits: { hits: [{ _id: "1", _source: { body: "x" } }] },
+      }),
+      bulk: async (index: string) => void calls.push(`bulk ${index}`),
+    };
+    return { calls, client };
+  }
+
+  function toolsWith(getClient: () => unknown): ReadonlyArray<{
+    name: string;
+    execute: (input: unknown, context: unknown) => Promise<unknown>;
+  }> {
+    return buildTools({
+      config: DEFAULT_CONFIG,
+      ledger: {} as never,
+      logger: {
+        debug() {},
+        info() {},
+        warn() {},
+        error() {},
+        entries: async () => [],
+        flush: async () => {},
+      },
+      getClient: getClient as never,
+      getSearch: () => null,
+      getMemory: () => null,
+      getSpool: () => null,
+      getAnomaly: () => null,
+      snapshot: async () => ({}) as never,
+    }) as never;
+  }
+
+  async function run(
+    getClient: () => unknown,
+    input: Record<string, unknown>,
+  ): Promise<{ content: string }> {
+    const tool = toolsWith(getClient).find((candidate) => candidate.name === "dataset");
+    expect(tool).toBeDefined();
+    return (await tool?.execute(input, {})) as { content: string };
+  }
+
+  test("lists indexes and marks the managed ones", async () => {
+    const { client } = datasetClient();
+    const result = await run(() => client, { action: "list" });
+
+    expect(result.content).toContain("my-notes · 3 docs");
+    expect(result.content).toContain("managed");
+  });
+
+  test("describes one index with its mapping", async () => {
+    const { client } = datasetClient();
+    const result = await run(() => client, { action: "describe", index: "my-notes" });
+
+    expect(result.content).toContain("my-notes");
+    expect(result.content).toContain('"body"');
+  });
+
+  test("a missing index says so", async () => {
+    const { client } = datasetClient();
+    const result = await run(() => client, { action: "describe", index: "absent" });
+
+    expect(result.content).toContain("no index named");
+  });
+
+  test("deleting a managed index explains that force is needed", async () => {
+    const { client, calls } = datasetClient();
+    const result = await run(() => client, {
+      action: "delete",
+      index: "xop-project-1234-docs",
+    });
+
+    expect(result.content).toContain("force");
+    expect(calls).toEqual([]);
+  });
+
+  test("creating an index is reported", async () => {
+    const { client, calls } = datasetClient();
+    const result = await run(() => client, { action: "create", index: "fresh" });
+
+    expect(result.content).toContain("created fresh");
+    expect(calls).toContain("put /fresh");
+  });
+
+  test("an unknown action is reported, not thrown", async () => {
+    const { client } = datasetClient();
+    const result = await run(() => client, { action: "explode" });
+
+    expect(result.content).toContain("unknown dataset action");
+  });
+
+  test("a missing client reports that the node is not ready", async () => {
+    const result = await run(() => null, { action: "list" });
+    expect(result.content).toContain("not available");
+  });
+
+  test("export and import require a path", async () => {
+    const { client } = datasetClient();
+    expect((await run(() => client, { action: "export", index: "x" })).content).toContain(
+      "needs index and path",
+    );
+    expect((await run(() => client, { action: "import" })).content).toContain(
+      "needs a path",
+    );
   });
 });
