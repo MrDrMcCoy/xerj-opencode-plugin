@@ -170,6 +170,30 @@ describe("the rest of the tool surface", () => {
     expect(result.metadata.xerj).toMatchObject({ hits: 1 });
   });
 
+  test("find reports matches with paths and lines", async () => {
+    const run = allTools();
+    const result = await run("find", { pattern: "createServer|somethingUnlikelyToExist", limit: 5 });
+
+    expect(result.metadata.xerj.kind).toBe("find");
+    expect(result.content.length).toBeGreaterThan(0);
+  });
+
+  test("find rejects an invalid pattern without throwing", async () => {
+    const run = allTools();
+    const result = await run("find", { pattern: "([" });
+
+    expect(result.content).toContain("Invalid pattern");
+    expect(result.metadata.xerj.error).toBe(true);
+  });
+
+  test("find lists paths when asked for files only", async () => {
+    const run = allTools();
+    const result = await run("find", { pattern: "**/*.md", files_only: true, limit: 5 });
+
+    expect(result.metadata.xerj.kind).toBe("find");
+    expect(result.content.length).toBeGreaterThan(0);
+  });
+
   test("imports reports cycles", async () => {
     const run = allTools();
     const result = await run("imports", {});

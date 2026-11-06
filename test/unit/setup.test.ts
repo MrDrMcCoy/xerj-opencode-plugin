@@ -135,6 +135,7 @@ describe("server setup wiring", () => {
         "anomaly",
         "dataset",
         "def",
+        "find",
         "forget",
         "imports",
         "index",
@@ -149,7 +150,7 @@ describe("server setup wiring", () => {
         "sysdocs",
         "zoom",
       ]);
-      expect(host.tools.length).toBe(16);
+      expect(host.tools.length).toBe(17);
       expect(host.toolHooks).toContain("execute.after");
       expect(host.sessionHooks).toContain("prompt");
       expect(host.sessionHooks).toContain("context");

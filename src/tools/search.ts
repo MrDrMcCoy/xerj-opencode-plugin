@@ -9,6 +9,7 @@ import type { RemoteSpool } from "../remote/spool.ts";
 import { formatAnomalies, type AnomalyService } from "../telemetry/anomaly.ts";
 import type { Ledger } from "../stats/ledger.ts";
 import type { XerjClient } from "../node/client.ts";
+import { findPaths, searchContent } from "../analysis/find.ts";
 import { findCycles, scanImports, specifiersIn } from "../analysis/imports.ts";
 import { readProjectFile } from "../analysis/walk.ts";
 import { DatasetService } from "../datasets/service.ts";
@@ -80,6 +81,22 @@ const ZOOM_INPUT = {
     k: { type: "number", description: "How many matches to return (1-10, default 2)." },
   },
   required: ["path", "symbol"],
+  additionalProperties: false,
+} as const;
+
+const FIND_INPUT = {
+  type: "object",
+  properties: {
+    pattern: {
+      type: "string",
+      description: "Regular expression for text, or a glob when files_only is true.",
+    },
+    glob: { type: "string", description: "Restrict the walk, for example src/** or *.ts." },
+    ignore_case: { type: "boolean", description: "Case-insensitive match." },
+    files_only: { type: "boolean", description: "Match paths instead of file contents." },
+    limit: { type: "number", description: "Maximum results (1-200, default 100)." },
+  },
+  required: ["pattern"],
   additionalProperties: false,
 } as const;
 
@@ -377,6 +394,76 @@ export function buildTools(options: ToolOptions): ReadonlyArray<{
               content: result.text,
               metadata: { xerj: { hits: result.hits.length, bytes: result.bytes } },
             };
+      },
+    },
+    {
+      name: "find",
+      description:
+        "Search the project's files with a regular expression, or list paths with a glob. Use it for exact text, symbols in comments, or a file pattern; the index answers concepts.",
+      input: FIND_INPUT,
+      options: { namespace: "xerj" },
+      execute: async (input, context) => {
+        const args = input as {
+          pattern: string;
+          glob?: string;
+          ignore_case?: boolean;
+          files_only?: boolean;
+          limit?: number;
+        };
+        const tool = context as { signal: AbortSignal };
+        const limit = Math.min(200, Math.max(1, Math.round(args.limit ?? 100)));
+
+        if (args.files_only === true) {
+          const paths = await findPaths(options.projectRoot, args.pattern, {
+            signal: tool.signal,
+            limit,
+          });
+          return {
+            content:
+              paths.length === 0
+                ? `No path matches ${args.pattern}.`
+                : [`${paths.length} ${paths.length === 1 ? "path" : "paths"}:`, ...paths].join("\n"),
+            metadata: { xerj: { kind: "find", paths: paths.length } },
+          };
+        }
+
+        let result;
+        try {
+          result = await searchContent(options.projectRoot, {
+            pattern: args.pattern,
+            glob: args.glob,
+            ignoreCase: args.ignore_case,
+            limit,
+            signal: tool.signal,
+          });
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          return {
+            content: `Invalid pattern: ${detail}`,
+            metadata: { xerj: { kind: "find", error: true } },
+          };
+        }
+
+        if (result.matches.length === 0) {
+          return {
+            content: `No match in ${result.files} files.`,
+            metadata: { xerj: { kind: "find", matches: 0, files: result.files } },
+          };
+        }
+
+        const lines = result.matches.map(
+          (match) => `${match.path}:${match.line}: ${match.text}`,
+        );
+        return {
+          content: [
+            `${result.matches.length} ${result.matches.length === 1 ? "match" : "matches"} across ${result.files} files` +
+              (result.truncated ? " (stopped at the limit)" : ""),
+            ...lines,
+          ].join("\n"),
+          metadata: {
+            xerj: { kind: "find", matches: result.matches.length, files: result.files },
+          },
+        };
       },
     },
     {

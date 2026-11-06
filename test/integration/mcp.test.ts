@@ -106,6 +106,7 @@ describe("MCP server", () => {
       "anomaly",
       "dataset",
       "def",
+      "find",
       "forget",
       "imports",
       "index",

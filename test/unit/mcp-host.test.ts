@@ -84,6 +84,7 @@ describe("McpHost", () => {
       "anomaly",
       "dataset",
       "def",
+      "find",
       "forget",
       "imports",
       "index",
