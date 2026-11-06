@@ -170,6 +170,19 @@ describe("the rest of the tool surface", () => {
     expect(result.metadata.xerj).toMatchObject({ hits: 1 });
   });
 
+  test("ast explains how to get ast-grep when it is missing", async () => {
+    // This machine has no ast-grep; the tool must say so rather than fail.
+    const run = allTools();
+    const result = await run("ast", { pattern: "console.log($A)", lang: "ts" });
+
+    if (result.metadata.xerj.available === false) {
+      expect(result.content).toContain("ast-grep is not installed");
+      expect(result.content).toContain("xerj_find");
+    } else {
+      expect(result.content).toMatch(/structural/);
+    }
+  });
+
   test("find reports matches with paths and lines", async () => {
     const run = allTools();
     const result = await run("find", { pattern: "createServer|somethingUnlikelyToExist", limit: 5 });

@@ -104,6 +104,7 @@ describe("MCP server", () => {
     };
     expect(list.tools.map((tool) => tool.name).sort()).toEqual([
       "anomaly",
+      "ast",
       "dataset",
       "def",
       "find",

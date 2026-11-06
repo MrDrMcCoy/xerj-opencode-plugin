@@ -9,6 +9,7 @@ import type { RemoteSpool } from "../remote/spool.ts";
 import { formatAnomalies, type AnomalyService } from "../telemetry/anomaly.ts";
 import type { Ledger } from "../stats/ledger.ts";
 import type { XerjClient } from "../node/client.ts";
+import { hasAstGrep, searchAst } from "../analysis/ast.ts";
 import { findPaths, searchContent } from "../analysis/find.ts";
 import { findCycles, scanImports, specifiersIn } from "../analysis/imports.ts";
 import { readProjectFile } from "../analysis/walk.ts";
@@ -97,6 +98,24 @@ const FIND_INPUT = {
     limit: { type: "number", description: "Maximum results (1-200, default 100)." },
   },
   required: ["pattern"],
+  additionalProperties: false,
+} as const;
+
+const AST_INPUT = {
+  type: "object",
+  properties: {
+    pattern: {
+      type: "string",
+      description: "ast-grep pattern with metavariables, for example console.log($A).",
+    },
+    lang: {
+      type: "string",
+      description: "Grammar: ts, tsx, js, python, rust, go, java, and others ast-grep knows.",
+    },
+    glob: { type: "string", description: "Restrict to paths matching this glob." },
+    limit: { type: "number", description: "Maximum matches (1-100, default 50)." },
+  },
+  required: ["pattern", "lang"],
   additionalProperties: false,
 } as const;
 
@@ -394,6 +413,50 @@ export function buildTools(options: ToolOptions): ReadonlyArray<{
               content: result.text,
               metadata: { xerj: { hits: result.hits.length, bytes: result.bytes } },
             };
+      },
+    },
+    {
+      name: "ast",
+      description:
+        "Structural search with ast-grep: match code by shape, not text, with metavariables like $A. Read-only, and only when ast-grep is installed.",
+      input: AST_INPUT,
+      options: { namespace: "xerj" },
+      execute: async (input, context) => {
+        const args = input as { pattern: string; lang: string; glob?: string; limit?: number };
+        const tool = context as { signal: AbortSignal };
+
+        const result = await searchAst({
+          root: options.projectRoot,
+          pattern: args.pattern,
+          lang: args.lang,
+          glob: args.glob,
+          limit: Math.min(100, Math.max(1, Math.round(args.limit ?? 50))),
+          signal: tool.signal,
+        });
+
+        if (!result.available) {
+          return {
+            content:
+              "ast-grep is not installed, so structural search is unavailable. " +
+              "Install it (cargo install ast-grep, or the ast-grep package for your system) " +
+              "or use xerj_find for a regex search.",
+            metadata: { xerj: { kind: "ast", available: false } },
+          };
+        }
+        if (result.matches.length === 0) {
+          return {
+            content: `No structural match for ${args.pattern} in ${args.lang}.`,
+            metadata: { xerj: { kind: "ast", matches: 0 } },
+          };
+        }
+
+        return {
+          content: [
+            `${result.matches.length} structural ${result.matches.length === 1 ? "match" : "matches"}:`,
+            ...result.matches.map((match) => `${match.path}:${match.line}: ${match.text}`),
+          ].join("\n"),
+          metadata: { xerj: { kind: "ast", matches: result.matches.length } },
+        };
       },
     },
     {
