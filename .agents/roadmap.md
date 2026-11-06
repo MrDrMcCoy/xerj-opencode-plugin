@@ -101,7 +101,8 @@ setting, not a build flag: the same published package carries the capability.
 | `analysis.treeSitter.languages` | `[]` | Which grammars to download. Empty means "detect": the languages the project's own files show, then download those grammars and no others |
 | `analysis.treeSitter.maxParseBytes` | 1 MiB | Files above this are skipped, so a bundled asset is never parsed |
 | `analysis.lsp.enabled` | `false` | Start language servers for definitions, references, call hierarchy, diagnostics |
-| `analysis.lsp.servers` | `{}` | Command per language. Empty means "discover": a server already present in the project's `node_modules/.bin` or on `PATH`. Nothing is ever installed |
+| `analysis.lsp.servers` | `{}` | Empty means auto: detect languages, then resolve each server in the order below, installing one when none is found. A non-empty map names the commands and turns auto-install off |
+| `analysis.lsp.autoInstall` | `true` | With `servers` empty, install a missing server into the plugin's cache. `false` reports the missing server instead |
 | `analysis.lsp.idleMs` | 5 min | Stop a server that answered nothing for this long |
 | `analysis.lsp.maxServers` | 2 | Cap concurrent servers, so one project cannot fill memory |
 | `analysis.lsp.timeoutMs` | 2 s | Per-request deadline; a miss returns no result rather than delaying a turn |
@@ -124,16 +125,16 @@ started, no port is opened, and no network call is made.
 | You enable | What it detects and fetches, with every other key left at default |
 |---|---|
 | `analysis.treeSitter.enabled` | Languages from the project's files, the same detection the docs indexer already runs. Grammars for those languages download once, checksum-verified, into `<data root>/grammars/<language>/`, and every later parse reads the cache. A failed download logs once, names the language, and disables only that language |
-| `analysis.lsp.enabled` | Nothing downloads. For each language it looks for a server in `servers[language]` first, then the project's `node_modules/.bin`, then `PATH`. A language with no server logs one warning naming the key and stays unanalysed; the others work |
+| `analysis.lsp.enabled` | Detects the project's languages, then resolves a server for each: `servers[language]`, then the project's `node_modules/.bin`, then `PATH`, then the plugin's own cache. If none is found and `autoInstall` is true, it installs a pinned server into `<data root>/lsp/<language>/<version>/`, probes it with `--version`, and uses it. A language with no installable server logs once and stays unanalysed |
 | `share.enabled` | Nothing until `xerj_share` is invoked. The tool then prints the address and expiry before it accepts a request |
 | `hub.enabled` | The cached catalogue only. `hub.network` adds downloads; until then, a missing pack reports which key would fetch it |
 
 Two rules follow from the table:
 
-- **Grammars are ours and download; language servers are not ours and never
-  install.** A parser is a file the plugin owns and caches. A language server
-  is part of the project's toolchain, so a missing one is reported rather than
-  added.
+- **Both are cached by the plugin, and neither lands in the project.** A
+  grammar and an installed server live under the XERJ data root, pinned by
+  version and verified before use. The project's `node_modules` and `PATH` are
+  read, never written.
 - **Enabling a gate never writes to the project.** Downloads land under the
   XERJ data root, never in `node_modules`, never in the repository.
 
@@ -142,6 +143,38 @@ pinned `tree-sitter-wasms` pack (51.8 MB, 0.1.13, every language at once) or
 per-language release assets fetched one at a time. Whichever is chosen is
 pinned with a version and a checksum at that point, and the manifest lives
 beside the cache so an upgrade is a version change, not a silent replacement.
+
+### Language servers the plugin can install
+
+Measured from the registry on 2026-11-06. The npm set together is about
+26 MB, which is the cost of enabling auto-install on a mixed project.
+
+| Language | Server | Unpacked | Source |
+|---|---|---|---|
+| TypeScript, JavaScript | `typescript` (`tsserver`) | 2.5 MB | npm |
+| Python | `pyright` | 19.5 MB | npm |
+| JSON, CSS, HTML | `vscode-langservers-extracted` | 0.9 MB | npm |
+| YAML | `yaml-language-server` | 1.2 MB | npm |
+| Shell | `bash-language-server` | 2.3 MB | npm |
+| Rust | `rust-analyzer` | release asset | GitHub releases |
+| Go | `gopls` | — | needs the project's Go toolchain |
+| C, C++ | `clangd` | — | needs the OS LLVM package |
+
+A language whose server needs a compiler the project does not have stays
+unanalysed, with one warning naming the missing toolchain. Installing Go or
+LLVM is the project's dependency management, not this plugin's.
+
+Four safety rules for an install:
+
+1. A pinned version and a checksum, both recorded beside the cache, as the
+   engine binary already does.
+2. npm installs run with `--ignore-scripts`, so a package cannot execute code
+   during install, and the expected binary is probed with `--version` before
+   first use.
+3. The install target is `<data root>/lsp/<language>/<version>/`, never the
+   project and never a global prefix.
+4. A failed or offline install logs once, names the language and the package,
+   retries at most daily, and leaves every other language working.
 
 ### Behaviour when a gate is closed
 
@@ -236,7 +269,8 @@ Ship these first. None adds a runtime, a grammar, or a write path.
 
 | Item | Source | What it does | Risk | Gate |
 |---|---|---|---|---|
-| LSP pool | AFT | Per-language server from the project's own toolchain; definitions, references, call hierarchy, diagnostics | Process leaks, resident memory, missing servers | `analysis.lsp.enabled` |
+| LSP pool | AFT | Per-language server with cached downloads; definitions, references, call hierarchy, diagnostics | Process leaks, resident memory, supply chain | `analysis.lsp.enabled` |
+| Server installer | AFT `lsp-auto-install` | Pinned, checksummed install of a missing server into the data root | Disk use, failed installs offline | `analysis.lsp.enabled` with `autoInstall` |
 | `xerj_callers`, `xerj_impact` | AFT callgraph | Real callers via `prepareCallHierarchy` | Depends on the pool; per-language coverage varies | `analysis.lsp.enabled` |
 | `xerj_inspect` | AFT inspect | Diagnostics, unused exports, dead code, TODOs | Accuracy varies by language; must report confidence | `analysis.lsp.enabled`; `analysis.treeSitter.enabled` for the full result |
 | `xerj_share` | XERJ engine | Read-only link with passcode and expiry | Opens a listener; the tool prints the address and expiry before it answers anyone | `share.enabled` |
@@ -253,7 +287,7 @@ Ship these first. None adds a runtime, a grammar, or a write path.
 | Not doing | Why |
 |---|---|
 | Desktop app | A separate binary over another plugin's database; not a plugin feature |
-| Auto-installing language servers | A server belongs to the project's toolchain. Suggesting the missing `npm` or `cargo` package is a warning; installing it is the project's dependency management, not a retrieval plugin's |
+| Installing a language toolchain (Go, Rust, LLVM) | A server can be fetched; the compiler and sysroot it needs belong to the project. The plugin installs the server and reports the missing toolchain |
 | Bash detach, wait, notifications | The host owns the shell; a second one competes with it |
 | Silent field reports | Sends data outward; opt-in at most, never automatic |
 | Bundling grammars in the npm package | 50 to 100 MB and a per-platform native build matrix |
@@ -277,6 +311,8 @@ Ship these first. None adds a runtime, a grammar, or a write path.
 | A gate opens without a decision | Gates default to closed, an upgrade never turns one on, and the panel prints the key that is closed |
 | A gate is open but its toolchain is missing | One probe at enable time; a missing server or grammar logs once, names the key, and leaves the capability off rather than retrying per call |
 | A gated tool leaks memory or processes | The LSP pool has an idle stop and a server cap; a test asserts zero surviving processes after teardown |
+| An installed server is compromised | Pinned version and checksum, `--ignore-scripts` on npm installs, and a `--version` probe before first use |
+| Installed servers fill the disk | Measured at about 26 MB for the npm set; the panel reports each install and a cache purge removes them |
 
 ## Sequencing and gates
 
@@ -289,7 +325,9 @@ Ship these first. None adds a runtime, a grammar, or a write path.
    download path is verified with the gate open, and the incremental pass
    time is unchanged with it closed.
 3. **Tier L**, one language at a time. Gate: a week of live use with no
-   process count growth, and a test that a closed gate starts no server.
+   process count growth, a test that a closed gate starts no server, and an
+   install proven offline (it fails once, names the package, and leaves every
+   other language working).
 4. **Tier XL**, curation depth and notes. Gate: curation proven by a dry run
    that names what it would change before it changes anything.
 5. Every tier ships with its gates closed by default, and the release notes

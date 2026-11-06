@@ -339,6 +339,24 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: LSP servers auto-detect and auto-install (0.7.0 plan). With
+  `analysis.lsp.servers` empty, the plugin now detects the project's languages
+  and resolves a server in one order: the configured command, the project's
+  `node_modules/.bin`, `PATH`, then the plugin's cache; if none is found and
+  `analysis.lsp.autoInstall` (default true) is set, it installs a pinned server
+  into `<data root>/lsp/<language>/<version>/` and probes it with `--version`.
+  A non-empty `servers` map still names commands and turns auto-install off.
+  Registry measurements: the npm set totals about 26 MB (typescript 2.5 MB,
+  pyright 19.5 MB, vscode-langservers-extracted 0.9 MB,
+  yaml-language-server 1.2 MB, bash-language-server 2.3 MB), each recorded in
+  the roadmap. Safety rules: pinned version and checksum beside the cache,
+  `--ignore-scripts` for npm installs, a probe before first use, an install
+  target outside the project, and one daily retry after a failure. Go and
+  clangd need toolchains the plugin will not install, so those languages are
+  reported instead; the non-goal changed from "auto-installing language
+  servers" to "installing a language toolchain". Tier L gained a server
+  installer row and sequencing gained an offline-install gate.
+
 - 2026-11-06: Gate behaviour made explicit (0.7.0 plan). Added a "What enabling
   a gate does" subsection with a row per key: at the default configuration no
   language is detected for analysis, no grammar is requested, no server probed,
