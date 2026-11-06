@@ -350,7 +350,9 @@ publish, and live TUI verification remain.
   manifest while `v9.9.9` is rejected, and `npm view` reports 0.6.8 as
   published and 0.7.0 as not. The workflow is committed but not pushed, so
   GitHub has not run it yet; the `NPM_TOKEN` secret must exist before the
-  first tag push.
+  first tag push. `NPM_TOKEN` lives in the `npm` GitHub environment, so the
+  publish job declares `environment: npm`; an environment-less job cannot see
+  an environment secret and would fail at authentication.
 
 - 2026-11-05: `/xerj-prjdocs eager` (0.7.0). Eager mode removes the two limits
   that keep an ordinary run small - page type and link depth - and replaces
