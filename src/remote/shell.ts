@@ -271,92 +271,120 @@ export async function shellReadPaths(
   return files;
 }
 
+/** Accumulates candidates while `cd` moves the working directory. */
+interface CandidateScan {
+  readonly found: string[];
+  readonly seen: Set<string>;
+  cwd: string;
+}
+
 /** Literal path-shaped arguments, in command order, deduped and capped. */
 function candidatesFrom(command: string, base: string): string[] {
-  const found: string[] = [];
-  const seen = new Set<string>();
-  let currentCwd = base;
-
-  const add = (value: string): void => {
-    if (!isLiteral(value)) return;
-
-    const absolute = isAbsolute(value)
-      ? resolve(value)
-      : resolve(currentCwd, value);
-    if (seen.has(absolute)) return;
-
-    seen.add(absolute);
-    found.push(absolute);
-  };
+  const scan: CandidateScan = { found: [], seen: new Set(), cwd: base };
 
   for (const tokens of shellCommands(command)) {
-    let index = 0;
-    while (index < tokens.length) {
-      const token = tokens[index] ?? "";
-      if (
-        WRAPPERS.has(basename(token)) ||
-        token.startsWith("-") ||
-        ASSIGNMENT.test(token)
-      ) {
-        index += 1;
-        continue;
-      }
-      break;
-    }
-
-    const word = tokens[index] ?? "";
-    index += 1;
+    const start = commandWordIndex(tokens);
+    const word = tokens[start] ?? "";
 
     // An executable referenced by path (`./scripts/gen.sh`) is a file too.
-    if (word.includes("/")) add(word);
+    if (word.includes("/")) addCandidate(scan, word);
 
     if (word === "cd") {
-      const target = tokens[index];
-      if (target !== undefined && isLiteral(target)) {
-        currentCwd = isAbsolute(target)
-          ? resolve(target)
-          : resolve(currentCwd, target);
-      }
+      scan.cwd = cdTarget(scan.cwd, tokens[start + 1]);
       continue;
     }
 
     // `xargs -a list` reads arguments (paths) from a file, so that file is a
     // reference. Arguments xargs receives on stdin cannot be known here.
     if (basename(word) === "xargs") {
-      for (let cursor = index; cursor < tokens.length; cursor += 1) {
-        const argument = tokens[cursor] ?? "";
-        if (argument === "-a" || argument === "--arg-file") {
-          const value = tokens[cursor + 1];
-          if (value !== undefined) {
-            add(value);
-            cursor += 1;
-          }
-        } else if (argument.startsWith("--arg-file=")) {
-          add(argument.slice("--arg-file=".length));
-        }
-      }
+      addXargsFiles(scan, tokens, start + 1);
       continue;
     }
 
-    let afterShortFlag = false;
-    for (const argument of tokens.slice(index)) {
-      if (afterShortFlag) {
-        afterShortFlag = false;
-        continue;
-      }
-
-      if (argument.startsWith("-")) {
-        afterShortFlag = SHORT_FLAG.test(argument);
-        continue;
-      }
-      if (argument.startsWith("+")) continue;
-
-      add(argument);
-      if (found.length >= MAX_CANDIDATES) return found;
-    }
+    addArguments(scan, tokens, start + 1);
+    if (scan.found.length >= MAX_CANDIDATES) return scan.found;
   }
 
-  return found;
+  return scan.found;
+}
+
+/** Skips wrappers, flags, and `VAR=value` prefixes to find the command word. */
+function commandWordIndex(tokens: ReadonlyArray<string>): number {
+  let index = 0;
+  while (index < tokens.length) {
+    const token = tokens[index] ?? "";
+    if (
+      WRAPPERS.has(basename(token)) ||
+      token.startsWith("-") ||
+      ASSIGNMENT.test(token)
+    ) {
+      index += 1;
+      continue;
+    }
+    break;
+  }
+  return index;
+}
+
+function addCandidate(scan: CandidateScan, value: string): void {
+  if (!isLiteral(value)) return;
+
+  const absolute = isAbsolute(value) ? resolve(value) : resolve(scan.cwd, value);
+  if (scan.seen.has(absolute)) return;
+
+  scan.seen.add(absolute);
+  scan.found.push(absolute);
+}
+
+/** The directory a `cd` moves to, or the current one when it cannot be known. */
+function cdTarget(cwd: string, target: string | undefined): string {
+  if (target === undefined || !isLiteral(target)) return cwd;
+  return isAbsolute(target) ? resolve(target) : resolve(cwd, target);
+}
+
+function addXargsFiles(
+  scan: CandidateScan,
+  tokens: ReadonlyArray<string>,
+  from: number,
+): void {
+  for (let cursor = from; cursor < tokens.length; cursor += 1) {
+    const argument = tokens[cursor] ?? "";
+    if (argument === "-a" || argument === "--arg-file") {
+      const value = tokens[cursor + 1];
+      if (value !== undefined) {
+        addCandidate(scan, value);
+        cursor += 1;
+      }
+      continue;
+    }
+    if (argument.startsWith("--arg-file=")) {
+      addCandidate(scan, argument.slice("--arg-file=".length));
+    }
+  }
+}
+
+/** Every literal argument; a short flag's value is skipped, not indexed. */
+function addArguments(
+  scan: CandidateScan,
+  tokens: ReadonlyArray<string>,
+  from: number,
+): void {
+  let afterShortFlag = false;
+  for (let cursor = from; cursor < tokens.length; cursor += 1) {
+    const argument = tokens[cursor] ?? "";
+    if (afterShortFlag) {
+      afterShortFlag = false;
+      continue;
+    }
+    if (argument.startsWith("-")) {
+      afterShortFlag = SHORT_FLAG.test(argument);
+      continue;
+    }
+    if (argument.startsWith("+")) continue;
+
+    addCandidate(scan, argument);
+    if (scan.found.length >= MAX_CANDIDATES) return;
+  }
 }
 
 /** Variables, globs, and tilde expansion need a shell to resolve. */

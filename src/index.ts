@@ -57,11 +57,14 @@ import {
   unindexedDocsHint,
   withoutBrainFolders,
 } from "./index/hint.ts";
+import {
+  handleToolResult,
+  type ToolResultEvent,
+} from "./hooks/tool-results.ts";
 import { recoverMemoryIndex } from "./memory/health.ts";
 import { startRetention } from "./memory/retain.ts";
 import { migrateMemoryIndex, migrateProjectStorage } from "./memory/migrate.ts";
 import { RemoteSpool } from "./remote/spool.ts";
-import { shellReadPaths } from "./remote/shell.ts";
 import { BrainGraph } from "./search/brains.ts";
 import { SearchService } from "./search/service.ts";
 import { formatAge } from "./ui/format.ts";
@@ -398,85 +401,17 @@ export default Plugin.define({
       for (const tool of tools) editor.add(tool as never);
     });
 
-    await ctx.tool.hook("execute.after", async (event) => {
-      if (event.status !== "completed") return;
-      runtime.lifecycle?.touch(event.sessionID);
-
-      // Any tool that fetched a URL (webfetch, MCP extract, search) can spool
-      // its text. A short result is an error or a list, not a document. The
-      // spool is fire-and-forget, like the other ingests: the write is local,
-      // and a failure must not delay or fail the tool result.
-      const urlInput = event.input as { url?: unknown } | null;
-      const url = typeof urlInput?.url === "string" ? urlInput.url : null;
-      const content = typeof event.result.content === "string" ? event.result.content : null;
-      if (url !== null && content !== null && content.length >= 200 && runtime.spool) {
-        void runtime.spool
-          .ingestUrl(url, content)
-          .then((stored) => {
-            if (stored) runtime.search?.invalidate();
-          })
-          .catch((error: unknown) => {
-            logger.debug("could not spool a fetched document", String(error));
-          });
-      }
-
-      // Bash reads are invisible per file, so parse the command for literal
-      // file references and index only existing files outside the project.
-      if (event.tool === "bash" || event.tool === "shell") {
-        const bashInput = event.input as {
-          command?: unknown;
-          cwd?: unknown;
-          workdir?: unknown;
-          directory?: unknown;
-        } | null;
-        const command = typeof bashInput?.command === "string" ? bashInput.command : null;
-        const spool = runtime.spool;
-        if (command === null || !spool) return;
-
-        const read = await shellReadPaths(command, toolCwd(bashInput, projectRoot));
-        const paths = read.filter((path) => isOutside(projectRoot, path));
-        if (paths.length === 0) return;
-
-        void Promise.all(
-          paths.map((path) =>
-            spool.ingestExternalFile(path, { skipUnchanged: true }).catch(() => null),
-          ),
-        )
-          .then((stored) => {
-            if (stored.some((entry) => entry !== null)) runtime.search?.invalidate();
-          })
-          .catch((error: unknown) => {
-            logger.debug("could not index a shell-read file", String(error));
-          });
-        return;
-      }
-
-      if (event.tool !== "read") return;
-
-      // OpenCode's built-in read uses `filePath`; other tool packs use `path`.
-      const input = event.input as { filePath?: unknown; path?: unknown } | null;
-      const filePath =
-        typeof input?.filePath === "string"
-          ? input.filePath
-          : typeof input?.path === "string"
-            ? input.path
-            : null;
-      if (filePath === null) return;
-      await ledger.recordRead(event.sessionID, filePath, contentBytes(event.result.content));
-
-      // A read outside the project is the only signal that the file matters.
-      // Index it in the background so the read itself is not delayed.
-      if (runtime.spool && isOutside(projectRoot, filePath)) {
-        void runtime.spool
-          .ingestExternalFile(filePath, { skipUnchanged: true })
-          .then((stored) => {
-            if (stored) runtime.search?.invalidate();
-          })
-          .catch((error: unknown) => {
-            logger.debug("could not index an external file", String(error));
-          });
-      }
-    });
+    await ctx.tool.hook("execute.after", (event) =>
+      handleToolResult(event as ToolResultEvent, {
+        projectRoot,
+        logger,
+        spool: runtime.spool,
+        invalidate: () => runtime.search?.invalidate(),
+        touch: (sessionID) => runtime.lifecycle?.touch(sessionID),
+        recordRead: (sessionID, path, bytes) =>
+          ledger.recordRead(sessionID, path, bytes),
+      }),
+    );
 
     // Prompts this instance saw; scopes the server-wide event stream to this
     // project's sessions for memory capture.
@@ -963,18 +898,6 @@ function datasetRows(
     .filter((dataset) => dataset.docs > 0 || dataset.bytes > 0);
 }
 
-function toolCwd(input: unknown, fallback: string): string {
-  if (typeof input !== "object" || input === null) return fallback;
-
-  const record = input as Record<string, unknown>;
-  for (const key of ["cwd", "workdir", "directory"]) {
-    const value = record[key];
-    if (typeof value === "string" && value.length > 0) {
-      return isAbsolute(value) ? resolve(value) : resolve(fallback, value);
-    }
-  }
-  return fallback;
-}
 
 async function pathExists(path: string): Promise<boolean> {
   try {
@@ -985,11 +908,6 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
-function isOutside(root: string, filePath: string): boolean {
-  const base = resolve(root);
-  const absolute = resolve(filePath);
-  return absolute !== base && !absolute.startsWith(base + sep);
-}
 
 function brainStatus(
   indexer: BrainIndexer | null,
@@ -1032,18 +950,6 @@ async function recentMessages(logger: Logger): Promise<string[]> {
     .map((entry) => `${entry.level}: ${entry.message} (${formatAge(now, entry.at)})`);
 }
 
-function contentBytes(content: unknown): number {
-  if (typeof content === "string") return Buffer.byteLength(content, "utf8");
-  if (!Array.isArray(content)) return 0;
-
-  return content.reduce((total, entry) => {
-    if (typeof entry === "object" && entry !== null && "text" in entry) {
-      const text = (entry as { text?: unknown }).text;
-      if (typeof text === "string") return total + Buffer.byteLength(text, "utf8");
-    }
-    return total;
-  }, 0);
-}
 
 function asStorage(storage: Plugin.Context["storage"]): KeyValueStorage {
   return {
