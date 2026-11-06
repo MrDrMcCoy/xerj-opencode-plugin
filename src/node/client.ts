@@ -44,6 +44,10 @@ export interface NodeInfo {
 }
 
 const DEFAULT_TIMEOUT_MS = 5_000;
+// A write that carries a `semantic_text` field is embedded before it is
+// acknowledged, and the neural embedder needs seconds per document. Reads and
+// searches stay on the short timeout so a stalled node cannot block a turn.
+const WRITE_TIMEOUT_MS = 120_000;
 const HTTP_NOT_FOUND = 404;
 
 /** Observes responses without changing them; used for 429 accounting. */
@@ -163,12 +167,17 @@ export class XerjClient {
     return result;
   }
 
+  /** Creates or replaces a document. A semantic mapping can load the model. */
   async put(path: string, body: unknown, label: string): Promise<void> {
-    const response = await this.request(path, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    const response = await this.request(
+      path,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      },
+      WRITE_TIMEOUT_MS,
+    );
 
     if (!response.ok) {
       const text = await response.text().catch(() => "");
@@ -183,11 +192,15 @@ export class XerjClient {
       .map((id) => JSON.stringify({ delete: { _index: index, _id: id } }))
       .join("\n");
 
-    const response = await this.request(`/_bulk?refresh=true`, {
-      method: "POST",
-      headers: { "content-type": "application/x-ndjson" },
-      body: `${lines}\n`,
-    });
+    const response = await this.request(
+      `/_bulk?refresh=true`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/x-ndjson" },
+        body: `${lines}\n`,
+      },
+      WRITE_TIMEOUT_MS,
+    );
 
     if (!response.ok) {
       const text = await response.text().catch(() => "");
@@ -208,11 +221,15 @@ export class XerjClient {
       ])
       .join("\n");
 
-    const response = await this.request(`/_bulk?refresh=true`, {
-      method: "POST",
-      headers: { "content-type": "application/x-ndjson" },
-      body: `${lines}\n`,
-    });
+    const response = await this.request(
+      `/_bulk?refresh=true`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/x-ndjson" },
+        body: `${lines}\n`,
+      },
+      WRITE_TIMEOUT_MS,
+    );
 
     if (!response.ok) {
       const text = await response.text().catch(() => "");
@@ -338,11 +355,15 @@ export class XerjClient {
     return response.json();
   }
 
-  private async request(path: string, init?: RequestInit): Promise<Response> {
+  private async request(
+    path: string,
+    init?: RequestInit,
+    timeoutMs = this.timeoutMs,
+  ): Promise<Response> {
     const base = await this.resolveBase();
 
     try {
-      return await this.send(base, path, init);
+      return await this.send(base, path, init, timeoutMs);
     } catch (error) {
       // A stopped node is expected: the idle timer shuts it down. Re-ensure and
       // retry once, unless the caller cancelled or the failure was not a
@@ -354,7 +375,7 @@ export class XerjClient {
       this.resolver.invalidate?.();
       const retryBase = await this.resolver.ensure();
       this.current = retryBase;
-      return this.send(retryBase, path, init);
+      return this.send(retryBase, path, init, timeoutMs);
     }
   }
 
@@ -364,10 +385,15 @@ export class XerjClient {
     return this.current;
   }
 
-  private send(base: string, path: string, init?: RequestInit): Promise<Response> {
+  private send(
+    base: string,
+    path: string,
+    init?: RequestInit,
+    timeoutMs = this.timeoutMs,
+  ): Promise<Response> {
     return fetch(`${base}${path}`, {
       ...init,
-      signal: init?.signal ?? AbortSignal.timeout(this.timeoutMs),
+      signal: init?.signal ?? AbortSignal.timeout(timeoutMs),
     }).then((response) => {
       this.observer?.onResponse?.(response.status);
       return response;

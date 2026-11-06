@@ -448,3 +448,34 @@ describe("memory listing", () => {
     ).rejects.toBeInstanceOf(NodeRequestError);
   });
 });
+
+describe("write timeout", () => {
+  function slowFetch(delayMs: number): FetchBehavior {
+    return (_url, init) =>
+      new Promise((resolve, reject) => {
+        const timer = setTimeout(() => resolve(response(200, { ok: true })), delayMs);
+        init?.signal?.addEventListener("abort", () => {
+          clearTimeout(timer);
+          reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+        });
+      });
+  }
+
+  test("a bulk write outlives the short read timeout", async () => {
+    stubFetch(slowFetch(80));
+    const subject = new XerjClient("http://127.0.0.1:9240", 20);
+
+    // Embedding a document on a neural node takes seconds; a read timeout
+    // would abandon the write after it had already been accepted.
+    await expect(
+      subject.bulk("idx", [{ id: "a", source: { body: "text" } }]),
+    ).resolves.toBeUndefined();
+  });
+
+  test("a read still gives up on the short timeout", async () => {
+    stubFetch(slowFetch(80));
+    const subject = new XerjClient("http://127.0.0.1:9240", 20);
+
+    await expect(subject.get("/slow", "slow read")).rejects.toBeDefined();
+  });
+});
