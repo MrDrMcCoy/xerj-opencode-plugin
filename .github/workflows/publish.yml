@@ -6,6 +6,7 @@ name: Publish
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -63,9 +64,19 @@ jobs:
       - run: bun install --frozen-lockfile
         if: steps.check.outputs.publish == 'true'
 
+      # A token scoped to staging can create the version but not release it;
+      # npm answers E_STAGE_REQUIRED and the version must be approved in the npm
+      # UI. Try the direct publish first and fall back to staging so one
+      # workflow serves both token kinds.
       - name: Publish
         if: steps.check.outputs.publish == 'true'
-        run: npm publish --access public --provenance
+        run: |
+          if npm publish --access public --provenance; then
+            exit 0
+          fi
+          echo "Direct publish refused; retrying through the staging area." >&2
+          npm stage publish --access public --provenance
+          echo "::notice title=npm approval needed::Version staged; approve it at https://www.npmjs.com/"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
