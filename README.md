@@ -326,9 +326,11 @@ same data.
 
 - XERJ is pre-1.0. The plugin pins a release and isolates every call behind
   `node/client.ts`; upgrades require the same major and never downgrade.
-- `autoindex` skips hidden paths. `index.hidden` covers configured folders
-  (`.agents`, `.github`) through a separate `_bulk` index. `.git`, `.xerj`,
-  build output, virtualenvs, and secret-shaped files are always skipped.
+- `autoindex` skips hidden paths in every mode, including with `--no-ignore`,
+  so `index.hidden` covers configured folders (`.agents`, `.github`) through a
+  separate `_bulk` index. That is the one corpus a project graph cannot absorb.
+  `.git`, `.xerj`, build output, virtualenvs, and secret-shaped files are
+  always skipped.
 - External files are indexed as plain text through `_bulk`; no AST or symbol
   extraction.
 - Shell references are detected heuristically: every literal argument of a
@@ -336,8 +338,12 @@ same data.
   option values, variables, globs, tilde paths, and redirection targets are
   not resolved, and `cd` is followed only within a simple
   `cd dir && ...` chain.
-- `autoindex` cannot watch a graph, so brains reindex on startup and on
-  `/xerj-reindex`, not on every edit.
+- The engine cannot watch a graph (`--watch` requires `--no-graph`), so a
+  graph project refreshes through the plugin's own directory watcher, and a
+  folder brain reindexes on startup and on `/xerj-reindex`.
+- A corpus built in one mode cannot be continued in the other: switching
+  `index.graph` rebuilds the project corpus once (about two minutes on this
+  repository with neural embeddings).
 - Anomaly scoring has no datafeed, timer, or alerting.
 
 ## Development
