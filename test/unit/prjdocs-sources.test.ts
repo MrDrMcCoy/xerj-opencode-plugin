@@ -46,7 +46,9 @@ describe("GPU documentation sources", () => {
     expect(sycl[0]?.maxBytes).toBe(6_000_000);
     expect(sycl[0]?.version).toBe("latest");
     expect(vulkan[0]?.url).toBe("https://docs.vulkan.org/guide/latest/index.html");
-    expect(maxPagesFor("vulkan")).toBe(15);
+    expect(maxPagesFor("vulkan")).toBe(120);
+    // The specification is published chapter by chapter.
+    expect(vulkan[0]?.seeds?.length ?? 0).toBeGreaterThan(1);
   });
 
   test("oneAPI stays inside the specification section", () => {
@@ -89,5 +91,52 @@ describe("version boundaries", () => {
     );
 
     expect(vulkan[0]?.urlPrefix).toBeUndefined();
+  });
+});
+
+describe("component guides", () => {
+  test("CUDA names every library the toolkit ships", () => {
+    const cuda = docsTargets(
+      { id: "cuda", kind: "framework", used: "12.4", evidence: "Dockerfile" },
+      null,
+    )[0];
+    const seeds = (cuda?.seeds ?? []).map((seed) => seed.url);
+
+    for (const component of ["cublas", "cufft", "cusolver", "cusparse", "npp"]) {
+      expect(seeds.some((url) => url.includes(`/12.4.0/${component}/`))).toBe(true);
+    }
+    expect(seeds.some((url) => url.includes("docs.nvidia.com/deeplearning/cudnn"))).toBe(true);
+  });
+
+  test("ROCm names its libraries under their versioned project paths", () => {
+    const rocm = docsTargets(
+      { id: "rocm", kind: "framework", used: "10.1", evidence: "Dockerfile" },
+      null,
+    )[0];
+    const seeds = (rocm?.seeds ?? []).map((seed) => seed.url);
+
+    expect(seeds).toContain("https://rocm.docs.amd.com/projects/rocBLAS/en/docs-10.1.0/");
+    expect(seeds).toContain("https://rocm.docs.amd.com/projects/MIOpen/en/docs-10.1.0/");
+    expect(seeds.length).toBeGreaterThanOrEqual(15);
+  });
+
+  test("a seed stays inside its own guide directory", () => {
+    const rocm = docsTargets(
+      { id: "rocm", kind: "framework", used: "10.1", evidence: "Dockerfile" },
+      null,
+    )[0];
+    const seed = (rocm?.seeds ?? []).find((entry) => entry.url.includes("rocBLAS"));
+
+    expect(seed?.prefix).toBe("https://rocm.docs.amd.com/projects/rocBLAS/en/docs-10.1.0/");
+  });
+
+  test("a versioned source without a version drops versioned seeds", () => {
+    const cuda = docsTargets(
+      { id: "cuda", kind: "framework", used: null, evidence: ".cu files" },
+      null,
+    )[0];
+
+    // The fallback has no version path, so archive seeds cannot be built.
+    expect(cuda?.seeds ?? []).toEqual([]);
   });
 });

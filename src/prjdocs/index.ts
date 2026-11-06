@@ -234,29 +234,7 @@ export class PrjdocsIndexer {
               this.options.logger.debug("could not fetch builtin docs", String(error));
               return [] as CrawledPage[];
             })
-          : await crawlDocs({
-              entry: target.url,
-              maxPages:
-                eager?.maxPages ?? this.options.maxPages ?? maxPagesFor(target.id),
-              maxDepth: eager?.maxDepth,
-              maxBytes: target.maxBytes,
-              urlPrefix: target.urlPrefix,
-              anyText: eager !== undefined,
-              judge:
-                judge === undefined
-                  ? undefined
-                  // The entry page is the site's own root, so it is always kept:
-                  // it seeds the crawl even when its wording matches nothing.
-                  : async (page) =>
-                      page.url === target.url ||
-                      (await judge.judge(page.url, page.title, page.body)).relevant,
-              logger: this.options.logger,
-              fetchImpl: this.options.fetchImpl,
-              signal: this.options.signal,
-            }).catch((error: unknown) => {
-              this.options.logger.debug("docs crawl failed", String(error));
-              return [] as CrawledPage[];
-            });
+          : await this.crawlTarget(target, judge, eager);
 
       if (crawled.length === 0) failed += 1;
       pages += crawled.length;
@@ -343,6 +321,79 @@ export class PrjdocsIndexer {
       bytes,
       unsupported,
     };
+  }
+
+  /**
+   * One target is one site or a set of component guides. A toolkit source
+   * names its components, so each is crawled on its own with a share of the
+   * budget and the pages are merged by URL.
+   */
+  private async crawlTarget(
+    target: DocsTarget,
+    judge: PageJudge | undefined,
+    eager: { maxPages: number; maxDepth: number } | undefined,
+  ): Promise<CrawledPage[]> {
+    const budget = eager?.maxPages ?? this.options.maxPages ?? maxPagesFor(target.id);
+    const seeds = target.seeds ?? [];
+    // A component guide needs enough pages to reach its API pages; a share
+    // below eight only fetches a guide's front page.
+    const perSeed = seeds.length === 0 ? budget : Math.max(8, Math.floor(budget / seeds.length));
+
+    const crawlOne = async (
+      entry: string,
+      prefix: string | undefined,
+      maxPages: number,
+    ): Promise<CrawledPage[]> =>
+      crawlDocs({
+        entry,
+        maxPages,
+        maxDepth: eager?.maxDepth,
+        maxBytes: target.maxBytes,
+        urlPrefix: prefix,
+        anyText: eager !== undefined,
+        judge:
+          judge === undefined
+            ? undefined
+            // The entry page is the site's own root, so it is always kept: it
+            // seeds the crawl even when its wording matches nothing.
+            : async (page) =>
+                page.url === entry ||
+                (await judge.judge(page.url, page.title, page.body)).relevant,
+        logger: this.options.logger,
+        fetchImpl: this.options.fetchImpl,
+        signal: this.options.signal,
+      }).catch((error: unknown) => {
+        this.options.logger.debug("docs crawl failed", String(error));
+        return [] as CrawledPage[];
+      });
+
+    if (seeds.length === 0) {
+      return crawlOne(target.url, target.urlPrefix, budget);
+    }
+
+    // The entry page carries the site's own overview and links, so it is a seed
+    // as well; a source that already lists it is not crawled twice.
+    const all = seeds.some((seed) => seed.url === target.url)
+      ? seeds
+      : [{ url: target.url, prefix: target.urlPrefix }, ...seeds];
+
+    // Four seeds at a time: one vendor host serves every component guide, and
+    // seventeen simultaneous crawls of it are answered with empty pages.
+    const collected = new Map<string, CrawledPage>();
+    const results: CrawledPage[][] = [];
+    for (let start = 0; start < all.length; start += 4) {
+      const batch = all.slice(start, start + 4);
+      results.push(...(await Promise.all(
+        batch.map((seed) => crawlOne(seed.url, seed.prefix, perSeed)),
+      )));
+    }
+    for (const pages of results) {
+      for (const page of pages) {
+        if (collected.size >= budget) break;
+        if (!collected.has(page.url)) collected.set(page.url, page);
+      }
+    }
+    return [...collected.values()];
   }
 
   private indexName(): string {

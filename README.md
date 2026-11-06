@@ -381,6 +381,16 @@ Detection is deliberate, not clever:
   version pin proves it. A project that merely mentions CUDA in prose does not
   get its documentation.
 
+  Each stack is a collection, not one URL, so a crawl names its component
+  guides: CUDA's cuBLAS, cuFFT, cuSPARSE, cuSOLVER, cuRAND, NPP, cuDNN, and
+  NCCL; ROCm's HIP, rocBLAS, MIOpen, RCCL, rocFFT, rocPRIM, rocSPARSE, and the
+  rest of its `projects/` tree; oneAPI's specification plus oneTBB, oneDNN, and
+  oneCCL; Vulkan's guide and specification chapters. The per-stack budget is 200
+  pages for CUDA, 150 for ROCm, 120 for Vulkan, 80 for oneAPI, and 40 for
+  SYCL, with at least eight pages per component. Seeds are crawled four at a
+  time: one vendor host serves every guide, and seventeen simultaneous requests
+  come back empty.
+
 Each technology maps to one entry URL. Versioned sources (Node, Python, CUDA,
 ROCm) produce one URL for the version the project declares and one for the
 latest release; oneAPI's specification is unversioned and stays inside the

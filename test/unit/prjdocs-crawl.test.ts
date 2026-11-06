@@ -171,13 +171,12 @@ describe("docsTargets", () => {
       "19.0.0",
     );
 
-    expect(targets).toEqual([
-      {
-        id: "react",
-        url: "https://react.dev/reference/react",
-        version: "latest",
-      },
-    ]);
+    expect(targets).toHaveLength(1);
+    expect(targets[0]?.id).toBe("react");
+    expect(targets[0]?.url).toBe("https://react.dev/reference/react");
+    expect(targets[0]?.version).toBe("latest");
+    // A single-site source names no component guides.
+    expect(targets[0]?.seeds ?? []).toEqual([]);
   });
 
   test("an unknown technology has no targets", () => {

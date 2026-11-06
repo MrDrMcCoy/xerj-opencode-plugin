@@ -21,6 +21,11 @@ export interface DocsSource {
   readonly maxBytes?: number;
   /** Link prefix for an unversioned site that shares its host with noise. */
   readonly prefix?: string;
+  /**
+   * Component guides to crawl as well as the entry. A toolkit is a collection:
+   * one URL reaches the overview, not cuBLAS, MIOpen, or oneTBB.
+   */
+  readonly seeds?: ReadonlyArray<string>;
 }
 
 export interface DocsTarget {
@@ -40,10 +45,71 @@ export interface DocsTarget {
    * versions from every page, and following those mixes versions in one corpus.
    */
   readonly urlPrefix?: string;
+  /** Component guides to crawl alongside `url`, each within its own directory. */
+  readonly seeds?: ReadonlyArray<{ readonly url: string; readonly prefix?: string }>;
 }
 
 /** Substituted into `{major}`, `{minor}`, and `{version}`. */
 import type { CrawledPage } from "./crawl.ts";
+
+/** Guides the CUDA toolkit ships, relative to the archive directory. */
+const CUDA_COMPONENTS = [
+  "cuda-c-programming-guide",
+  "cuda-c-best-practices-guide",
+  "cuda-compiler-driver-nvcc",
+  "cuda-runtime-api",
+  "cuda-driver-api",
+  "cuda-math-api",
+  "cudla-api",
+  "libdevice-users-guide",
+  "floating-point",
+  "cublas",
+  "cufft",
+  "curand",
+  "cusolver",
+  "cusparse",
+  "npp",
+].map((name) => `https://docs.nvidia.com/cuda/archive/{version}/${name}/index.html`);
+
+/** cuDNN and NCCL publish outside the toolkit archive, without versions. */
+const CUDA_DEEP_LEARNING = [
+  "https://docs.nvidia.com/deeplearning/cudnn/latest/",
+  "https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/",
+];
+
+/** ROCm libraries, each published under its own `projects/<name>` path. */
+const ROCM_COMPONENTS = [
+  "HIP",
+  "rocBLAS",
+  "hipBLASLt",
+  "MIOpen",
+  "rccl",
+  "rocFFT",
+  "hipFFT",
+  "rocPRIM",
+  "hipCUB",
+  "rocSPARSE",
+  "hipSPARSE",
+  "rocSOLVER",
+  "hipSOLVER",
+  "rocRAND",
+  "hipRAND",
+  "rocWMMA",
+  "composable_kernel",
+  "rocDecode",
+].map((name) => `https://rocm.docs.amd.com/projects/${name}/en/docs-{version}/`);
+
+const VULKAN_COMPONENTS = [
+  "https://docs.vulkan.org/spec/latest/index.html",
+  "https://docs.vulkan.org/guide/latest/index.html",
+];
+
+const ONEAPI_COMPONENTS = [
+  "https://uxlfoundation.org/specifications/oneapi/",
+  "https://uxlfoundation.github.io/oneTBB/",
+  "https://uxlfoundation.github.io/oneDNN/",
+  "https://uxlfoundation.github.io/oneCCL/",
+];
 
 const SOURCES: Readonly<Record<string, DocsSource>> = {
   typescript: {
@@ -260,19 +326,24 @@ const SOURCES: Readonly<Record<string, DocsSource>> = {
   },
   cuda: {
     id: "cuda",
-    // The archive hub links every guide: programming, runtime API, driver API,
-    // libdevice. Each guide page fits the default page limit.
+    // The archive hub links every guide; the seeds name them, so a budget is
+    // not spent on release notes and installation pages.
     entry: "https://docs.nvidia.com/cuda/archive/{version}/index.html",
     versioned: true,
     fallback: "https://docs.nvidia.com/cuda/index.html",
-    maxPages: 15,
+    maxPages: 200,
+    // The programming guide and the three largest library guides are single
+    // multi-megabyte pages, so the cap has to clear them.
+    maxBytes: 8_000_000,
+    seeds: [...CUDA_COMPONENTS, ...CUDA_DEEP_LEARNING],
   },
   rocm: {
     id: "rocm",
     entry: "https://rocm.docs.amd.com/en/docs-{version}/",
     versioned: true,
     fallback: "https://rocm.docs.amd.com/en/latest/",
-    maxPages: 15,
+    maxPages: 150,
+    seeds: ROCM_COMPONENTS,
   },
   oneapi: {
     id: "oneapi",
@@ -281,21 +352,29 @@ const SOURCES: Readonly<Record<string, DocsSource>> = {
     entry: "https://uxlfoundation.org/specifications/oneapi/",
     versioned: false,
     prefix: "https://uxlfoundation.org/specifications/oneapi/",
-    maxPages: 10,
+    maxPages: 80,
+    // oneTBB, oneDNN, and oneCCL publish their own guides on the same
+    // foundation's pages.
+    seeds: ONEAPI_COMPONENTS,
   },
   sycl: {
     id: "sycl",
     // The landing page links the specification, which is one 4 MB document.
     entry: "https://registry.khronos.org/SYCL/",
     versioned: false,
-    maxPages: 10,
+    maxPages: 40,
     maxBytes: 6_000_000,
+    seeds: [
+      "https://registry.khronos.org/SYCL/specs/sycl-2020/html/sycl-2020.html",
+    ],
   },
   vulkan: {
     id: "vulkan",
     entry: "https://docs.vulkan.org/guide/latest/index.html",
     versioned: false,
-    maxPages: 15,
+    maxPages: 120,
+    // The specification is published chapter by chapter, not as one page.
+    seeds: VULKAN_COMPONENTS,
   },
   openai: {
     id: "openai",
@@ -329,6 +408,7 @@ export function docsTargets(
         version: "latest",
         maxBytes: source.maxBytes,
         urlPrefix: source.prefix,
+        seeds: seedTargets(source.seeds, null),
       },
     ];
   }
@@ -352,6 +432,7 @@ export function docsTargets(
       urlPrefix: versionPrefix(url),
       version: label,
       maxBytes: source.maxBytes,
+      seeds: seedTargets(source.seeds, label),
     });
   }
 
@@ -393,6 +474,36 @@ export function versionLabel(id: string, version: string): string | null {
     return `${major}.${minor}.${patch}`;
   }
   return version.replace(/^[v=^~]+/, "");
+}
+
+/**
+ * Component guides for one version, each with the directory its crawl stays
+ * inside. A seed that still carries a placeholder is dropped rather than
+ * crawled at a path that cannot exist.
+ */
+function seedTargets(
+  seeds: ReadonlyArray<string> | undefined,
+  label: string | null,
+): Array<{ url: string; prefix?: string }> {
+  if (seeds === undefined) return [];
+
+  const resolved: Array<{ url: string; prefix?: string }> = [];
+  const seen = new Set<string>();
+  for (const seed of seeds) {
+    const url = seed
+      .replace("{major}", label?.split(".")[0] ?? "")
+      .replace("{minor}", label?.split(".").slice(0, 2).join(".") ?? "")
+      .replace("{version}", label ?? "");
+    if (url.includes("{")) continue;
+    if (seen.has(url)) continue;
+    seen.add(url);
+    resolved.push({
+      url,
+      prefix: label === null ? undefined : versionPrefix(url),
+    });
+  }
+
+  return resolved;
 }
 
 /** The directory a versioned URL lives in, with a trailing slash. */

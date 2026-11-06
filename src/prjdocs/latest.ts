@@ -11,6 +11,8 @@ const PYTHON_RELEASES = "https://endoflife.date/api/python.json";
 // The CUDA archive page lists every version directory; it is the only public
 // index of CUDA releases that needs no key.
 const CUDA_ARCHIVE = "https://docs.nvidia.com/cuda/archive/";
+// The ROCm docs landing page names its release in the title.
+const ROCM_LATEST = "https://rocm.docs.amd.com/en/latest/";
 
 const REQUEST_TIMEOUT_MS = 5_000;
 
@@ -29,7 +31,14 @@ export class LatestVersions {
   constructor(private readonly options: LatestOptions) {}
 
   async resolve(ref: TechRef): Promise<string | null> {
-    if (ref.id !== "node" && ref.id !== "python" && ref.id !== "cuda") return null;
+    if (
+      ref.id !== "node" &&
+      ref.id !== "python" &&
+      ref.id !== "cuda" &&
+      ref.id !== "rocm"
+    ) {
+      return null;
+    }
 
     const ttl = this.options.ttlMs ?? 6 * 60 * 60 * 1000;
     const cached = this.cache.get(ref.id);
@@ -46,6 +55,7 @@ export class LatestVersions {
   private async fetchLatest(id: string): Promise<string | null> {
     const fetchImpl = this.options.fetchImpl ?? fetch;
     if (id === "cuda") return this.fetchCudaLatest(fetchImpl);
+    if (id === "rocm") return this.fetchRocmLatest(fetchImpl);
 
     const url = id === "node" ? NODE_RELEASES : PYTHON_RELEASES;
     const response = await fetchImpl(url, {
@@ -83,6 +93,18 @@ export class LatestVersions {
     if (versions.length === 0) return null;
 
     return versions.sort(compareVersions).at(-1) ?? null;
+  }
+
+  /** The release the ROCm docs landing page advertises, for example 10.1.0. */
+  private async fetchRocmLatest(fetchImpl: typeof fetch): Promise<string | null> {
+    const response = await fetchImpl(ROCM_LATEST, {
+      headers: { "user-agent": "xerj-opencode-plugin (documentation indexer)" },
+      signal: mergeSignal(this.options.signal, REQUEST_TIMEOUT_MS),
+    });
+    if (!response.ok) return null;
+
+    const html = await response.text().catch(() => "");
+    return /AMD ROCm (\d+\.\d+\.\d+)/.exec(html)?.[1] ?? null;
   }
 }
 

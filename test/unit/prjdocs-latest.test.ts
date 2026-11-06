@@ -132,3 +132,24 @@ describe("CUDA latest", () => {
     ).toBeNull();
   });
 });
+
+describe("ROCm latest", () => {
+  test("the release in the docs title is returned", async () => {
+    const html = "<title>AMD ROCm 10.1.0 documentation</title>";
+    const fetchImpl = (async () => new Response(html)) as unknown as typeof fetch;
+    const latest = new LatestVersions({ logger, fetchImpl });
+
+    expect(
+      await latest.resolve({ id: "rocm", kind: "framework", used: null, evidence: "t" }),
+    ).toBe("10.1.0");
+  });
+
+  test("a page without a release is null", async () => {
+    const fetchImpl = (async () => new Response("<title>ROCm docs</title>")) as unknown as typeof fetch;
+    const latest = new LatestVersions({ logger, fetchImpl });
+
+    expect(
+      await latest.resolve({ id: "rocm", kind: "framework", used: null, evidence: "t" }),
+    ).toBeNull();
+  });
+});
