@@ -592,3 +592,48 @@ describe("builtin refresh window", () => {
     expect(counter.calls).toBeGreaterThan(afterFirst);
   });
 });
+
+describe("GPU project wiring", () => {
+  test("a CUDA project crawls the archive for the version it pins", async () => {
+    const project = await mkdtemp(join(root, "cuda-project-"));
+    const state = await mkdtemp(join(root, "state-"));
+    await writeFile(join(project, "kernel.cu"), "__global__ void k() {}\n");
+    await writeFile(
+      join(project, "CMakeLists.txt"),
+      "find_package(CUDAToolkit 12.4 REQUIRED)\n",
+    );
+
+    const requested: string[] = [];
+    const fetchImpl = (async (input: string | URL) => {
+      const url = String(input);
+      requested.push(url);
+      return new Response(
+        `<html><head><title>CUDA Toolkit Documentation 12.4</title></head><body><p>${longBody}</p></body></html>`,
+        { headers: { "content-type": "text/html" } },
+      );
+    }) as unknown as typeof fetch;
+
+    const fake = client();
+    const summary = await new PrjdocsIndexer({
+      client: fake as never,
+      prefix: "xop-prjdoc-gpu",
+      projectRoot: project,
+      stateDir: state,
+      logger,
+      fetchImpl,
+      builtin: {
+        enabled: false,
+        elasticsearchVersion: "8.13.0",
+        xerjPages: 0,
+        elasticsearchPages: 0,
+        refreshDays: 7,
+      },
+      maxTargets: 4,
+    }).run();
+
+    expect(summary.pages).toBeGreaterThan(0);
+    expect(requested.some((url) => url.includes("/cuda/archive/12.4.0/"))).toBe(true);
+    // Every fetched page is the CUDA archive itself: no other host.
+    expect(requested.every((url) => url.startsWith("https://docs.nvidia.com/"))).toBe(true);
+  }, 30_000);
+});
