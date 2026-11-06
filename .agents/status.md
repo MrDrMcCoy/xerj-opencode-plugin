@@ -358,6 +358,10 @@ publish, and live TUI verification remain.
   12 pages with zero outside its version path, SYCL 1.3 MB, Vulkan guide
   12 pages/64 KB. 797 unit tests pass, `src/prjdocs/gpu.ts` at 100%.
   The memory index deletion was the user's own reset, not a defect.
+Pinned by 24 new tests across detection, sources, latest-version
+resolution, and the indexer, including an end-to-end case where a CUDA
+project requests only `docs.nvidia.com` archive pages for its pinned
+version.
 
 - 2026-11-06: Cleanup pass (0.7.0, after the release tag). `src/manifest.ts` now
   holds the manifest reader and writer the project-docs and system-docs
