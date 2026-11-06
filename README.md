@@ -274,7 +274,7 @@ covers the same file, so one file is cited from its precise section.
 
 ### Measuring a change
 
-`bun run eval` runs 40 labeled questions against a live index and reports how
+`bun run eval` runs 60 labeled questions against a live index and reports how
 often the expected file survives, the bytes it costs, and every miss:
 
 ```
@@ -282,8 +282,10 @@ bun run eval
 bun run eval --k 8 --surface tool --json
 ```
 
-Defaults match what the plugin ships. A one-prompt change is inside the noise
-of a 40-prompt set; treat a single point as unproven.
+Defaults match what the plugin ships. Run it against a current index: a file
+added since the last pass is missing from the corpus, and the miss it causes
+looks like a ranking fault. A one-prompt change is inside the noise of a
+60-prompt set; treat a single point as unproven.
 
 Savings are measured, not asserted: the baseline is each cited file's size
 capped at `stats.maxBaselineBytes`, counted once per session. Reading a file
