@@ -353,8 +353,9 @@ publish, and live TUI verification remain.
   cached in `prjdocs-discovered.json`. `prjdocs.eagerMaxPages` is 120,
   `prjdocs.eagerMaxDepth` is 12, and `prjdocs.eager` is off by default.
   Measured on docs.solidjs.com with the heuristic judge: 25 pages, 169 KB,
-  9 s, three levels deep. Model and search paths are typechecked against the host SDK but have
-  not been exercised live (the running module predates them). 633 unit and 10
+  9 s, three levels deep. Model and search paths are typechecked against the
+  host SDK but have not been exercised live (the running module predates
+  them). 633 unit and 10
   integration tests pass.
 
 - 2026-11-05: Project documentation corpus and `/xerj-prjdocs` (0.7.0).
