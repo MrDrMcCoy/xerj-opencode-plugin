@@ -81,8 +81,22 @@ jobs:
             exit 0
           fi
           echo "Direct publish refused; retrying through the staging area." >&2
-          npm stage publish --access public --provenance
-          echo "::notice title=npm approval needed::Version staged; approve it at https://www.npmjs.com/"
+          set +e
+          OUT="$(npm stage publish --access public --provenance 2>&1)"
+          CODE=$?
+          set -e
+          echo "$OUT"
+          if [ "$CODE" -eq 0 ]; then
+            echo "::notice title=npm approval needed::Version staged; approve it at https://www.npmjs.com/"
+            exit 0
+          fi
+          # A re-run, or a tag moved after the first stage, finds the version
+          # already waiting for approval. That is the intended end state.
+          if printf '%s' "$OUT" | grep -q 'previously published version'; then
+            echo "::notice title=npm approval pending::Version already staged; approve it at https://www.npmjs.com/"
+            exit 0
+          fi
+          exit "$CODE"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
