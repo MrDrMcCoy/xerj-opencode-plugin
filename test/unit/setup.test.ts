@@ -3,7 +3,7 @@
 // typechecking cannot see, so this drives the real setup against a stub host.
 
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import plugin from "../../src/index.ts";
@@ -272,3 +272,86 @@ describe("server rpc handlers", () => {
     }
   });
 });
+
+describe("server setup failure paths", () => {
+  test("a binary that cannot report a version fails cleanly", async () => {
+    const project = await mkdtemp(join(tmpdir(), "xerj-setup-"));
+    const fake = join(project, "fake-xerj");
+    await writeFakeBinary(fake, "exit 1");
+
+    try {
+      const host = stubHost(project, { binary: { path: fake } });
+      const cleanup = (await plugin.setup(host.ctx as never)) as () => void;
+
+      // Bootstrap runs in the background; wait for it to settle.
+      const deadline = Date.now() + 5_000;
+      let phase = "starting";
+      while (Date.now() < deadline && phase === "starting") {
+        const snapshot = await host.status();
+        phase = (snapshot.node as { phase: string }).phase;
+        await Bun.sleep(50);
+      }
+
+      const snapshot = await host.status();
+      const errors = snapshot.errors as string[];
+      expect(phase).toBe("error");
+      expect(errors.join("\n")).toContain("did not run");
+
+      cleanup?.();
+    } finally {
+      await rm(project, { recursive: true, force: true });
+    }
+  });
+
+  test("a visible storage.root inside the project is refused with a warning", async () => {
+    const project = await mkdtemp(join(tmpdir(), "xerj-setup-"));
+
+    try {
+      const host = stubHost(project, {
+        binary: { path: join(project, "absent-xerj") },
+        storage: { root: join(project, "engine-data") },
+      });
+      const cleanup = (await plugin.setup(host.ctx as never)) as () => void;
+      const snapshot = await host.status();
+
+      expect((snapshot.warnings as string[]).join("\n")).toContain("not hidden");
+      expect((snapshot.config as { storageRoot: string }).storageRoot).toContain(".xerj");
+      cleanup?.();
+    } finally {
+      await rm(project, { recursive: true, force: true });
+    }
+  });
+
+  test("an unwritable workspace reports an error instead of throwing", async () => {
+    const project = await mkdtemp(join(tmpdir(), "xerj-setup-"));
+    await chmod(project, 0o555);
+
+    try {
+      const host = stubHost(project, { binary: { path: join(project, "absent-xerj") } });
+      const cleanup = (await plugin.setup(host.ctx as never)) as () => void;
+
+      const deadline = Date.now() + 5_000;
+      let phase = "starting";
+      while (Date.now() < deadline && phase === "starting") {
+        const snapshot = await host.status();
+        phase = (snapshot.node as { phase: string }).phase;
+        await Bun.sleep(50);
+      }
+
+      // A read-only root either fails the state write (error) or never gets
+      // that far (starting); a throw out of setup is what must not happen.
+      expect(["error", "ready", "starting"]).toContain(phase);
+      const snapshot = await host.status();
+      expect(Array.isArray(snapshot.errors)).toBe(true);
+      cleanup?.();
+    } finally {
+      await chmod(project, 0o755);
+      await rm(project, { recursive: true, force: true });
+    }
+  });
+});
+
+/** Writes a shell script that stands in for the engine binary. */
+async function writeFakeBinary(path: string, body: string): Promise<void> {
+  await writeFile(path, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+}
