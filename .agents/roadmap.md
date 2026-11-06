@@ -267,7 +267,7 @@ root, and it stays in this tier because it needs no process and no network.
 | Sidebar rebuild | AFT and Magic Context, layout only | Bordered box with a `▼ XERJ` accent header, click to collapse, three summary rows when collapsed and named sections when expanded; per-section on/off and collapse memory in the shared `tui-preferences.jsonc` under key `xerj` (`order` is not offered: this host's slots take `prepend`/`append` only); inline `⚠` for a failing corpus; 150 ms refresh debounce | Collapsed and expanded views both render from `StatusSnapshot` alone, a click survives a view switch, and formatting stays pure and tested |
 | **Config example formatting** | This plugin | Rewrite the complete-default options block in the README (and the copy in `plan.md` §3) as one key per line, grouped by section, with a comment naming the default and its unit; the README block omits 21 defaults today, including `node.logMaxBytes`, `index.graph`, `index.git`, `index.gitLimit`, `context.archiveEnabled`, `context.archiveMaxBytes`, every `prjdocs.*`, and every `sysdocs.*`; the `plan.md` copy is staler still (`context.maxPassages` reads 4 against a default of 8) | The block parses as JSONC, its key set equals `DEFAULT_CONFIG`, and a test fails when a new option lands without updating the example |
 | **CPU affinity (`node.cpus`)** | This plugin | Confine every XERJ process to a chosen CPU set: explicit indices and inclusive ranges, `odd` (the default), `even`, or a percentage of the CPUs available to the process, rounded down | `node.cpus: "0-3,8"` confines the node and every index run on Linux, `"50%"` resolves against the available CPU count, `null` or `"all"` leaves affinity unchanged, and an unsupported platform behaves as it does today |
-| **Local telemetry** | This plugin | Record every operation with its type, duration, and outcome into bounded files under the XERJ data root, plus boot phases, crashes, restarts, and the split between idle and busy time, so the plugin's own performance can be measured and improved | `xerj_telemetry` reports count, error rate, p50/p95 split by idle and busy, total time per type, the last ten boots, and crash counts; the sidebar and panel show `ready`, `busy` with the running job, `degraded`, `starting`, or `stopped`; with telemetry on, retrieval p50 and p95 do not move and no flush lands inside a turn; the store never exceeds `telemetry.maxBytes` |
+| **Local telemetry** | This plugin | Record every operation with its type, duration, and outcome into bounded files under the XERJ data root, plus boot phases, crashes, restarts, CPU and RSS per XERJ process, and the split between idle and busy time, so the plugin's own performance can be measured and improved | `xerj_telemetry` reports count, error rate, p50/p95 split by idle and busy, total time per type, the last ten boots, crash counts, and CPU/RSS with the day's peak and growth; the sidebar and panel show `ready`, `busy` with the running job, `degraded`, `starting`, or `stopped`; with telemetry on, retrieval p50 and p95 do not move and no flush lands inside a turn; the store never exceeds `telemetry.maxBytes` |
 
 ### CPU affinity value syntax
 
@@ -342,6 +342,7 @@ One store per installation, under the XERJ data root:
   ops.ndjson                    every operation, newest last
   ops.1.ndjson … ops.N.ndjson   rotated, 1 is the newest rotation
   rings/<type>.ndjson           last N samples for one type
+  samples/<date>.ndjson         CPU and RSS of each XERJ process
   rollup/<date>/<instance>.json per-day, per-instance counters
   state/boot-<instance>.json    this process's boot id and last phase
   writer.lock                   owner pid and heartbeat
@@ -424,6 +425,7 @@ Durations use `performance.now()`, which is monotonic. Timestamps use
 |---|---|---|---|
 | `ops.ndjson` | every operation, chronological | append, O_APPEND | rotates at `telemetry.rotateBytes` (8 MiB), `telemetry.rotations` (4) kept |
 | `rings/<type>.ndjson` | the last `telemetry.samplesPerType` (256) samples of one type | append by any instance, compacted by the owner | 256 lines, rewritten tail-only |
+| `samples/<date>.ndjson` | one CPU and RSS line per sampled process | appended by the owner | one day per file, pruned first |
 | `rollup/<date>/<instance>.json` | per-day count, errors, total ms, max ms per type | each instance writes its own file | one small file per day per instance |
 | `state/boot-<instance>.json` | this process's boot id and last reached phase | rewritten at each milestone, removed on a clean shutdown | one tiny file per live instance |
 
@@ -588,21 +590,83 @@ and the expanded view gains a `State` section with the current state's age, the
 running jobs, and the day's dwell split. The panel opens with the same section
 above corpora, so the first thing it answers is "what is it doing right now".
 
+#### CPU and memory
+
+A duration says an index pass took 105 seconds. It does not say whether the
+node used one core or eight, or whether its resident set grew by 200 MB while
+it did. Those are the two numbers that explain a slow pass and the cost the
+plugin puts on the machine.
+
+The sampler reuses `src/process-stats.ts`, extended to remember the previous
+CPU-tick count per pid and report the delta over the sampling interval. The
+existing `sampleProcess` sleeps 120 ms between two reads, which suits a status
+line and not a 15-second series; the telemetry path reads twice per interval,
+sleeps not at all, and measures the real window.
+
+Three kinds are sampled:
+
+| Kind | Process | Why |
+|---|---|---|
+| `node` | the XERJ server from `node.pid` | the memory and CPU the corpus holds all day |
+| `watcher` | the resident autoindex process | separates indexing cost from serving cost |
+| `index` | a one-shot index or brain run, while it runs | short, CPU-heavy, and worth attributing |
+
+One line per sample, one sample every `telemetry.sampleMs` (15 s):
+
+```jsonc
+{"at":1762470000000,"kind":"node","pid":4242,"load":1,
+ "cpuPct":86.4,"rssBytes":1017118720,"threads":24}
+```
+
+`cpuPct` is a percentage of one core, the unit the panel already shows, so 400
+means four cores saturated. `load` and the dominant job kind sit alongside, so
+CPU during indexing separates from CPU while serving. `threads` is free from
+the same `/proc` read and explains a falling `cpuPct` when the scan pool shrinks.
+
+The first sample after a start carries `cpuPct: null`, because there is no
+previous tick count to subtract. It is still written: its RSS is real.
+
+Samples get their own file. At 15 s that is 5760 lines a day for the node
+alone, which would bury a log holding a few hundred real operations, and a
+sample is not an operation: it has no duration and no outcome. Keeping them
+apart keeps both readable, and the sample file is pruned first.
+
+The report gains a `process` block:
+
+- current CPU and RSS, and the day's peak RSS;
+- p50 and p95 RSS over the window, so a spike is not read as the steady cost;
+- mean CPU while busy against while ready;
+- RSS change over the window in MB per day, which is the figure that catches a
+  leak before it fills a machine.
+
+The panel's runtime row already shows CPU and RSS now; it gains the day's peak
+and the growth figure.
+
+Volume: two resident series at 110 bytes per line is about 1.3 MB a day, or
+38 MB for 30 days. That is the largest family under the cap, which is why the
+sweep drops sample days before rollups.
+
+Platform: Linux reads `/proc`. macOS and the BSDs use
+`ps -o pcpu=,rss= -p <pid>`, one cheap spawn per sample. Windows has no
+equivalent without a helper, so sampling is skipped there with one warning
+that names the key; every other telemetry record still works.
+
 #### The size limit
 
 `telemetry.maxBytes` defaults to 134217728 (128 MiB) and covers the whole
 directory. It is a backstop, not the normal bound: with the defaults above the
-log family tops out at 40 MiB, the rings at about 2 MiB, and rollups at
-kilobytes per day.
+log family tops out at 40 MiB, the rings at about 2 MiB, samples at about
+1.3 MB a day, and rollups at kilobytes per day.
 
 The sweep runs at startup and every ten minutes. It removes, in order:
 
 1. the oldest rotated ops files, until the cap is met without touching
    `ops.ndjson`, the rings, or the rollup;
-2. the oldest rollup days, oldest first;
-3. half of every ring, keeping the newest samples;
-4. if the cap still binds, telemetry drops to log-only for the session, which
-   stops ring and rollup writes and logs one warning naming the key.
+2. the oldest sample days, oldest first, because they are the bulk;
+3. the oldest rollup days, oldest first;
+4. half of every ring, keeping the newest samples;
+5. if the cap still binds, telemetry drops to log-only for the session, which
+   stops ring, sample, and rollup writes and logs one warning naming the key.
 
 A directory walk measures the real size, cached for 60 seconds, because the
 files are also written by another process.
@@ -615,8 +679,9 @@ all), `window` (`session`, `day`, or `all`, default `day`), `sort` (`count`,
 type: count, errors, p50, p95, max, and total milliseconds, split into idle and
 busy by `load`; a `starts` block with the last ten boots, their
 setup/ready/indexed figures, and the crash and restart counts; a `state` block
-with the day's dwell split; the store's size; and the date the surviving
-history starts.
+with the day's dwell split; a `process` block with CPU and RSS now, the day's
+peak, p50/p95 RSS, mean CPU busy against ready, and the growth in MB per day;
+the store's size; and the date the surviving history starts.
 
 The panel gains a telemetry section with the five busiest types, the last
 boot's `ready` figure, any unclean shutdown, and the line
@@ -633,6 +698,7 @@ the filesystem.
   "rotateBytes": 8388608,   // 8 MiB before ops.ndjson rotates
   "rotations": 4,           // rotated ops files kept
   "flushMs": 5000,          // queue drain period
+  "sampleMs": 15000,        // CPU and RSS sample period; 0 disables sampling
   "maxText": 160            // characters of caller text; 0 records none
 }
 ```
@@ -664,6 +730,9 @@ two sentences, because that is where a model and a user will read them.
 | the previous run was killed before any milestone | the crash record carries `phase: "setup"`, which is still a signal |
 | a job leaks and never ends | a job past its per-kind deadline stops counting toward busy and warns once; the badge cannot stick on `busy` |
 | a job flaps on and off | every transition is recorded; only the UI update is debounced |
+| a sampled pid vanishes between reads | that sample is skipped; one warning per kind per hour, not one per interval |
+| the platform has no `/proc` and no `ps` | sampling is skipped with one warning naming `telemetry.sampleMs`; every other record still works |
+| the first sample has no delta | `cpuPct` is null and the RSS is still recorded, so a series always starts with a memory point |
 
 #### Tests
 
@@ -693,6 +762,14 @@ debounced; every operation record carries the load that was running;
 `xerj_telemetry` splits p50/p95 by idle and busy; the sidebar renders each of
 the five states and counts the busy elapsed from `startedAt` with no RPC.
 
+Sampler tests: the delta sampler reports CPU over the interval from two tick
+counts and sleeps not at all; the first sample is null CPU with a real RSS;
+consecutive samples of one pid use consecutive deltas; a vanished pid returns
+null and the caller skips it without throwing; the `ps` path parses `pcpu` and
+`rss`; an unsupported platform warns once and keeps every other record; the
+sweep drops sample days before rollup days; the report computes the day's
+peak, p50/p95 RSS, mean CPU while busy and while ready, and the growth rate.
+
 Integration: drive one retrieval and one tool call with telemetry on, then
 assert both appear in `ops.ndjson` and in their rings, and that the count in
 the rollup matches. Then stop the node through the plugin and assert the next
@@ -703,9 +780,10 @@ time on this repository with telemetry off and on. On must be within noise,
 and no flush may appear inside a turn. If it does not hold, the flush moves
 off the turn path or the feature ships off by default.
 
-Effort: about 10.5 hours. Store and sweep 2 h, span API and generic wraps
+Effort: about 12 hours. Store and sweep 2 h, span API and generic wraps
 1.5 h, lifecycle records and crash detection 1.5 h, service state and the
-two UI surfaces 1.5 h, report and tool 1.5 h, tests 2.5 h.
+two UI surfaces 1.5 h, CPU and RSS sampler 1.5 h, report and tool 1.5 h,
+tests 2.5 h.
 
 ## Tier M: one to three weeks, high suitability
 
@@ -777,7 +855,8 @@ two UI surfaces 1.5 h, report and tool 1.5 h, tests 2.5 h.
 | Installed servers fill the disk | Measured at about 26 MB for the npm set; the panel reports each install and a cache purge removes them |
 | CPU affinity is silently ignored | A missing `taskset`, a restrictive cpuset, or macOS logs one warning and leaves the process unpinned; indexing and retrieval never depend on the key |
 | Telemetry slows the turns it measures | Records go to an in-memory queue that a timer drains; `span` never awaits a write, a full queue drops, and the performance gate compares retrieval p50/p95 with telemetry off and on |
-| The telemetry store fills the disk | `telemetry.maxBytes` (128 MiB) bounds the directory, the sweep runs every ten minutes, and the defaults top out at about 42 MiB so the cap is a backstop |
+| The telemetry store fills the disk | `telemetry.maxBytes` (128 MiB) bounds the directory, the sweep runs every ten minutes, and the defaults stay well under it: about 42 MiB for ops and rings, plus about 1.3 MB of samples a day |
+| Sampling costs more than it measures | One `/proc` read on Linux, one cheap `ps` spawn per sample on macOS and the BSDs, and nothing on Windows; `telemetry.sampleMs: 0` turns sampling off without touching the rest of the store |
 | Telemetry captures private text | `meta` is a fixed set of scalar fields, error messages are never recorded, and caller text is clipped at `telemetry.maxText` (160) and passed through `redact()` first; prompts and file bodies are never recorded |
 | Two instances corrupt the rings | Appends are atomic under O_APPEND; only the lock owner rewrites a file, and a stale lock is taken over after 60 s |
 | A crash is miscounted as a clean stop, or twice | The marker is removed on every teardown path, an idle stop is recorded as `idle` and not as a crash, and node crashes are deduped by pid and pidfile mtime |
@@ -829,7 +908,7 @@ measured; they include tests and the commits that carry them. A status of
 | `prjdocs` keyword surfacing | S | Done | 0.2 h | `config.prjdocsKeywords` in the status, a panel line, and the command description |
 | Config example formatting | S | Done | 0.5 h | README block is one key per line with comments; `test/unit/config-example.test.ts` compares every flattened key and value with `DEFAULT_CONFIG`; `plan.md` §3 is a readable subset that points at the README for the full set |
 | CPU affinity (`node.cpus`) | S | Done | 1.5 h | `src/node/priority.ts` parses lists, ranges, `odd`, `even`, and percentages; resolves against `/proc/self/status` on Linux; applies `taskset -a -pc`, `ProcessorAffinity`, or one macOS warning; wired into node, watcher, and brain spawns; 29 unit tests |
-| Local telemetry | S | Not started | — | Design settled: ops log, per-type rings, and per-day rollups under `<data root>/telemetry`, a closed `OpType` set, generic wraps for tools and RPC, owner-only compaction, a 128 MiB sweep, lifecycle records for boot phases, crashes, and restarts, and a five-state service model (`ready`, `busy`, `degraded`, `starting`, `stopped`) shared by the UI and the report. About 10.5 h |
+| Local telemetry | S | Not started | — | Design settled: ops log, per-type rings, CPU/RSS sample days, and per-day rollups under `<data root>/telemetry`, a closed `OpType` set, generic wraps for tools and RPC, owner-only compaction, a 128 MiB sweep, lifecycle records for boot phases, crashes, and restarts, and a five-state service model (`ready`, `busy`, `degraded`, `starting`, `stopped`) shared by the UI and the report. About 12 h |
 | Graph overview in the panel | M | Done (earlier) | 0 h this pass | Brains already report docs and live edges; the corpora list covers the rest |
 | Import graph and cycles | M | Done | 2.0 h | `analysis/imports.ts` plus `xerj_imports`; relative, Python, Go, and Rust specifiers resolve against project files, unresolved ones are counted; ten module tests and four tool tests |
 | Regex and glob search | M | Done | 1.5 h | `analysis/find.ts` plus `xerj_find`: glob-to-regex with `**` spanning folders, line-numbered matches, secret files skipped, 200-match cap; ten module tests and three tool tests |

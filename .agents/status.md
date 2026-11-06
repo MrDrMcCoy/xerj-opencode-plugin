@@ -283,14 +283,16 @@ test/unit/*.test.ts    pure-function tests
 
 ## Work in progress
 
-Local telemetry is designed in `roadmap.md` (Tier S, about 10.5 h) and not
+Local telemetry is designed in `roadmap.md` (Tier S, about 12 h) and not
 started. It records every operation's type, duration, outcome, idle/busy load,
 and up to 160 characters of redacted caller text into bounded NDJSON files
 under `<data root>/telemetry`, keeps a per-type ring of samples plus a per-day
 rollup, tracks boot phases, crashes, and restarts through a per-instance
-marker, and publishes a five-state service model (`ready`, `busy`, `degraded`,
-`starting`, `stopped`) to both the UI and the report. On by default, local
-only, capped at 128 MiB.
+marker, samples CPU and RSS for the node, the watcher, and any one-shot index
+process into `samples/<date>.ndjson` every `telemetry.sampleMs` (15 s, 0
+disables), and publishes a five-state service model (`ready`, `busy`,
+`degraded`, `starting`, `stopped`) to both the UI and the report. On by
+default, local only, capped at 128 MiB.
 
 Nothing else. M0–M6 and in-project storage are committed; only the restart,
 publish, and live TUI verification remain.
