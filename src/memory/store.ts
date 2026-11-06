@@ -30,6 +30,13 @@ const RECENCY_WEIGHT = 0.2;
 // A clipped memory shorter than this carries a header and little else.
 const MIN_CLIPPED_CHARS = 120;
 
+/** One stored memory with its text and metadata, for maintenance passes. */
+export interface MemoryRecord {
+  readonly id: string;
+  readonly text: string;
+  readonly metadata: Record<string, unknown>;
+}
+
 export interface RememberInput {
   readonly text: string;
   readonly kind?: string;
@@ -77,6 +84,31 @@ export class MemoryStore {
       created: typeof record.metadata.created === "string" ? record.metadata.created : null,
       bytes: Buffer.byteLength(record.text, "utf8"),
     }));
+  }
+
+  /** Every memory with its text, for verification and curation. */
+  async scan(limit: number): Promise<ReadonlyArray<MemoryRecord>> {
+    const records = await this.client
+      .memoryList(this.namespace, limit)
+      .catch((error: unknown) => {
+        this.logger.debug("memory scan failed", String(error));
+        return [];
+      });
+
+    return records.map((record) => ({
+      id: record.id,
+      text: record.text,
+      metadata: record.metadata,
+    }));
+  }
+
+  /** Rewrites one memory's metadata, keeping its id and text. */
+  async revise(record: MemoryRecord, metadata: Record<string, unknown>): Promise<void> {
+    await this.client.memoryStore(this.namespace, {
+      id: record.id,
+      text: record.text,
+      metadata,
+    });
   }
 
   async recall(query: string, k = 3): Promise<ReadonlyArray<MemoryHit>> {

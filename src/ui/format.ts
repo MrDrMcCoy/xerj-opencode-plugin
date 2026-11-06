@@ -244,7 +244,8 @@ export function panelSections(snapshot: StatusSnapshot, now: number): PanelSecti
       lines: [
         [
           `${formatCount(memory.count)} ${plural(memory.count, "entry", "entries")}` +
-            (memory.exists ? "" : " · index missing"),
+            (memory.exists ? "" : " · index missing") +
+            (memory.stale > 0 ? ` · ${formatCount(memory.stale)} stale` : ""),
           memory.namespace,
         ].join(" · "),
       ],

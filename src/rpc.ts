@@ -50,6 +50,8 @@ export interface MemoryStatus {
    * both report `count: 0`, and only this tells them apart.
    */
   readonly exists: boolean;
+  /** Memories whose every named path is gone; set by the verification pass. */
+  readonly stale: number;
 }
 
 export interface CitedFileStatus {

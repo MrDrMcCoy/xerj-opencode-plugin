@@ -446,7 +446,7 @@ export class McpHost {
         contextEnabled: this.config.context.enabled,
       },
       usage,
-      memory: { namespace: memoryNamespace(this.projectRoot), count: memory.count, exists: memory.count > 0 },
+      memory: { namespace: memoryNamespace(this.projectRoot), count: memory.count, exists: memory.count > 0, stale: 0 },
       brains: [],
       corpora: [],
       disk: { engineBytes: 0, logBytes: 0 },

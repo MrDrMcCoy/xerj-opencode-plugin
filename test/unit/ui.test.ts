@@ -70,7 +70,7 @@ function snapshot(overrides: Partial<StatusSnapshot> = {}): StatusSnapshot {
       netTokens: 42_000,
       topFiles: [{ path: "src/a.ts", citations: 3, bytes: 4_000 }],
     },
-    memory: { namespace: "proj-demo-1a2b3c4d", count: 2, exists: true },
+    memory: { namespace: "proj-demo-1a2b3c4d", count: 2, exists: true, stale: 0 },
     brains: [],
     disk: { engineBytes: 1024, logBytes: 2048 },
     frameworks: [],
@@ -342,7 +342,7 @@ describe("corpus and memory honesty", () => {
       [
         { name: "web", state: "missing", docs: 0, lastRunAt: NOW, records: 0, edges: null, error: "index is missing; the last pass wrote 5 records" },
       ],
-      { namespace: "ns", count: 0, exists: false },
+      { namespace: "ns", count: 0, exists: false, stale: 0 },
     );
 
     const body = panelSections(view, NOW)
@@ -356,7 +356,7 @@ describe("corpus and memory honesty", () => {
   });
 
   test("a memory store with no index says so", () => {
-    const view = withRows([], { namespace: "ns", count: 0, exists: false });
+    const view = withRows([], { namespace: "ns", count: 0, exists: false, stale: 0 });
     const body = panelSections(view, NOW)
       .flatMap((section) => section.lines)
       .join("\n");
@@ -365,7 +365,7 @@ describe("corpus and memory honesty", () => {
   });
 
   test("a healthy memory store does not claim a missing index", () => {
-    const view = withRows([], { namespace: "ns", count: 4, exists: true });
+    const view = withRows([], { namespace: "ns", count: 4, exists: true, stale: 0 });
     const body = panelSections(view, NOW)
       .flatMap((section) => section.lines)
       .join("\n");

@@ -75,6 +75,7 @@ import {
 } from "./hooks/tool-results.ts";
 import { CommitIndex, type CommitSummary } from "./index/commits.ts";
 import { memoryIndexMissing, recoverMemoryIndex } from "./memory/health.ts";
+import { verifyMemories } from "./memory/verify.ts";
 import { sampleProcess } from "./process-stats.ts";
 import { startRetention } from "./memory/retain.ts";
 import { migrateMemoryIndex, migrateProjectStorage } from "./memory/migrate.ts";
@@ -93,6 +94,8 @@ interface Runtime {
   node: NodeHandle | null;
   nodes: NodeRuntime | null;
   lifecycle: ProjectLifecycle | null;
+  /** Memories the verification pass flagged; reported in the panel. */
+  staleMemories: number;
   corpus: CorpusService | null;
   search: SearchService | null;
   memory: MemoryStore | null;
@@ -163,6 +166,7 @@ export default Plugin.define({
       node: null,
       nodes: null,
       lifecycle: null,
+    staleMemories: 0,
       corpus: null,
       search: null,
       memory: null,
@@ -290,7 +294,7 @@ export default Plugin.define({
           netTokens: usage.netTokens,
           topFiles: usage.topFiles,
         },
-        memory: { namespace: memoryNs, count: 0, exists: false },
+        memory: { namespace: memoryNs, count: 0, exists: false, stale: 0 },
         brains: brainStatus(runtime.brain, runtime.brains),
         corpora: corpusHealth(runtime),
         // The engine data and the node log were invisible before: a project
@@ -396,6 +400,7 @@ export default Plugin.define({
           },
           memory: {
             namespace: memoryNs,
+            stale: runtime.staleMemories,
             count:
               summary?.count ??
               datasets.find((dataset) => dataset.name === "memory")?.docs ??
@@ -1123,6 +1128,27 @@ export default Plugin.define({
       );
       runtime.memory = new MemoryStore(client, memoryNamespace(projectRoot), logger);
       runtime.anomaly = new AnomalyService(client, logger);
+
+      // A memory that names a file which no longer exists is misleading, not
+      // wrong: flag it and leave the text alone. Read-only, no model call.
+      void verifyMemories({
+        memory: runtime.memory,
+        projectRoot,
+        logger,
+        signal: shutdown.signal,
+      })
+        .then((summary) => {
+          runtime.staleMemories = summary.stale;
+          if (summary.stale > 0) {
+            logger.info("some memories name paths that no longer exist", {
+              stale: summary.stale,
+              checked: summary.checked,
+            });
+          }
+        })
+        .catch((error: unknown) => {
+          logger.debug("memory verification failed", String(error));
+        });
 
       // Subscribe before the node exists: a compaction can arrive while the
       // node is starting, and the memory write re-ensures it.
