@@ -339,6 +339,18 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: Tier S complete (9.9 h estimated, eleven items). Added since the
+  last entry: the data map in the panel (record kinds from a `terms`
+  aggregation), `prjdocs.eagerKeywords` surfaced in the status, panel, and
+  command description, the auto-search hint (`search({ hint: true })` skips the
+  word gate with a 150 ms deadline and injects one `<xerj-hint>` line naming the
+  candidate), and memory curation (`memory/curate.ts`: an exact duplicate of an
+  automatic summary is dropped, any other repeat is flagged `duplicateOf` and
+  never deleted). Also fixed the MCP integration test, which still expected
+  twelve tools after refs, outline, and zoom were added. 891 unit and 12
+  integration tests pass, typecheck clean. The roadmap's progress table carries
+  status, estimate, and the commit for each item.
+
 - 2026-11-06: Tier S begun: seven of eleven items shipped, with the time spent
   recorded per item in `roadmap.md`. Done: the compaction dedupe reset
   (`165af5c`, 0.5 h), `/xerj-wrapup` (`ea98e68`, 0.5 h), `xerj_refs`,
