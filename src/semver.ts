@@ -100,7 +100,7 @@ export function shouldUpgrade(installed: string, remote: string): boolean {
 }
 
 /** Lowest release `auto` will track. Earlier prereleases are not offered. */
-export const TRACKING_FLOOR = "1.0.0-rc.1";
+const TRACKING_FLOOR = "1.0.0-rc.1";
 
 /** True when a release is at or above the tracking floor. */
 export function meetsTrackingFloor(version: string): boolean {

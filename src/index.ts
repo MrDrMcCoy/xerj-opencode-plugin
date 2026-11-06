@@ -481,7 +481,7 @@ export default Plugin.define({
       onActivity: (sessionID) => runtime.lifecycle?.touch(sessionID),
       onInject: () => counters.noteInjection(),
       onNoiseSkip: () => counters.noteNoiseSkip(),
-      onCost: (sessionID, bytes) => void ledger.recordInjection(bytes),
+      onCost: (_sessionID, bytes) => void ledger.recordInjection(bytes),
       onPrompt: (sessionID, text) => prompts.note(sessionID, text),
       recordQuery: (sessionID, paths, bytes, hits) =>
         ledger.recordQuery(sessionID, paths, bytes, hits),

@@ -6,7 +6,6 @@
 import { spawn } from "node:child_process";
 import { execFile } from "node:child_process";
 import {
-  chmod,
   mkdir,
   open,
   readFile,

@@ -99,8 +99,6 @@ describe("applyPriority", () => {
   test("a denied or missing tool never throws", async () => {
     const { runner: stub } = runner("linux", { failNice: true, failRun: true });
 
-    await expect(
-      applyPriority({ pid: 5, priority: Priority.Low, runner: stub }),
-    ).resolves.toBeUndefined();
+    await applyPriority({ pid: 5, priority: Priority.Low, runner: stub });
   });
 });
