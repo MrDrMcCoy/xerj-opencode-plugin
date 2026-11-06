@@ -98,10 +98,10 @@ setting, not a build flag: the same published package carries the capability.
 | Key | Default | Effect |
 |---|---|---|
 | `analysis.treeSitter.enabled` | `false` | Parse project files for symbol ranges, complexity, duplicates, and structural search |
-| `analysis.treeSitter.languages` | `[]` | Grammars to download. Empty means the languages detection already found |
+| `analysis.treeSitter.languages` | `[]` | Which grammars to download. Empty means "detect": the languages the project's own files show, then download those grammars and no others |
 | `analysis.treeSitter.maxParseBytes` | 1 MiB | Files above this are skipped, so a bundled asset is never parsed |
 | `analysis.lsp.enabled` | `false` | Start language servers for definitions, references, call hierarchy, diagnostics |
-| `analysis.lsp.servers` | `{}` | Command per language. Empty means the toolchain already installed in the project |
+| `analysis.lsp.servers` | `{}` | Command per language. Empty means "discover": a server already present in the project's `node_modules/.bin` or on `PATH`. Nothing is ever installed |
 | `analysis.lsp.idleMs` | 5 min | Stop a server that answered nothing for this long |
 | `analysis.lsp.maxServers` | 2 | Cap concurrent servers, so one project cannot fill memory |
 | `analysis.lsp.timeoutMs` | 2 s | Per-request deadline; a miss returns no result rather than delaying a turn |
@@ -114,6 +114,34 @@ should not impose on its own: 52 to 100 MB of grammars, a process holding
 hundreds of megabytes, an open port, or traffic to a remote catalogue. The
 plugin's contract is that nothing blocks `setup`, and a closed gate keeps
 that true.
+
+### What enabling a gate does
+
+At the default configuration nothing below happens: no language is detected
+for analysis, no grammar is requested, no server is probed, no process is
+started, no port is opened, and no network call is made.
+
+| You enable | What it detects and fetches, with every other key left at default |
+|---|---|
+| `analysis.treeSitter.enabled` | Languages from the project's files, the same detection the docs indexer already runs. Grammars for those languages download once, checksum-verified, into `<data root>/grammars/<language>/`, and every later parse reads the cache. A failed download logs once, names the language, and disables only that language |
+| `analysis.lsp.enabled` | Nothing downloads. For each language it looks for a server in `servers[language]` first, then the project's `node_modules/.bin`, then `PATH`. A language with no server logs one warning naming the key and stays unanalysed; the others work |
+| `share.enabled` | Nothing until `xerj_share` is invoked. The tool then prints the address and expiry before it accepts a request |
+| `hub.enabled` | The cached catalogue only. `hub.network` adds downloads; until then, a missing pack reports which key would fetch it |
+
+Two rules follow from the table:
+
+- **Grammars are ours and download; language servers are not ours and never
+  install.** A parser is a file the plugin owns and caches. A language server
+  is part of the project's toolchain, so a missing one is reported rather than
+  added.
+- **Enabling a gate never writes to the project.** Downloads land under the
+  XERJ data root, never in `node_modules`, never in the repository.
+
+Where a grammar comes from is a Tier M decision, not an assumption: either the
+pinned `tree-sitter-wasms` pack (51.8 MB, 0.1.13, every language at once) or
+per-language release assets fetched one at a time. Whichever is chosen is
+pinned with a version and a checksum at that point, and the manifest lives
+beside the cache so an upgrade is a version change, not a silent replacement.
 
 ### Behaviour when a gate is closed
 
@@ -135,8 +163,9 @@ Five rules make the gates trustworthy:
 2. No retrieval path depends on a gated capability. With every gate closed,
    injection output is byte-identical to today's.
 3. Status and the panel name each gate and the key that opens it.
-4. Opening a gate downloads what it needs on first use, verified by checksum,
-   and the download is visible in the panel rather than a silent wait.
+4. Opening a gate fetches only what that gate owns: a grammar for the
+   languages in play, checksum-verified, visible in the panel rather than a
+   silent wait. A language server is discovered, never installed.
 5. A closed gate leaves no residue: no process, no cached parse, no file read
    beyond the project scan the index already performs.
 
@@ -224,7 +253,7 @@ Ship these first. None adds a runtime, a grammar, or a write path.
 | Not doing | Why |
 |---|---|
 | Desktop app | A separate binary over another plugin's database; not a plugin feature |
-| LSP auto-install matrix | Six platform targets for language servers duplicates the toolchain the project already has |
+| Auto-installing language servers | A server belongs to the project's toolchain. Suggesting the missing `npm` or `cargo` package is a warning; installing it is the project's dependency management, not a retrieval plugin's |
 | Bash detach, wait, notifications | The host owns the shell; a second one competes with it |
 | Silent field reports | Sends data outward; opt-in at most, never automatic |
 | Bundling grammars in the npm package | 50 to 100 MB and a per-platform native build matrix |

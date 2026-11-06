@@ -339,6 +339,24 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: Gate behaviour made explicit (0.7.0 plan). Added a "What enabling
+  a gate does" subsection with a row per key: at the default configuration no
+  language is detected for analysis, no grammar is requested, no server probed,
+  no process started, no port opened, no network call made. Enabling
+  `analysis.treeSitter.enabled` detects the project's languages and downloads
+  their grammars once into `<data root>/grammars/<language>/`, checksum-verified
+  and cached, with a failed download disabling only that language. Enabling
+  `analysis.lsp.enabled` downloads nothing: it resolves a server from
+  `servers[language]`, then `<project>/node_modules/.bin`, then `PATH`, and a
+  missing one logs a warning naming the key while other languages keep working.
+  Two rules state the split (grammars are ours and download; language servers
+  are the project's and never install) and that enabling a gate never writes to
+  the project. The grammar source is left as a Tier M decision between the
+  pinned `tree-sitter-wasms` pack (51.8 MB, 0.1.13) and per-language release
+  assets, with a pinned version and checksum either way. The LSP non-goal now
+  reads "auto-installing language servers" and names the dependency management
+  it leaves to the project.
+
 - 2026-11-06: `xerj_share` and `xerj_ask` are configurable, off by default
   (0.7.0 plan). Three keys joined the gate block: `share.enabled` (false)
   registers the share tool, `hub.enabled` (false) registers `xerj_ask` and the
