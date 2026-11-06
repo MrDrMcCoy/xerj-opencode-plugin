@@ -340,6 +340,24 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-05: Third batch (0.6.4). Every XERJ process now runs at a
+  configurable priority: `node.priority` is `low` by default, POSIX gets
+  nice 19/0/-10, Linux adds idle-class I/O through `ionice` for `low`, and
+  Windows sets the Idle/Normal/High class through PowerShell. Each call is
+  best effort and never blocks startup. The hidden corpus now defaults to
+  the docs folders that exist (`.agents`, `.github`, `.claude`), so project
+  notes are searchable with no configuration; an explicit `index.hidden`
+  list still wins. Coverage rose from 83% to 85%: the tool surface went
+  from 37% to 88% lines and `tui.tsx` from 47% to 71%, with the remaining
+  tools and ten TUI command paths tested. Dead code removed
+  (`readPeerHeartbeats`, `spoolDir`) and six module-internal helpers are no
+  longer exported. The watcher's duplicated stop body is shared, and the
+  shell tokenizer (complexity 26) is split into per-rule helpers. Two
+  orphaned `index/lastRun` kv entries were deleted, and ten stale plugin
+  cache epochs (0.4.5 through 0.6.3) were removed. The package version is
+  0.6.4 because the global config already pins that epoch; the 0.6.4 cache
+  tree was built from the working tree and the old epochs deleted.
+
 - 2026-11-05: Second improvement batch on 0.6.3, all measured on the live
   neural index. The semantic leg now vouches for its top three hits when
   they share at least one word with the prompt (`trustSemantic`, set only
