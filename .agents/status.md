@@ -350,10 +350,10 @@ publish, and live TUI verification remain.
   deterministic heuristic decides (name match with separators ignored,
   documentation path, or two project terms). Unknown dependencies are searched
   with `ctx.websearch.query` and crawled from the first documentation host,
-  cached in `prjdocs-discovered.json`. `prjdocs.eagerMaxPages` 120,
-  `eagerMaxDepth` 12, `prjdocs.eager` off by default. Measured on
-  docs.solidjs.com with the heuristic: 25 pages, 169 KB, 9 s, three levels
-  deep. Model and search paths are typechecked against the host SDK but have
+  cached in `prjdocs-discovered.json`. `prjdocs.eagerMaxPages` is 120,
+  `prjdocs.eagerMaxDepth` is 12, and `prjdocs.eager` is off by default.
+  Measured on docs.solidjs.com with the heuristic judge: 25 pages, 169 KB,
+  9 s, three levels deep. Model and search paths are typechecked against the host SDK but have
   not been exercised live (the running module predates them). 633 unit and 10
   integration tests pass.
 
