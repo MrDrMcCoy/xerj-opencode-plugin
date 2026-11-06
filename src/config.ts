@@ -81,6 +81,17 @@ export interface PrjdocsOptions {
   readonly maxTargets: number;
   /** Pages per target; 0 uses the per-source default. */
   readonly maxPages: number;
+  /**
+   * Eager mode removes the depth and page-type limits, judges pages with the
+   * current model, and searches for documentation of unknown technologies.
+   */
+  readonly eager: boolean;
+  /** Pages per site in eager mode. */
+  readonly eagerMaxPages: number;
+  /** Link depth in eager mode. */
+  readonly eagerMaxDepth: number;
+  /** Model judgements per run; the heuristic covers the rest. */
+  readonly eagerModelCalls: number;
 }
 
 export interface SysdocsOptions {
@@ -184,6 +195,10 @@ export const DEFAULT_CONFIG: Config = {
   prjdocs: {
     maxTargets: 40,
     maxPages: 0,
+    eager: false,
+    eagerMaxPages: 120,
+    eagerMaxDepth: 12,
+    eagerModelCalls: 150,
   },
   sysdocs: {
     maxDocs: 5000,
@@ -381,6 +396,36 @@ export function loadConfig(
         0,
         500,
         "prjdocs.maxPages",
+        warnings,
+      ),
+      eager: readBoolean(
+        prjdocs.eager,
+        DEFAULT_CONFIG.prjdocs.eager,
+        "prjdocs.eager",
+        warnings,
+      ),
+      eagerMaxPages: readInteger(
+        prjdocs.eagerMaxPages,
+        DEFAULT_CONFIG.prjdocs.eagerMaxPages,
+        1,
+        5000,
+        "prjdocs.eagerMaxPages",
+        warnings,
+      ),
+      eagerMaxDepth: readInteger(
+        prjdocs.eagerMaxDepth,
+        DEFAULT_CONFIG.prjdocs.eagerMaxDepth,
+        1,
+        100,
+        "prjdocs.eagerMaxDepth",
+        warnings,
+      ),
+      eagerModelCalls: readInteger(
+        prjdocs.eagerModelCalls,
+        DEFAULT_CONFIG.prjdocs.eagerModelCalls,
+        0,
+        5000,
+        "prjdocs.eagerModelCalls",
         warnings,
       ),
     },

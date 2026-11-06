@@ -13,6 +13,15 @@ export interface CrawlOptions {
   readonly signal?: AbortSignal;
   /** Extra seconds between requests, to stay a polite client. */
   readonly delayMs?: number;
+  /** Link depth to follow; eager crawling raises this well past 2. */
+  readonly maxDepth?: number;
+  /** Accept `text/*` and markdown, not only HTML. Eager mode needs this. */
+  readonly anyText?: boolean;
+  /**
+   * Decides whether a page is worth keeping and worth following links from.
+   * Without it every page within the budget is kept.
+   */
+  readonly judge?: (page: CrawledPage) => Promise<boolean>;
 }
 
 export interface CrawledPage {
@@ -23,7 +32,7 @@ export interface CrawledPage {
 }
 
 const DEFAULT_MAX_BYTES = 2_000_000;
-const MAX_DEPTH = 2;
+const DEFAULT_MAX_DEPTH = 2;
 const REQUEST_TIMEOUT_MS = 15_000;
 
 /** Crawls one documentation site, breadth first, from its entry URL. */
@@ -33,6 +42,9 @@ export async function crawlDocs(options: CrawlOptions): Promise<CrawledPage[]> {
   const delayMs = options.delayMs ?? 0;
   const origin = originOf(options.entry);
   if (origin === null) return [];
+
+  const maxDepth = options.maxDepth ?? DEFAULT_MAX_DEPTH;
+  const anyText = options.anyText ?? false;
 
   const queue: Array<{ url: string; depth: number }> = [
     { url: options.entry, depth: 0 },
@@ -60,16 +72,30 @@ export async function crawlDocs(options: CrawlOptions): Promise<CrawledPage[]> {
     if (response === null || !response.ok) continue;
 
     const type = response.headers.get("content-type") ?? "";
-    if (!type.includes("text/html")) continue;
+    const isHtml = type.includes("text/html");
+    const isText =
+      anyText &&
+      (type.includes("text/plain") ||
+        type.includes("text/markdown") ||
+        type.includes("application/json"));
+    if (!isHtml && !isText) continue;
 
-    const html = await response.text().catch(() => "");
-    if (html.length === 0 || html.length > maxBytes) continue;
+    const body = await response.text().catch(() => "");
+    if (body.length === 0 || body.length > maxBytes) continue;
 
-    const page = extractPage(next.url, html);
-    if (page !== null) pages.push(page);
+    const page = isHtml
+      ? extractPage(next.url, body)
+      : extractPlain(next.url, body, isText && type.includes("text/markdown"));
+    if (page === null) continue;
 
-    if (next.depth >= MAX_DEPTH) continue;
-    for (const link of linksIn(html)) {
+    // The judge decides both whether the page is kept and whether its links are
+    // followed: eager crawling trusts relevant pages to lead to more of them.
+    const keep = options.judge === undefined || (await options.judge(page));
+    if (!keep) continue;
+    pages.push(page);
+
+    if (next.depth >= maxDepth) continue;
+    for (const link of linksIn(body)) {
       const url = absolute(link, next.url);
       if (url === null || seen.has(url)) continue;
       if (originOf(url) !== origin) continue;
@@ -79,6 +105,26 @@ export async function crawlDocs(options: CrawlOptions): Promise<CrawledPage[]> {
   }
 
   return pages;
+}
+
+/** A plain-text or markdown page: the text is the body, the first line the title. */
+export function extractPlain(
+  url: string,
+  body: string,
+  markdown = false,
+): CrawledPage | null {
+  const text = markdown
+    ? body
+        .replace(/```[\s\S]*?```/g, (block) => block.replace(/```[a-z]*\n?/g, ""))
+        .replace(/^#+\s*/gm, "")
+        .replace(/\(([^)]+)\)\[([^\]]+)\]/g, "$2")
+        .trim()
+    : body.trim();
+  if (text.length < 200) return null;
+
+  const firstLine = text.split("\n").find((line) => line.trim().length > 0) ?? url;
+  const title = firstLine.trim().slice(0, 120);
+  return { url, title: title.length > 0 ? title : url, body: text, bytes: text.length };
 }
 
 /** Body text and title from an HTML document, with scripts and styles removed. */

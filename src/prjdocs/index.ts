@@ -13,6 +13,13 @@ import { join } from "node:path";
 import type { Logger } from "../log.ts";
 import type { XerjClient } from "../node/client.ts";
 import { crawlDocs, type CrawledPage } from "./crawl.ts";
+import {
+  DocsDiscovery,
+  readDiscovered,
+  writeDiscovered,
+  type SearchSurface,
+} from "./discover.ts";
+import { PageJudge, projectTerms } from "./relevance.ts";
 import { detectTech, type TechRef } from "./detect.ts";
 import { docsTargets, maxPagesFor, type DocsTarget } from "./sources.ts";
 
@@ -33,6 +40,21 @@ export interface PrjdocsOptions {
   readonly signal?: AbortSignal;
   /** Resolves the latest release of a technology; null when unknown. */
   readonly latestVersion?: (ref: TechRef) => Promise<string | null>;
+  /** Eager mode: no depth cap, any text page, model-judged relevance. */
+  readonly eager?: EagerOptions;
+}
+
+export interface EagerOptions {
+  readonly maxPages: number;
+  readonly maxDepth: number;
+  /** Stateless model call; when absent the heuristic judges every page. */
+  readonly generate?: (prompt: string) => Promise<string>;
+  /** Search surface for technologies the source table does not know. */
+  readonly search?: SearchSurface;
+  /** Total model judgements per run. */
+  readonly maxModelCalls?: number;
+  /** Search queries per run. */
+  readonly maxQueries?: number;
 }
 
 export interface PrjdocsSummary {
@@ -62,15 +84,41 @@ export class PrjdocsIndexer {
   constructor(private readonly options: PrjdocsOptions) {}
 
   async run(): Promise<PrjdocsSummary> {
-    const techs = await detectTech(this.options.projectRoot);
+    const techs = await detectTech(this.options.projectRoot, {
+      includeUnknown: this.options.eager !== undefined,
+    });
     const targets: DocsTarget[] = [];
     const unsupported: string[] = [];
+    const eager = this.options.eager;
+
+    // Eager mode searches for docs of technologies the table does not know and
+    // remembers what it found, so the search happens once per technology.
+    const discovery =
+      eager === undefined
+        ? null
+        : new DocsDiscovery(
+            {
+              search: eager.search,
+              stateDir: this.options.stateDir,
+              logger: this.options.logger,
+              maxQueries: eager.maxQueries,
+            },
+            await readDiscovered(this.options.stateDir),
+          );
+
+    const terms = projectTerms(techs.map((ref) => `${ref.id} ${ref.evidence}`));
 
     for (const ref of techs.slice(0, this.options.maxTargets ?? 40)) {
       const resolve = this.options.latestVersion;
       const latest =
         resolve === undefined ? null : await resolve(ref).catch(() => null);
-      const found = docsTargets(ref, latest);
+      let found = docsTargets(ref, latest);
+      if (found.length === 0 && discovery !== null) {
+        const url = await discovery.find(ref.id);
+        if (url !== null) {
+          found = [{ id: ref.id, url, version: ref.used ?? "latest" }];
+        }
+      }
       if (found.length === 0) {
         unsupported.push(ref.id);
         continue;
@@ -88,9 +136,32 @@ export class PrjdocsIndexer {
     if (targets.length > 0) await this.ensureMapping();
 
     for (const target of targets) {
+      // One judge per target: its cache and call budget belong to that site.
+      const judge =
+        eager === undefined
+          ? undefined
+          : new PageJudge(
+              { tech: target.id, version: target.version, terms },
+              {
+                generate: eager.generate,
+                maxModelCalls: eager.maxModelCalls,
+                logger: this.options.logger,
+              },
+            );
+
       const crawled = await crawlDocs({
         entry: target.url,
-        maxPages: this.options.maxPages ?? maxPagesFor(target.id),
+        maxPages: eager?.maxPages ?? this.options.maxPages ?? maxPagesFor(target.id),
+        maxDepth: eager?.maxDepth,
+        anyText: eager !== undefined,
+        judge:
+          judge === undefined
+            ? undefined
+            // The entry page is the site's own root, so it is always kept: it
+            // seeds the crawl even when its wording matches nothing.
+            : async (page) =>
+                page.url === target.url ||
+                (await judge.judge(page.url, page.title, page.body)).relevant,
         logger: this.options.logger,
         fetchImpl: this.options.fetchImpl,
         signal: this.options.signal,
@@ -159,6 +230,9 @@ export class PrjdocsIndexer {
     const kept: Record<string, ManifestEntry> = {};
     for (const [url, entry] of desired) kept[url] = entry;
     await this.writeManifest(kept);
+    if (discovery !== null) {
+      await writeDiscovered(this.options.stateDir, discovery.snapshot());
+    }
 
     return {
       techs: techs.map((ref) => `${ref.id}${ref.used === null ? "" : `@${ref.used}`}`),

@@ -93,6 +93,7 @@ interface Host {
   readonly toasts: Toast[];
   readonly alerts: Array<{ title: string; message: string }>;
   readonly closes: () => number;
+  readonly prjdocsInputs: unknown[];
   setStatus(handler: () => Promise<StatusSnapshot>): void;
   setLocation(directory: string | undefined): void;
   setPanel(open: boolean): void;
@@ -125,6 +126,7 @@ function makeHost(): Host {
   let reindex = async (): Promise<unknown> => ({ queued: true, records: 900 });
   let remember = async (): Promise<unknown> => ({ id: "mem-1", created: true });
   let search = async (): Promise<unknown> => ({ text: "[1] src/a.ts:1\ncode", hits: 1, bytes: 20 });
+  const prjdocsInputs: unknown[] = [];
   let prjdocs = async (): Promise<unknown> => ({
     techs: [],
     targets: 0,
@@ -174,6 +176,7 @@ function makeHost(): Host {
       },
       prjdocs: async (_input: unknown, options?: CallOptions) => {
         record("prjdocs", options);
+        prjdocsInputs.push(_input);
         return prjdocs();
       },
       events: { on: () => () => {} },
@@ -275,6 +278,7 @@ function makeHost(): Host {
     setPanelOpenResult: (opens) => {
       panelOpens = opens;
     },
+    prjdocsInputs,
     slots,
   };
 
@@ -649,6 +653,38 @@ describe("project docs command", () => {
     expect(toast?.message).toContain("5 unchanged");
     expect(toast?.message).toContain("3 pruned");
     expect(host.calls.some((call) => call.method.startsWith("prjdocs"))).toBe(true);
+    dispose();
+  });
+});
+
+describe("project docs eager argument", () => {
+  test("passes eager only when the argument asks for it", async () => {
+    const host = makeHost();
+    host.setPrjdocs(async () => ({
+      techs: [],
+      targets: 0,
+      pages: 0,
+      indexed: 0,
+      skipped: 0,
+      pruned: 0,
+      failed: 0,
+      bytes: 0,
+      unsupported: [],
+    }));
+
+    const { dispose } = await setup(host);
+    const command = host.commands.find((candidate) => candidate.id === "xerj.prjdocs");
+    expect(command).toBeDefined();
+
+    // The harness records inputs through the rpc stub, so read them from calls.
+    await command?.run("");
+    await flush();
+    await command?.run("eager");
+    await flush();
+
+    expect(host.prjdocsInputs).toEqual([{}, { eager: true }]);
+    const toast = host.toasts.at(-1);
+    expect(toast?.message).toContain("technologies");
     dispose();
   });
 });

@@ -233,13 +233,29 @@ export function goDependencies(text: string): Array<{ name: string; version: str
 export function classifyDependencies(
   dependencies: ReadonlyArray<{ name: string; version: string }>,
   evidence: string,
+  includeUnknown = false,
 ): TechRef[] {
   const refs: TechRef[] = [];
   const seen = new Set<string>();
 
   for (const dependency of dependencies) {
     const id = dependencyId(dependency.name);
-    if (id === null || seen.has(id)) continue;
+    if (id === null) {
+      // An unknown package is worth a search only when the caller asked for it;
+      // its id is the package name with any scope removed.
+      if (!includeUnknown) continue;
+      const bare = dependency.name.replace(/^@[^/]+\//, "");
+      if (bare.length < 3 || seen.has(bare)) continue;
+      seen.add(bare);
+      refs.push({
+        id: bare,
+        kind: "framework",
+        used: usedVersion(dependency.version),
+        evidence,
+      });
+      continue;
+    }
+    if (seen.has(id)) continue;
     seen.add(id);
     refs.push({
       id,
@@ -271,6 +287,12 @@ export interface ScanOptions {
   readonly readManifest?: (path: string) => Promise<string | null>;
   /** Directories to skip while walking. */
   readonly maxFiles?: number;
+  /**
+   * Report dependencies that match no known technology, so eager mode can
+   * search for their documentation. Off by default: a conservative scan is
+   * what the ordinary command reports.
+   */
+  readonly includeUnknown?: boolean;
 }
 
 /** File names and extension counts, collected in one walk. */
@@ -438,7 +460,9 @@ export async function detectTech(
     if (match === undefined) continue;
     const text = await read(match.startsWith("/") ? match : join(projectRoot, match));
     if (text === null) continue;
-    for (const ref of classifyDependencies(parse(text), file)) add(ref);
+    for (const ref of classifyDependencies(parse(text), file, options.includeUnknown === true)) {
+      add(ref);
+    }
   }
 
   // Runtime pins first: they name the version, which a file extension cannot.

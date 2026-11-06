@@ -381,7 +381,7 @@ export default Plugin.define({
         runtime.lifecycle?.touch();
         return snapshot();
       },
-      prjdocs: async () => {
+      prjdocs: async (input: unknown) => {
         counters.noteRpc();
         runtime.lifecycle?.touch();
         const handle = runtime.node ?? (await nodes.ensure().catch(() => null));
@@ -390,6 +390,23 @@ export default Plugin.define({
 
         const client = new XerjClient(handle.baseUrl);
         const latest = new LatestVersions({ logger, signal: shutdown.signal });
+        // Eager mode asks the host for its model and its search provider; both
+        // are optional, and the heuristic covers a missing model.
+        const wanted =
+          typeof input === "object" && input !== null && "eager" in input
+            ? (input as { eager?: unknown }).eager
+            : undefined;
+        const eagerMode =
+          (typeof wanted === "boolean" ? wanted : config.prjdocs.eager)
+            ? {
+                maxPages: config.prjdocs.eagerMaxPages,
+                maxDepth: config.prjdocs.eagerMaxDepth,
+                maxModelCalls: config.prjdocs.eagerModelCalls,
+                generate: (prompt: string) =>
+                  ctx.experimental.generate.text({ prompt }).then((answer) => answer.text),
+                search: ctx.websearch,
+              }
+            : undefined;
         const indexer = new PrjdocsIndexer({
           client,
           prefix: prjdocsPrefix(projectRoot),
@@ -400,6 +417,7 @@ export default Plugin.define({
           maxPages: config.prjdocs.maxPages > 0 ? config.prjdocs.maxPages : undefined,
           signal: shutdown.signal,
           latestVersion: (ref) => latest.resolve(ref),
+          eager: eagerMode,
         });
 
         const summary = await indexer.run();

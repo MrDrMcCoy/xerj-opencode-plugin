@@ -199,3 +199,92 @@ describe("versionLabel", () => {
     expect(versionLabel("node", "latest")).toBeNull();
   });
 });
+
+describe("eager crawling", () => {
+  test("follows past depth two when allowed", async () => {
+    const chain = ["/d0", "/d1", "/d2", "/d3", "/d4"];
+    const fetchImpl = (async (input: string | URL) => {
+      const url = String(input);
+      const index = chain.findIndex((part) => url.endsWith(part));
+      const nextLink = chain[index + 1] !== undefined ? [chain[index + 1] ?? ""] : [];
+      return new Response(html(`Level ${index}`, longBody, nextLink), {
+        headers: { "content-type": "text/html" },
+      });
+    }) as unknown as typeof fetch;
+
+    const limited = await crawlDocs({
+      entry: "https://example.test/d0",
+      maxPages: 10,
+      fetchImpl,
+      logger,
+    });
+    const eager = await crawlDocs({
+      entry: "https://example.test/d0",
+      maxPages: 10,
+      maxDepth: 10,
+      fetchImpl,
+      logger,
+    });
+
+    expect(limited).toHaveLength(3);
+    expect(eager).toHaveLength(5);
+  });
+
+  test("accepts plain text and markdown when asked", async () => {
+    const fetchImpl = (async (input: string | URL) => {
+      const url = String(input);
+      if (url.endsWith(".md")) {
+        return new Response(`# Guide\n\n${longBody}` , {
+          headers: { "content-type": "text/markdown" },
+        });
+      }
+      return new Response(longBody, { headers: { "content-type": "text/plain" } });
+    }) as unknown as typeof fetch;
+
+    const plain = await crawlDocs({
+      entry: "https://example.test/notes.txt",
+      maxPages: 3,
+      fetchImpl,
+      logger,
+    });
+    const eager = await crawlDocs({
+      entry: "https://example.test/notes.txt",
+      maxPages: 3,
+      anyText: true,
+      fetchImpl,
+      logger,
+    });
+
+    expect(plain).toEqual([]);
+    expect(eager).toHaveLength(1);
+  });
+
+  test("a judged page keeps its links; a rejected page is not followed", async () => {
+    const fetchImpl = (async (input: string | URL) => {
+      const url = String(input);
+      if (url.endsWith("/start")) {
+        return new Response(html("Start", longBody, ["/good", "/bad"]), {
+          headers: { "content-type": "text/html" },
+        });
+      }
+      if (url.endsWith("/bad")) {
+        return new Response(html("Bad", longBody, ["/from-bad"]), {
+          headers: { "content-type": "text/html" },
+        });
+      }
+      return new Response(html("Good", longBody), {
+        headers: { "content-type": "text/html" },
+      });
+    }) as unknown as typeof fetch;
+
+    const pages = await crawlDocs({
+      entry: "https://example.test/start",
+      maxPages: 10,
+      fetchImpl,
+      logger,
+      judge: async (page) => !page.url.includes("/bad"),
+    });
+
+    expect(pages.map((page) => page.url.split("/").pop())).toEqual(["start", "good"]);
+  });
+});

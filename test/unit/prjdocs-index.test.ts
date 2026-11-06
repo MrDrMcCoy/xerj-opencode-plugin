@@ -220,3 +220,104 @@ describe("version pruning", () => {
     expect(fake.deletes.at(-1)?.ids).toHaveLength(1);
   });
 });
+
+describe("eager mode", () => {
+  /** A site with a deep chain plus one page the judge should reject. */
+  function chainSite(): typeof fetch {
+    return (async (input: string | URL) => {
+      const url = String(input);
+      const depth = Number(/\/l(\d+)/.exec(url)?.[1] ?? 0);
+      const links = depth < 4 ? [`/l${depth + 1}`] : [];
+      if (url.includes("/noise")) {
+        return new Response(html("Team page", []), {
+          headers: { "content-type": "text/html" },
+        });
+      }
+      return new Response(html(`React level ${depth}`, links), {
+        headers: { "content-type": "text/html" },
+      });
+    }) as unknown as typeof fetch;
+  }
+
+  test("crawls deeper than the default and keeps judged pages only", async () => {
+    const project = await projectWith({ react: "^18.2.0" });
+    const state = await mkdtemp(join(root, "state-"));
+    const fake = client();
+    const indexer = new PrjdocsIndexer({
+      client: fake as never,
+      prefix: "xop-prjdoc-eager",
+      projectRoot: project,
+      stateDir: state,
+      logger,
+      fetchImpl: chainSite(),
+      eager: { maxPages: 20, maxDepth: 8 },
+      maxTargets: 1,
+    });
+
+    const summary = await indexer.run();
+
+    // The entry page plus four levels of links, past the default depth of two.
+    expect(summary.indexed).toBe(5);
+  });
+
+  test("an unknown technology is discovered through search", async () => {
+    const project = await projectWith({ "acme-sdk": "^2.0.0" });
+    const state = await mkdtemp(join(root, "state-"));
+    const fake = client();
+    const searched: string[] = [];
+    const indexer = new PrjdocsIndexer({
+      client: fake as never,
+      prefix: "xop-prjdoc-eager",
+      projectRoot: project,
+      stateDir: state,
+      logger,
+      // Every page the discovery points at names the technology, so the
+      // heuristic judge keeps it.
+      fetchImpl: (async () =>
+        new Response(html("acme-sdk documentation"), {
+          headers: { "content-type": "text/html" },
+        })) as unknown as typeof fetch,
+      maxTargets: 1,
+      eager: {
+        maxPages: 5,
+        maxDepth: 3,
+        search: {
+          query: async ({ query }) => {
+            searched.push(query);
+            return {
+              data: { results: [{ url: "https://docs.acme.test/", title: "acme-sdk" }] },
+            } as never;
+          },
+        },
+      },
+    });
+
+    const summary = await indexer.run();
+
+    expect(searched).toEqual(["acme-sdk official documentation"]);
+    expect(summary.targets).toBe(1);
+    expect(summary.unsupported).toEqual([]);
+    expect(fake.bulks.length).toBeGreaterThan(0);
+  });
+
+  test("without a search surface an unknown technology stays unsupported", async () => {
+    const project = await projectWith({ "other-sdk": "^1.0.0" });
+    const state = await mkdtemp(join(root, "state-"));
+    const fake = client();
+    const indexer = new PrjdocsIndexer({
+      client: fake as never,
+      prefix: "xop-prjdoc-eager",
+      projectRoot: project,
+      stateDir: state,
+      logger,
+      fetchImpl: site(["/"]),
+      maxTargets: 1,
+      // `acme-sdk` is not a known framework id either, so detection skips it;
+      // `react` is known, so this proves the path where search is absent.
+      eager: { maxPages: 3, maxDepth: 2 },
+    });
+
+    const summary = await indexer.run();
+    expect(summary.targets).toBe(0);
+  });
+});

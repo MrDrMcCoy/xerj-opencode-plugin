@@ -194,6 +194,10 @@ The same entry works with a checkout path instead of the package name; see
 | `index.hiddenMaxBytes` | Per-file ceiling for hidden documents. |
 | `prjdocs.maxTargets` | Documentation sites crawled in one run. Default 40. |
 | `prjdocs.maxPages` | Pages per site; `0` uses the per-source default (8 to 25). |
+| `prjdocs.eager` | Eager mode: no page-type or depth limit, model-judged relevance, and search for unknown technologies. Default `false`. |
+| `prjdocs.eagerMaxPages` | Pages per site in eager mode. Default 120. |
+| `prjdocs.eagerMaxDepth` | Link depth in eager mode. Default 12. |
+| `prjdocs.eagerModelCalls` | Model judgements per run; the heuristic covers the rest. Default 150. |
 | `sysdocs.maxDocs` | Pages indexed per run. Default 5000. |
 | `sysdocs.maxBytesPerDoc` | Bytes kept per page, head first. Default 64 KiB. |
 | `sysdocs.manDirs` | Extra man roots, searched before the machine roots. Empty means `MANPATH` only. |
@@ -337,6 +341,31 @@ that moved. Unchanged pages are skipped by body hash.
 
 Measured here: two technologies, 12 pages, 1 s; moving `.nvmrc` from 22 to 20
 indexed the 20 pages and pruned the 5 from 22; removing the pin pruned the rest.
+
+### Eager mode
+
+`/xerj-prjdocs eager`, or `prjdocs.eager: true`, trades the safety limits for
+reach:
+
+- **No page-type limit.** Plain text, markdown, and JSON are indexed alongside
+  HTML.
+- **A wider depth.** Links are followed up to `prjdocs.eagerMaxDepth` (12) and
+  `prjdocs.eagerMaxPages` pages per site (120).
+- **Model-judged relevance.** Each page is shown to the current model, which
+  answers `yes` or `no`; the page is kept and its links followed only when it
+  says `yes`. The entry page is always kept so the crawl can start. Judgements
+  are cached per URL and capped at `prjdocs.eagerModelCalls` (150) per run;
+  past the cap, and whenever the model is unavailable, a deterministic
+  heuristic decides: a page that names the technology, sits under a
+  documentation path, or matches two of the project's own terms is relevant.
+- **Documentation search for unknown technologies.** A dependency with no
+  entry in the source table is searched for with the host's web search, and the
+  first result on a documentation host is crawled. Discovered URLs are cached,
+  so a later run does not search again.
+
+Eager mode is off by default because it costs model calls and network traffic.
+Measured on `docs.solidjs.com` with the heuristic judge: 25 pages and 169 KB in
+9 s, reaching pages three levels below the entry.
 
 ## System documentation
 

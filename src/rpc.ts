@@ -303,7 +303,7 @@ const definition = {
       }),
     },
     prjdocs: {
-      input: valueSchema({}),
+      input: valueSchema({ eager: { type: "boolean" } }),
       output: valueSchema({
         techs: { type: "array", items: { type: "string" } },
         targets: { type: "number" },

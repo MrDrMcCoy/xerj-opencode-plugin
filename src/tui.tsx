@@ -152,13 +152,21 @@ export default Plugin.define({
       }
     };
 
-    const prjdocs = async (): Promise<void> => {
+    const prjdocs = async (prefill?: string): Promise<void> => {
+      // `eager` is opt-in per run: it removes the crawl limits, so it should be
+      // a deliberate choice rather than what happens by accident.
+      const eager = (prefill ?? "").trim().toLowerCase().includes("eager");
       context.ui.toast.show({
-        message: "XERJ is reading official documentation…",
+        message: eager
+          ? "XERJ is reading documentation (eager)…"
+          : "XERJ is reading official documentation…",
         variant: "info",
       });
       try {
-        const result = (await rpc().prjdocs({}, at())) as {
+        const result = (await rpc().prjdocs(
+          eager ? { eager: true } : {},
+          at(),
+        )) as {
           techs?: string[];
           targets?: number;
           indexed?: number;
@@ -306,9 +314,9 @@ export default Plugin.define({
             "Index official docs for this project's languages, frameworks, and cloud APIs",
           group: "XERJ",
           palette: true,
-          slash: { name: "xerj-prjdocs" },
+          slash: { name: "xerj-prjdocs", arguments: true },
           enabled: () => state.ready,
-          run: () => prjdocs(),
+          run: (input) => prjdocs(input),
         },
         {
           id: "xerj.sysdocs",
