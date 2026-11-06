@@ -152,6 +152,26 @@ export class SearchService {
       options.signal,
     );
 
+    // A symbol-and-title leg. `name` is the function or type a record is about
+    // and `title` is its file or section, so a question that names the concept
+    // ("target triple", "sidebar line") ranks the file that defines it even
+    // when prose mentions the words more often. It needs no passage.
+    const nameLeg = fields.includes("name")
+      ? await this.leg(
+          pattern,
+          {
+            ...base,
+            query: {
+              multi_match: {
+                query: trimmed,
+                fields: ["name^3", "title^2", "body"],
+              },
+            },
+          },
+          options.signal,
+        ).catch(() => null)
+      : null;
+
     let semantic: LegResult | null = null;
     if (semanticCapable) {
       try {
@@ -166,9 +186,10 @@ export class SearchService {
     }
 
     const strategy = semantic ? "hybrid" : "lexical";
-    const fused = semantic
-      ? fuse([lexical.hits, semantic.hits], pool)
-      : lexical.hits.slice(0, pool);
+    const legs: Array<ReadonlyArray<ParsedHit>> = [lexical.hits];
+    if (semantic) legs.push(semantic.hits);
+    if (nameLeg) legs.push(nameLeg.hits);
+    const fused = legs.length === 1 ? lexical.hits.slice(0, pool) : fuse(legs, pool);
     const ranked = demoteGenerated(this.locateBrainPaths(fused), trimmed);
     const trusted =
       options.trustSemantic === true && semantic !== null
@@ -187,7 +208,8 @@ export class SearchService {
     const exclude = options.exclude;
     const hits = (exclude ? candidates.filter((hit) => !exclude(hit)) : candidates).slice(0, k);
     const related = this.brains ? await this.brains.related(hits, options.signal) : [];
-    const narrowing = lexical.narrowing + (semantic?.narrowing ?? 0);
+    const narrowing =
+      lexical.narrowing + (semantic?.narrowing ?? 0) + (nameLeg?.narrowing ?? 0);
 
     if (related.length === 0) {
       return formatResult(hits, strategy, budget, narrowing);

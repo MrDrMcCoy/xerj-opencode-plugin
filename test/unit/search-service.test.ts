@@ -415,3 +415,63 @@ describe("definition", () => {
     expect(result.hits).toHaveLength(0);
   });
 });
+
+describe("symbol and title leg", () => {
+  test("runs a third leg when the mapping has a name field", async () => {
+    const client = fakeClient({
+      mappingsResult: {
+        "xop-p-docs": { body: "semantic_text", name: "text", title: "text", path: "keyword" },
+      },
+      searchResults: [
+        { hits: { hits: [hit({ id: "lex", path: "README.md" })] } },
+        { hits: { hits: [hit({ id: "sme", path: "docs/guide.md" })] } },
+        { hits: { hits: [hit({ id: "nam", path: "src/platform.ts" })] } },
+      ],
+    });
+
+    const service = new SearchService(client, ["xop-p"], logger, process.cwd());
+    const result = await service.search("how is a target chosen", { k: 5 });
+
+    expect(client.searches).toHaveLength(3);
+    const legs = client.searches.map((call) => JSON.stringify(call.body.query));
+    expect(legs.some((body) => body.includes("multi_match"))).toBe(true);
+    expect(legs.some((body) => body.includes('"name^3"'))).toBe(true);
+    expect(result.hits.map((entry) => entry.path)).toContain("src/platform.ts");
+  });
+
+  test("skips the leg when there is no name field", async () => {
+    const client = fakeClient({
+      searchResults: [{ hits: { hits: [hit({ path: "src/a.ts" })] } }],
+    });
+
+    const service = new SearchService(client, ["xop-p"], logger, process.cwd());
+    await service.search("where is the config", { k: 5 });
+
+    // Lexical plus semantic; no third leg without a `name` field.
+    expect(client.searches).toHaveLength(2);
+    expect(client.searches.some((call) => "multi_match" in (call.body.query as object))).toBe(
+      false,
+    );
+  });
+
+  test("a failing name leg leaves the other legs working", async () => {
+    let calls = 0;
+    const base = fakeClient({
+      mappingsResult: {
+        "xop-p-docs": { body: "text", name: "text", path: "keyword" },
+      },
+    });
+    const client = Object.assign(base, {
+      search: async (index: string, body: Record<string, unknown>) => {
+        calls += 1;
+        if (calls === 2) throw new Error("leg refused");
+        return { hits: { hits: [hit({ path: "src/a.ts" })] } };
+      },
+    });
+
+    const service = new SearchService(client, ["xop-p"], logger, process.cwd());
+    const result = await service.search("where is the config", { k: 5 });
+
+    expect(result.hits.length).toBeGreaterThan(0);
+  });
+});
