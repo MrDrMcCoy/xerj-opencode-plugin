@@ -10,6 +10,7 @@ import { docsTargets, versionLabel } from "../../src/prjdocs/sources.ts";
 import {
   builtinSources,
   elasticsearchBranch,
+  elasticsearchDocsSource,
   listRepoDocs,
   xerjDocsSource,
 } from "../../src/prjdocs/builtin.ts";
@@ -439,5 +440,165 @@ describe("builtin documentation sources", () => {
 
     expect(sources.map((source) => source.tech)).toEqual(["xerj", "elasticsearch"]);
     expect(sources[1]?.url).toContain("/reference/8.13/index.html");
+  });
+});
+
+describe("elasticsearch chapter discovery", () => {
+  test("chapters come from rest-apis.html, with the summary first", async () => {
+    const fetchImpl = (async (input: string | URL) => {
+      const url = String(input);
+      if (url.endsWith("rest-apis.html")) {
+        return new Response(
+          `<html><body>
+             <a href="indices.html">Indices</a>
+             <a href="cat.html">CAT</a>
+             <a href="../current/index.html">Current</a>
+             <a href="rest-apis.html">Self</a>
+           </body></html>`,
+        );
+      }
+      return new Response(
+        `<html><head><title>Elasticsearch API</title></head><body><p>${longBody}</p></body></html>`,
+        { headers: { "content-type": "text/html" } },
+      );
+    }) as unknown as typeof fetch;
+
+    const pages = await elasticsearchDocsSource("8.13.0", {
+      logger,
+      fetchImpl,
+      maxPages: 40,
+    }).collect();
+
+    // Only pages inside the branch are collected: `../current/` is dropped.
+    expect(pages.every((page) => page.url.includes("/reference/8.13/"))).toBe(true);
+    expect(pages.some((page) => page.url.endsWith("/indices.html"))).toBe(true);
+    expect(pages.some((page) => page.url.endsWith("/cat.html"))).toBe(true);
+  });
+
+  test("a missing rest-apis.html falls back to the known chapter list", async () => {
+    const requested: string[] = [];
+    const fetchImpl = (async (input: string | URL) => {
+      const url = String(input);
+      requested.push(url);
+      if (url.endsWith("rest-apis.html")) return new Response("gone", { status: 404 });
+      return new Response(
+        `<html><head><title>Elasticsearch guide</title></head><body><p>${longBody}</p></body></html>`,
+        { headers: { "content-type": "text/html" } },
+      );
+    }) as unknown as typeof fetch;
+
+    const pages = await elasticsearchDocsSource("8.13.0", {
+      logger,
+      fetchImpl,
+      maxPages: 12,
+    }).collect();
+
+    expect(requested.some((url) => url.endsWith("/query-dsl.html"))).toBe(true);
+    expect(pages.length).toBeGreaterThan(0);
+  });
+
+  test("a failed chapter crawl does not stop the others", async () => {
+    const fetchImpl = (async (input: string | URL) => {
+      const url = String(input);
+      if (url.endsWith("rest-apis.html")) {
+        return new Response(`<a href="indices.html">i</a><a href="cat.html">c</a>`);
+      }
+      if (url.endsWith("cat.html")) throw new Error("network down");
+      return new Response(
+        `<html><head><title>Elasticsearch API</title></head><body><p>${longBody}</p></body></html>`,
+        { headers: { "content-type": "text/html" } },
+      );
+    }) as unknown as typeof fetch;
+
+    const pages = await elasticsearchDocsSource("8.13.0", {
+      logger,
+      fetchImpl,
+      maxPages: 20,
+    }).collect();
+
+    expect(pages.some((page) => page.url.endsWith("/indices.html"))).toBe(true);
+  });
+});
+
+describe("crawl boundary options", () => {
+  test("links outside the url prefix are not followed", async () => {
+    const requested: string[] = [];
+    const fetchImpl = (async (input: string | URL) => {
+      const url = String(input);
+      requested.push(url);
+      return new Response(
+        html("Guide", longBody, ["/guide/a.html", "/blog/post.html"]),
+        { headers: { "content-type": "text/html" } },
+      );
+    }) as unknown as typeof fetch;
+
+    const pages = await crawlDocs({
+      entry: "https://example.test/guide/index.html",
+      maxPages: 5,
+      urlPrefix: "https://example.test/guide/",
+      fetchImpl,
+      logger,
+    });
+
+    expect(pages).toHaveLength(2);
+    expect(requested.some((url) => url.includes("/blog/"))).toBe(false);
+  });
+
+  test("the delay option is applied between pages", async () => {
+    const fetchImpl = (async () =>
+      new Response(html("Page", longBody, ["/next"]), {
+        headers: { "content-type": "text/html" },
+      })) as unknown as typeof fetch;
+
+    const started = Date.now();
+    await crawlDocs({
+      entry: "https://example.test/one",
+      maxPages: 2,
+      delayMs: 30,
+      fetchImpl,
+      logger,
+    });
+
+    expect(Date.now() - started).toBeGreaterThanOrEqual(25);
+  });
+});
+
+describe("page titles and asset links", () => {
+  test("a page without a markdown heading is titled by its path", async () => {
+    const fetchImpl = (async (input: string | URL) => {
+      const url = String(input);
+      if (url.includes("api.github.com")) {
+        return new Response(JSON.stringify({ tree: [{ type: "blob", path: "docs/plain.md" }] }));
+      }
+      // No `#` heading anywhere in the body.
+      return new Response(`Plain documentation text without a heading.\n\n${longBody}`);
+    }) as unknown as typeof fetch;
+
+    const pages = await xerjDocsSource({ logger, fetchImpl }).collect();
+
+    // `stripRoff`-free fallback: the file name plus the first line.
+    expect(pages[0]?.title).toContain("plain.md");
+  });
+
+  test("asset links next to documentation links are not followed", async () => {
+    const requested: string[] = [];
+    const fetchImpl = (async (input: string | URL) => {
+      const url = String(input);
+      requested.push(url);
+      return new Response(
+        html("Guide", longBody, ["/docs/page.html", "/docs/manual.pdf", "/docs/app.js"]),
+        { headers: { "content-type": "text/html" } },
+      );
+    }) as unknown as typeof fetch;
+
+    await crawlDocs({
+      entry: "https://example.test/docs/index.html",
+      maxPages: 5,
+      fetchImpl,
+      logger,
+    });
+
+    expect(requested.some((url) => url.endsWith(".pdf"))).toBe(false);
+    expect(requested.some((url) => url.endsWith(".js"))).toBe(false);
   });
 });

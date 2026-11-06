@@ -354,3 +354,63 @@ describe("hidden indexer failures", () => {
     expect(bulks).toBeGreaterThanOrEqual(3);
   });
 });
+
+describe("hidden indexer watching", () => {
+  test("start runs once and watches the folder, stop releases it", async () => {
+    const project = await mkdtemp(join(root, "project-"));
+    const agents = join(project, ".agents");
+    await mkdir(agents, { recursive: true });
+    await writeFile(join(agents, "plan.md"), "# Plan");
+
+    let bulks = 0;
+    const index = new HiddenIndex({
+      client: {
+        put: async () => {},
+        bulk: async () => {
+          bulks += 1;
+        },
+        bulkDelete: async () => {},
+        search: async () => ({ hits: [] }),
+      } as unknown as XerjClient,
+      projectRoot: project,
+      prefix: "xop-hidden-test",
+      roots: documentRoots(project, [".agents"]),
+      maxBytes: 4096,
+      logger,
+    });
+
+    await index.start();
+    expect(bulks).toBe(1);
+    expect(index.snapshot().docs).toBe(1);
+
+    // An edit reaches the watcher; give the debounce a moment.
+    await writeFile(join(agents, "second.md"), "second");
+    for (let waited = 0; waited < 4_000 && bulks < 2; waited += 100) {
+      await Bun.sleep(100);
+    }
+    expect(bulks).toBeGreaterThanOrEqual(2);
+
+    await index.stop();
+  }, 20_000);
+
+  test("no configured folders means nothing to watch", async () => {
+    const project = await mkdtemp(join(root, "project-"));
+    const index = new HiddenIndex({
+      client: {
+        put: async () => {},
+        bulk: async () => {},
+        bulkDelete: async () => {},
+        search: async () => ({ hits: [] }),
+      } as unknown as XerjClient,
+      projectRoot: project,
+      prefix: "xop-hidden-test",
+      roots: [],
+      maxBytes: 4096,
+      logger,
+    });
+
+    await index.start();
+    expect(index.snapshot().lastRunAt).toBeNull();
+    await index.stop();
+  });
+});

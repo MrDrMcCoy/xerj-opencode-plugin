@@ -154,6 +154,13 @@ describe("McpHost boot against an existing node", () => {
     const result = (await status?.execute({})) as { content: string };
     expect(result.content).toContain("xerj");
 
+    // The dataset tool runs against the same client, so listing answers from
+    // the node rather than failing on a missing service.
+    const dataset = tools.find((tool) => tool.name === "dataset");
+    const listed = (await dataset?.execute({ action: "list" })) as { content: string };
+    expect(listed.content).toContain("xop-test-docs");
+    expect(listed.content).toContain("managed");
+
     await host.stop();
     server.stop(true);
   }, 60_000);

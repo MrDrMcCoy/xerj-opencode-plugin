@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { DEFAULT_CONFIG } from "../../src/config.ts";
 import { buildTools } from "../../src/tools/search.ts";
 import type { SearchService } from "../../src/search/service.ts";
@@ -389,5 +392,99 @@ describe("dataset tool", () => {
     expect((await run(() => client, { action: "import" })).content).toContain(
       "needs a path",
     );
+  });
+});
+
+describe("dataset tool export and import", () => {
+  test("export writes a dump and reports the count", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "xerj-dataset-tool-"));
+    const path = join(dir, "dump.ndjson");
+    const client = {
+      indices: async () => [{ index: "notes", docs: 2, bytes: 100 }],
+      search: async () => ({
+        hits: {
+          hits: [
+            { _id: "1", _source: { body: "one" } },
+            { _id: "2", _source: { body: "two" } },
+          ],
+        },
+      }),
+    };
+
+    const tools = buildTools({
+      config: DEFAULT_CONFIG,
+      ledger: {} as never,
+      logger: {
+        debug() {},
+        info() {},
+        warn() {},
+        error() {},
+        entries: async () => [],
+        flush: async () => {},
+      },
+      getClient: () => client as never,
+      getSearch: () => null,
+      getMemory: () => null,
+      getSpool: () => null,
+      getAnomaly: () => null,
+      snapshot: async () => ({}) as never,
+    });
+    const tool = tools.find((candidate) => candidate.name === "dataset");
+    const result = (await tool?.execute(
+      { action: "export", index: "notes", path },
+      {},
+    )) as { content: string };
+
+    expect(result.content).toContain("exported 2 documents");
+    const lines = (await readFile(path, "utf8")).trim().split("\n");
+    expect(lines).toHaveLength(4);
+
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test("import reports the created index and skipped lines", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "xerj-dataset-tool-"));
+    const path = join(dir, "dump.ndjson");
+    await writeFile(
+      path,
+      ['{"index":{"_index":"fresh","_id":"1"}}', '{"body":"x"}', "junk", ""].join("\n"),
+    );
+
+    const created: string[] = [];
+    const client = {
+      indices: async () => [],
+      put: async (index: string) => void created.push(index),
+      bulk: async () => {},
+    };
+
+    const tools = buildTools({
+      config: DEFAULT_CONFIG,
+      ledger: {} as never,
+      logger: {
+        debug() {},
+        info() {},
+        warn() {},
+        error() {},
+        entries: async () => [],
+        flush: async () => {},
+      },
+      getClient: () => client as never,
+      getSearch: () => null,
+      getMemory: () => null,
+      getSpool: () => null,
+      getAnomaly: () => null,
+      snapshot: async () => ({}) as never,
+    });
+    const tool = tools.find((candidate) => candidate.name === "dataset");
+    const result = (await tool?.execute({ action: "import", path }, {})) as {
+      content: string;
+    };
+
+    expect(result.content).toContain("imported 1 documents into fresh");
+    expect(result.content).toContain("index created");
+    expect(result.content).toContain("lines skipped");
+    expect(created).toContain("/fresh");
+
+    await rm(dir, { recursive: true, force: true });
   });
 });

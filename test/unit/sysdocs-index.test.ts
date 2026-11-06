@@ -1,9 +1,10 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { gzipSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SysdocIndexer, discoverPages } from "../../src/sysdocs/index.ts";
+import { NodeRequestError } from "../../src/node/client.ts";
 
 const root = await mkdtemp(join(tmpdir(), "xerj-sysdocs-"));
 afterAll(async () => rm(root, { recursive: true, force: true }));
@@ -272,5 +273,160 @@ describe("sysdocs failures", () => {
 
     expect(summary.indexed).toBe(1);
     expect(summary.discovered).toBeGreaterThan(1);
+  });
+});
+
+describe("sysdocs index creation", () => {
+  test("an existing index is not recreated a second time", async () => {
+    const { man, info, state } = await fixture();
+    const puts: string[] = [];
+    const client = {
+      ...fakeClient(),
+      put: async (path: string) => {
+        puts.push(path);
+        throw new NodeRequestError("exists", 409);
+      },
+    };
+
+    const indexer = new SysdocIndexer({
+      client: client as never,
+      prefix: "xop-sys-test",
+      stateDir: state,
+      logger,
+      manDirs: [man],
+      infoDirs: [info],
+    });
+
+    await indexer.run();
+    await indexer.run();
+
+    expect(puts).toHaveLength(1);
+  });
+
+  test("a mapping failure other than 400/409 is a warning, not a crash", async () => {
+    const { man, info, state } = await fixture();
+    const warnings: string[] = [];
+    const client = {
+      ...fakeClient(),
+      put: async () => {
+        throw new NodeRequestError("node exploded", 500);
+      },
+    };
+
+    const summary = await new SysdocIndexer({
+      client: client as never,
+      prefix: "xop-sys-test",
+      stateDir: state,
+      logger: { ...logger, warn: (message: string) => void warnings.push(message) },
+      manDirs: [man],
+      infoDirs: [info],
+    }).run();
+
+    expect(summary.indexed).toBeGreaterThan(0);
+    expect(warnings).toContain("could not create the system docs index");
+  });
+
+  test("manifest rows for vanished pages are dropped after a prune", async () => {
+    const { man, info, state } = await fixture();
+    const fake = fakeClient();
+
+    await new SysdocIndexer({
+      client: fake as never,
+      prefix: "xop-sys-test",
+      stateDir: state,
+      logger,
+      manDirs: [man],
+      infoDirs: [info],
+    }).run();
+
+    await rm(join(man, "man1/git.1.gz"));
+    const summary = await new SysdocIndexer({
+      client: fake as never,
+      prefix: "xop-sys-test",
+      stateDir: state,
+      logger,
+      manDirs: [man],
+      infoDirs: [info],
+    }).run();
+
+    expect(summary.pruned).toBe(1);
+    const manifest = JSON.parse(
+      await readFile(join(state, "sysdocs-manifest.json"), "utf8"),
+    ) as Record<string, unknown>;
+    expect(Object.keys(manifest).some((path) => path.endsWith("git.1"))).toBe(false);
+  });
+});
+
+describe("sysdocs page extraction", () => {
+  test("an uncompressed info page is read, and a compressed one that is not gzip is skipped", async () => {
+    const man = join(root, `man-plain-${Math.random().toString(36).slice(2)}`);
+    const info = join(root, `info-mixed-${Math.random().toString(36).slice(2)}`);
+    const state = join(root, `state-${Math.random().toString(36).slice(2)}`);
+    await mkdir(join(man, "man1"), { recursive: true });
+    await mkdir(info, { recursive: true });
+
+    await writeFile(join(man, "man1/plain.1"), ".SH NAME\nplain - a plain page\n");
+    // `.info.bz2` is not gzip: the extractor must skip it, not fail the run.
+    await writeFile(join(info, "skipped.info.bz2"), "not gzip");
+
+    const fake = fakeClient();
+    const summary = await new SysdocIndexer({
+      client: fake as never,
+      prefix: "xop-sys-test",
+      stateDir: state,
+      logger,
+      manDirs: [man],
+      infoDirs: [info],
+      roots: { man: [], info: [] },
+    }).run();
+
+    expect(summary.indexed).toBe(1);
+    expect(fake.bulks[0]?.actions[0]?.source.path).toBe("man/plain.1");
+  });
+
+  test("a page longer than the cap is truncated", async () => {
+    const man = join(root, `man-long-${Math.random().toString(36).slice(2)}`);
+    const state = join(root, `state-${Math.random().toString(36).slice(2)}`);
+    await mkdir(join(man, "man1"), { recursive: true });
+    await writeFile(join(man, "man1/long.1"), `.SH NAME\nlong - ${"x".repeat(500)}\n`);
+
+    const fake = fakeClient();
+    await new SysdocIndexer({
+      client: fake as never,
+      prefix: "xop-sys-test",
+      stateDir: state,
+      logger,
+      manDirs: [man],
+      infoDirs: [],
+      roots: { man: [], info: [] },
+      maxBytesPerDoc: 120,
+    }).run();
+
+    const body = String(fake.bulks[0]?.actions[0]?.source.body ?? "");
+    expect(body.length).toBeLessThan(500);
+    expect(body.length).toBeLessThanOrEqual(200);
+  });
+
+  test("a corrupt manifest is rewritten instead of failing the run", async () => {
+    const { man, info, state } = await fixture();
+    await mkdir(state, { recursive: true });
+    await writeFile(join(state, "sysdocs-manifest.json"), "{ not json");
+    const fake = fakeClient();
+
+    const summary = await new SysdocIndexer({
+      client: fake as never,
+      prefix: "xop-sys-test",
+      stateDir: state,
+      logger,
+      manDirs: [man],
+      infoDirs: [info],
+      roots: { man: [], info: [] },
+    }).run();
+
+    expect(summary.indexed).toBeGreaterThan(0);
+    const manifest = JSON.parse(
+      await readFile(join(state, "sysdocs-manifest.json"), "utf8"),
+    ) as Record<string, unknown>;
+    expect(Object.keys(manifest).length).toBeGreaterThan(0);
   });
 });
