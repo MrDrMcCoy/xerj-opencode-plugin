@@ -19,10 +19,23 @@ cited passages instead of whole files. Nothing leaves the machine.
 - **Remote ingest.** Pages fetched during a session are spooled and indexed, so
   a URL read today is searchable tomorrow. Any shell command that references
   a file outside the project also indexes it.
-- **Hidden trees.** `index.hidden` indexes folders that `autoindex` skips, such
-  as `.agents` or `.github`, as plain searchable documents.
-- **Second brain.** Opt in with `index.brain` to build a graph over a docs
-  folder. Hits expand one hop along citation and sequence edges.
+- **One graph corpus.** `index.graph` indexes the project as a single corpus
+  with sections, symbols, `path:line`, and reference edges, refreshed by the
+  plugin's own watcher. `index.hidden` adds folders the engine skips, such as
+  `.agents` or `.github`; a folder configured in `index.brain` is indexed once,
+  as a graph, not twice.
+- **System documentation.** `/xerj-sysdocs` indexes this machine's man and info
+  pages, including user, Homebrew, and Nix roots, skipping unchanged pages and
+  pruning pages that vanished.
+- **Library documentation.** `/xerj-prjdocs` reads the project's manifests and
+  runtime pins, then crawls official docs for its languages, frameworks, and
+  cloud APIs at the versions it uses, pruning other versions. `eager` widens
+  the crawl and judges pages with the current model.
+- **Your own datasets.** `xerj_dataset` lists, creates, and deletes extra
+  indexes, and imports or exports them as Elasticsearch-compatible NDJSON
+  dumps.
+- **MCP.** The same twelve tools are available to agents that do not run
+  OpenCode, through a standalone `xerj-mcp` server on stdio.
 - **Accounting.** `xerj_status` reports queries, hit rate, bytes returned, and
   measured token savings. The sidebar and `/xerj` panel show the same numbers.
 - **Anomaly scoring.** `xerj_anomaly` flags spikes in a numeric metric series
@@ -236,10 +249,29 @@ The same entry works with a checkout path instead of the package name; see
 
 ## TUI
 
-- Sidebar: docs and size, hit rate, tokens saved, freshness.
-- `/xerj`: open the details panel. Also accepts `status`, `reindex`,
-  `remember <text>`, and `search <query>`.
-- `/xerj-reindex`, `/xerj-remember`, `/xerj-search`: direct commands.
+The sidebar shows four lines: node state with document and size counts, queries
+with hit rate and prompts the relevance gate skipped, tokens saved, and index
+freshness. Every command is also in the palette.
+
+| Command | What it does |
+| --- | --- |
+| `/xerj` | Open the details panel: node, binary, index, corpora, datasets, memory, usage, counters, top cited files, and health. |
+| `/xerj status` | Same as `/xerj`. |
+| `/xerj reindex` | Run an incremental pass over the project and report the record count. |
+| `/xerj remember <text>` | Store a durable fact in project memory. |
+| `/xerj search <query>` | Search the index and show cited passages in a dialog. |
+| `/xerj-reindex` | Incremental pass over the project, fetched pages, and hidden folders. |
+| `/xerj-remember <text>` | Store a memory (prompts for the text when empty). |
+| `/xerj-search <query>` | Search and show cited passages (prompts when empty). |
+| `/xerj-prjdocs [eager]` | Index official docs for the project's languages, frameworks, and cloud APIs. Add `eager` for the wider, model-judged crawl. |
+| `/xerj-sysdocs` | Index this machine's man and info pages. |
+
+The panel closes three ways: `escape`, the **✕ close** button in its footer, or
+running `/xerj` again.
+
+The TUI talks to the server part over RPC (`status`, `reindex`, `search`,
+`remember`, `sysdocs`, `prjdocs`, and an `updated` event the sidebar follows),
+so the commands work in any OpenCode window on the same project.
 
 ## How retrieval works
 
@@ -434,15 +466,75 @@ bunx @mrdrmccoy/xerj-opencode-plugin@latest xerj-mcp --project /path/to/repo
 node ./node_modules/@mrdrmccoy/xerj-opencode-plugin/dist/mcp.mjs --project .
 ```
 
-Tools: `search`, `def`, `status`, `remember`, `recall`, `forget`, `index`,
-`anomaly`, `reindex`, `sysdocs`, and `prjdocs`. They are the same tools the
-OpenCode plugin registers, plus the three corpus runners the plugin exposes
-only as commands.
+### Client setup
+
+Any MCP client works; the entry is the same everywhere.
+
+**Claude Code** (`.mcp.json` in the project, or the CLI):
+
+```json
+{
+  "mcpServers": {
+    "xerj": {
+      "command": "npx",
+      "args": ["-y", "@mrdrmccoy/xerj-opencode-plugin@latest", "xerj-mcp", "--project", "."]
+    }
+  }
+}
+```
+
+```
+claude mcp add xerj -- npx -y @mrdrmccoy/xerj-opencode-plugin@latest xerj-mcp --project .
+```
+
+**Cursor** (`~/.cursor/mcp.json`) uses the same shape. **Anything else** that
+spawns a command over stdio works the same way; point it at `xerj-mcp`.
+
+### Arguments
+
+| Argument | Meaning |
+| --- | --- |
+| `--project <dir>`, `-C <dir>` | Project to index. Defaults to the working directory. |
+| `--url <node url>` | Attach to a running node instead of spawning one. |
+| `--help`, `-h` | Print usage on stderr and exit. |
+
+### Tools
+
+The MCP server exposes twelve tools, the same set the OpenCode plugin
+registers, so a prompt written for one works in the other:
+
+| Tool | Arguments | What it does |
+| --- | --- | --- |
+| `search` | `query`, `k?`, `max_tokens?` | Cited passages from the project, docs, and memory corpora. |
+| `def` | `symbol`, `k?` | A declaration by name with its signature. |
+| `status` | — | Node, index, corpora, memory, and accounting. |
+| `remember` | `text`, `kind?`, `topic?` | Store a durable fact. |
+| `recall` | `query`, `k?` | Retrieve memories by meaning. |
+| `forget` | `id` | Retract a memory. |
+| `index` | `url?` or `path?` | Index a page or a file from outside the project. |
+| `anomaly` | `index`, plus the detection options | Flag spikes in a numeric series. |
+| `dataset` | `action`, `index?`, `path?`, `mapping?`, `force?` | Manage extra indexes and import or export NDJSON dumps. |
+| `reindex` | — | Incremental pass over the project now. |
+| `sysdocs` | — | Index the machine's man and info pages. |
+| `prjdocs` | `eager?` | Index official docs for what the project uses. |
+
+A typical session, in tool-call form:
+
+```
+xerj_search {query: "where is the idle timeout configured"}
+xerj_def    {symbol: "stopNode"}
+xerj_dataset{action: "export", index: "my-notes", path: "/tmp/notes.ndjson"}
+xerj_dataset{action: "import", path: "/tmp/notes.ndjson", index: "notes-copy"}
+```
 
 The handshake touches nothing: `initialize` and `tools/list` answer
 immediately, and the binary download, node start, and index pass happen behind
 the first call that needs them. Diagnostics go to stderr, so every line of
 stdout is JSON-RPC.
+
+A call returns MCP text content plus `structuredContent` when the tool has
+machine-readable output (counts, hits, and paths), so a client can show the
+prose or use the numbers.
 
 Settings come from the environment because there are no plugin options:
 
@@ -515,7 +607,13 @@ and reference prose already carries the words people search for.
 <project>/.xerj/nodes/<prefix>/                node port, pid, log, heartbeats
 <project>/.xerj/nodes/<prefix>/data/           engine storage and journal
 <project>/.xerj/spool/<prefix>/                fetched pages
+<project>/.xerj/nodes/<prefix>/sysdocs/        man and info manifest
+<project>/.xerj/nodes/<prefix>/prjdocs/        documentation crawl manifest
 ```
+
+Datasets you create with `xerj_dataset`, and the documentation corpora, live
+inside the engine data directory; `xerj_status` reports their document counts
+and sizes, and the panel lists them under Corpora and Datasets.
 
 Set `storage.root` to an absolute path to keep a project's data elsewhere. A
 configured path inside the project must be under a dot-directory; a visible
@@ -530,8 +628,9 @@ same data.
 
 ## Limitations
 
-- XERJ is pre-1.0. The plugin pins a release and isolates every call behind
-  `node/client.ts`; upgrades require the same major and never downgrade.
+- XERJ is pre-1.0. Every call is isolated behind `node/client.ts`, and
+  `binary.version: "auto"` tracks the newest release at or above
+  `1.0.0-rc.1` without ever downgrading. Pin a version to freeze it.
 - `autoindex` skips hidden paths in every mode, including with `--no-ignore`,
   so `index.hidden` covers configured folders (`.agents`, `.github`) through a
   separate `_bulk` index. That is the one corpus a project graph cannot absorb.
