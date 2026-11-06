@@ -281,7 +281,12 @@ export class TelemetryStore {
   }
 
   /** One service-state transition; dwell time is summed from it. */
-  noteState(from: ServiceState, to: ServiceState, at: number): void {
+  noteState(
+    from: ServiceState,
+    to: ServiceState,
+    at: number,
+    detail: string | null = null,
+  ): void {
     if (!this.enabled || this.broken || from === to) return;
 
     const dwell = this.todayDwell();
@@ -294,6 +299,7 @@ export class TelemetryStore {
       from,
       to,
       reason: from === "starting" ? "startup" : "status",
+      ...(detail === null ? {} : { detail }),
     });
   }
 

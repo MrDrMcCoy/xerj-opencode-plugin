@@ -438,7 +438,7 @@ export default Plugin.define({
         const from = stateNow.name;
         stateNow.name = result.name;
         stateNow.since = now;
-        telemetry.noteState(from, result.name, now);
+        telemetry.noteState(from, result.name, now, result.detail);
       }
 
       return {
@@ -520,7 +520,9 @@ export default Plugin.define({
         memory: { namespace: memoryNs, count: 0, exists: false, stale: 0 },
         brains: brainStatus(runtime.brain, runtime.brains),
         corpora: baseCorpora,
-        state: stateStatus(baseCorpora, false, runtime.phase, nodeState),
+        // The memory check needs the node, which this base path has not
+        // reached. Unknown is not missing: accusing flashed `degraded`.
+        state: stateStatus(baseCorpora, true, runtime.phase, nodeState),
         telemetry: await telemetryStatus(),
         // The engine data and the node log were invisible before: a project
         // could occupy gigabytes with only document counts to show for it.

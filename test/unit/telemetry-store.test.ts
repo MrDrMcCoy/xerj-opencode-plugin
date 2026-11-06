@@ -246,6 +246,16 @@ describe("TelemetryStore", () => {
     await built.close();
   });
 
+  test("a transition records why it happened", async () => {
+    const built = await store();
+    built.noteState("starting", "degraded", Date.now(), "memory missing");
+    await built.flush();
+
+    const text = await readFile(join(built.directory, "ops.ndjson"), "utf8");
+    expect(text).toContain('"detail":"memory missing"');
+    await built.close();
+  });
+
   test("a report carries the day's dwell for this instance", async () => {
     const built = await store();
     built.noteState("starting", "ready", Date.now() - 2_000);
