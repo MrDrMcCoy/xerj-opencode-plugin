@@ -302,6 +302,20 @@ const definition = {
         records: { type: ["number", "null"] },
       }),
     },
+    prjdocs: {
+      input: valueSchema({}),
+      output: valueSchema({
+        techs: { type: "array", items: { type: "string" } },
+        targets: { type: "number" },
+        pages: { type: "number" },
+        indexed: { type: "number" },
+        skipped: { type: "number" },
+        pruned: { type: "number" },
+        failed: { type: "number" },
+        bytes: { type: "number" },
+        unsupported: { type: "array", items: { type: "string" } },
+      }),
+    },
     sysdocs: {
       input: valueSchema({}),
       output: valueSchema({

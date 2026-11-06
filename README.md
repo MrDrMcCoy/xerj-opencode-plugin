@@ -192,6 +192,8 @@ The same entry works with a checkout path instead of the package name; see
 | `index.brain` | Folders to index as second brains, e.g. `[".agents"]`. |
 | `index.hidden` | Hidden folders to index as plain documents. Empty means "the docs folders that exist": `.agents`, `.github`, `.claude`. Set a list to choose exactly what is indexed. |
 | `index.hiddenMaxBytes` | Per-file ceiling for hidden documents. |
+| `prjdocs.maxTargets` | Documentation sites crawled in one run. Default 40. |
+| `prjdocs.maxPages` | Pages per site; `0` uses the per-source default (8 to 25). |
 | `sysdocs.maxDocs` | Pages indexed per run. Default 5000. |
 | `sysdocs.maxBytesPerDoc` | Bytes kept per page, head first. Default 64 KiB. |
 | `sysdocs.manDirs` | Extra man roots, searched before the machine roots. Empty means `MANPATH` only. |
@@ -303,6 +305,38 @@ Savings are measured, not asserted: the baseline is each cited file's size
 capped at `stats.maxBaselineBytes`, counted once per session. Reading a file
 subtracts the bytes actually read, so a partial read only removes what it
 covered.
+
+## Project documentation
+
+`/xerj-prjdocs` reads the project's manifests and file extensions, then crawls
+the official documentation for what it finds into
+`xop-<project>-prjdocs-docs`.
+
+Detection is deliberate, not clever:
+
+- **Languages** come from file extensions and from the files that pin a runtime:
+  `.nvmrc`, `.node-version`, `.python-version`, `.tool-versions`,
+  `rust-toolchain.toml`, `engines` in `package.json`, `go` in `go.mod`, and
+  `requires-python` in `pyproject.toml`.
+- **Frameworks** come from `package.json` dependencies, `requirements.txt`,
+  `Cargo.toml`, and `go.mod`, matched against a known list.
+- **Cloud APIs** come from dependency names: `@aws-sdk/*`, `@google-cloud/*`,
+  `@azure/*`, `stripe`, `twilio`, `@supabase/*`, `wrangler`, `vercel`, and the
+  like.
+
+Each technology maps to one entry URL. Versioned sources (Node, Python) produce
+one URL for the version the project declares and one for the latest release,
+resolved from `nodejs.org/dist/index.json` and `endoflife.date`; everything else
+is an unversioned site with a page budget of 8 to 25.
+
+The crawler stays on the site it started from, follows links two levels deep,
+skips assets and non-HTML responses, and stops at its page budget. A document
+carries `url`, `title`, `tech`, `version`, and `fetched_at`, so a page for a
+version the project no longer uses is **pruned** on the next run, as is a page
+that moved. Unchanged pages are skipped by body hash.
+
+Measured here: two technologies, 12 pages, 1 s; moving `.nvmrc` from 22 to 20
+indexed the 20 pages and pruned the 5 from 22; removing the pin pruned the rest.
 
 ## System documentation
 

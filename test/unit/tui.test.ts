@@ -101,6 +101,7 @@ interface Host {
   setRemember(handler: () => Promise<unknown>): void;
   setSearch(handler: () => Promise<unknown>): void;
   setSysdocs(handler: () => Promise<unknown>): void;
+  setPrjdocs(handler: () => Promise<unknown>): void;
   setDialogAnswer(answer: string): void;
   setPanelOpenResult(opens: boolean): void;
   readonly slots: Array<{ append: string; render: (input?: Record<string, unknown>) => unknown }>;
@@ -124,6 +125,17 @@ function makeHost(): Host {
   let reindex = async (): Promise<unknown> => ({ queued: true, records: 900 });
   let remember = async (): Promise<unknown> => ({ id: "mem-1", created: true });
   let search = async (): Promise<unknown> => ({ text: "[1] src/a.ts:1\ncode", hits: 1, bytes: 20 });
+  let prjdocs = async (): Promise<unknown> => ({
+    techs: [],
+    targets: 0,
+    pages: 0,
+    indexed: 0,
+    skipped: 0,
+    pruned: 0,
+    failed: 0,
+    bytes: 0,
+    unsupported: [],
+  });
   let sysdocs = async (): Promise<unknown> => ({
     discovered: 400,
     indexed: 12,
@@ -159,6 +171,10 @@ function makeHost(): Host {
       sysdocs: async (_input: unknown, options?: CallOptions) => {
         record("sysdocs", options);
         return sysdocs();
+      },
+      prjdocs: async (_input: unknown, options?: CallOptions) => {
+        record("prjdocs", options);
+        return prjdocs();
       },
       events: { on: () => () => {} },
     };
@@ -243,6 +259,9 @@ function makeHost(): Host {
     },
     setSysdocs: (handler) => {
       sysdocs = handler;
+    },
+    setPrjdocs: (handler) => {
+      prjdocs = handler;
     },
     setRemember: (handler) => {
       remember = handler;
@@ -599,6 +618,37 @@ describe("system docs command", () => {
     expect(toast?.message).toContain("380 unchanged");
     expect(toast?.message).toContain("8 pruned");
     expect(host.calls.some((call) => call.method.startsWith("sysdocs"))).toBe(true);
+    dispose();
+  });
+});
+
+describe("project docs command", () => {
+  test("runs the method and reports technologies, indexed, and pruned", async () => {
+    const host = makeHost();
+    host.setPrjdocs(async () => ({
+      techs: ["react@18.2.0", "typescript@5.4.0"],
+      targets: 2,
+      pages: 40,
+      indexed: 35,
+      skipped: 5,
+      pruned: 3,
+      failed: 0,
+      bytes: 90_000,
+      unsupported: [],
+    }));
+
+    const { dispose } = await setup(host);
+    const command = host.commands.find((candidate) => candidate.id === "xerj.prjdocs");
+    expect(command).toBeDefined();
+    await command?.run("");
+    await flush();
+
+    const toast = host.toasts.at(-1);
+    expect(toast?.message).toContain("2 technologies");
+    expect(toast?.message).toContain("35 pages indexed");
+    expect(toast?.message).toContain("5 unchanged");
+    expect(toast?.message).toContain("3 pruned");
+    expect(host.calls.some((call) => call.method.startsWith("prjdocs"))).toBe(true);
     dispose();
   });
 });

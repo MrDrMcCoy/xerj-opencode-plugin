@@ -76,6 +76,13 @@ export interface ContextOptions {
   readonly timeoutMs: number;
 }
 
+export interface PrjdocsOptions {
+  /** Documentation targets crawled in one run. */
+  readonly maxTargets: number;
+  /** Pages per target; 0 uses the per-source default. */
+  readonly maxPages: number;
+}
+
 export interface SysdocsOptions {
   /** Pages indexed per run; the rest wait for the next run. */
   readonly maxDocs: number;
@@ -127,6 +134,7 @@ export interface Config {
   readonly index: IndexOptions;
   readonly remote: RemoteOptions;
   readonly context: ContextOptions;
+  readonly prjdocs: PrjdocsOptions;
   readonly sysdocs: SysdocsOptions;
   readonly memory: MemoryOptions;
   readonly stats: StatsOptions;
@@ -173,6 +181,10 @@ export const DEFAULT_CONFIG: Config = {
     maxPassages: 8,
     timeoutMs: 400,
   },
+  prjdocs: {
+    maxTargets: 40,
+    maxPages: 0,
+  },
   sysdocs: {
     maxDocs: 5000,
     maxBytesPerDoc: 65536,
@@ -203,6 +215,7 @@ export function loadConfig(
   const index = asObject(root.index);
   const remote = asObject(root.remote);
   const context = asObject(root.context);
+  const prjdocs = asObject(root.prjdocs);
   const sysdocs = asObject(root.sysdocs);
   const memory = asObject(root.memory);
   const retain = asObject(memory.retain);
@@ -350,6 +363,24 @@ export function loadConfig(
         50,
         30_000,
         "context.timeoutMs",
+        warnings,
+      ),
+    },
+    prjdocs: {
+      maxTargets: readInteger(
+        prjdocs.maxTargets,
+        DEFAULT_CONFIG.prjdocs.maxTargets,
+        1,
+        500,
+        "prjdocs.maxTargets",
+        warnings,
+      ),
+      maxPages: readInteger(
+        prjdocs.maxPages,
+        DEFAULT_CONFIG.prjdocs.maxPages,
+        0,
+        500,
+        "prjdocs.maxPages",
         warnings,
       ),
     },

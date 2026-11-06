@@ -152,6 +152,42 @@ export default Plugin.define({
       }
     };
 
+    const prjdocs = async (): Promise<void> => {
+      context.ui.toast.show({
+        message: "XERJ is reading official documentation…",
+        variant: "info",
+      });
+      try {
+        const result = (await rpc().prjdocs({}, at())) as {
+          techs?: string[];
+          targets?: number;
+          indexed?: number;
+          skipped?: number;
+          pruned?: number;
+          failed?: number;
+        };
+        const indexed = result.indexed ?? 0;
+        const skipped = result.skipped ?? 0;
+        const pruned = result.pruned ?? 0;
+        const failed = result.failed ?? 0;
+        const techs = result.techs?.length ?? 0;
+        context.ui.toast.show({
+          message:
+            `XERJ project docs · ${techs} technologies · ` +
+            `${indexed.toLocaleString("en-US")} pages indexed · ` +
+            `${skipped.toLocaleString("en-US")} unchanged · ` +
+            `${pruned.toLocaleString("en-US")} pruned` +
+            (failed > 0 ? ` · ${failed} failed` : ""),
+          variant: failed > 0 ? "info" : "success",
+        });
+      } catch {
+        context.ui.toast.show({
+          message: "XERJ could not read project documentation",
+          variant: "error",
+        });
+      }
+    };
+
     const sysdocs = async (): Promise<void> => {
       context.ui.toast.show({
         message: "XERJ is reading system documentation…",
@@ -262,6 +298,17 @@ export default Plugin.define({
           slash: { name: "xerj-reindex" },
           enabled: () => state.ready,
           run: () => reindex(),
+        },
+        {
+          id: "xerj.prjdocs",
+          title: "XERJ project docs",
+          description:
+            "Index official docs for this project's languages, frameworks, and cloud APIs",
+          group: "XERJ",
+          palette: true,
+          slash: { name: "xerj-prjdocs" },
+          enabled: () => state.ready,
+          run: () => prjdocs(),
         },
         {
           id: "xerj.sysdocs",

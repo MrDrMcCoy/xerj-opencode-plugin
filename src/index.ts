@@ -34,6 +34,7 @@ import {
   memoryNamespace,
   nodeDataDir,
   nodeLogPath,
+  prjdocsPrefix,
   sysdocsPrefix,
   projectBrainName,
   projectNodeDir,
@@ -53,6 +54,8 @@ import {
   type DatasetStatus,
   type StatusSnapshot,
 } from "./rpc.ts";
+import { PrjdocsIndexer } from "./prjdocs/index.ts";
+import { LatestVersions } from "./prjdocs/latest.ts";
 import { SysdocIndexer } from "./sysdocs/index.ts";
 import { MemoryStore } from "./memory/store.ts";
 import {
@@ -377,6 +380,38 @@ export default Plugin.define({
         counters.noteRpc();
         runtime.lifecycle?.touch();
         return snapshot();
+      },
+      prjdocs: async () => {
+        counters.noteRpc();
+        runtime.lifecycle?.touch();
+        const handle = runtime.node ?? (await nodes.ensure().catch(() => null));
+
+        if (handle === null) throw new Error("the XERJ node is not available");
+
+        const client = new XerjClient(handle.baseUrl);
+        const latest = new LatestVersions({ logger, signal: shutdown.signal });
+        const indexer = new PrjdocsIndexer({
+          client,
+          prefix: prjdocsPrefix(projectRoot),
+          projectRoot,
+          stateDir: join(nodeDir, "prjdocs"),
+          logger,
+          maxTargets: config.prjdocs.maxTargets,
+          maxPages: config.prjdocs.maxPages > 0 ? config.prjdocs.maxPages : undefined,
+          signal: shutdown.signal,
+          latestVersion: (ref) => latest.resolve(ref),
+        });
+
+        const summary = await indexer.run();
+        counters.noteIndexRun();
+        void registration.events.emit("updated", { updatedAt: Date.now() }).catch(() => {});
+        logger.info("project docs indexed", {
+          techs: summary.techs.length,
+          targets: summary.targets,
+          indexed: summary.indexed,
+          pruned: summary.pruned,
+        });
+        return summary;
       },
       sysdocs: async () => {
         counters.noteRpc();
@@ -1085,11 +1120,16 @@ function datasetRows(
       name: "project",
       matches: (index: string) =>
         index.startsWith(`${project}-`) &&
-        !index.startsWith(`${project}-hidden-`),
+        !index.startsWith(`${project}-hidden-`) &&
+        !index.startsWith(`${project}-prjdocs-`),
     },
     {
       name: "hidden",
       matches: (index: string) => index.startsWith(`${project}-hidden-`),
+    },
+    {
+      name: "prjdocs",
+      matches: (index: string) => index.startsWith(`${project}-prjdocs-`),
     },
     { name: "web", matches: (index: string) => index.startsWith(`${web}-`) },
     {

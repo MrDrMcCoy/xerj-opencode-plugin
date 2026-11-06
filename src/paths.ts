@@ -293,6 +293,11 @@ export function brainSpecs(
   });
 }
 
+/** Project documentation corpus: official docs for what this project uses. */
+export function prjdocsPrefix(projectRoot: string): string {
+  return `${indexPrefix(projectRoot)}-prjdocs`;
+}
+
 /**
  * System documentation is machine-wide, but each project has its own node, so
  * the name is derived from the host rather than the project. Two projects on

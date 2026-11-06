@@ -145,7 +145,7 @@ describe("server setup wiring", () => {
       expect(host.toolHooks).toContain("execute.after");
       expect(host.sessionHooks).toContain("prompt");
       expect(host.sessionHooks).toContain("context");
-      expect(host.rpcMethods.sort()).toEqual(["reindex", "remember", "search", "status", "sysdocs"]);
+      expect(host.rpcMethods.sort()).toEqual(["prjdocs", "reindex", "remember", "search", "status", "sysdocs"]);
 
       const snapshot = await host.status();
       expect(snapshot.pluginVersion).toBeString();
