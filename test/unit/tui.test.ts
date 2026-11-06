@@ -57,7 +57,7 @@ const SNAPSHOT: StatusSnapshot = {
     netTokens: 112,
     topFiles: [{ path: "a.md", citations: 1, bytes: 512 }],
   },
-  memory: { namespace: "proj-demo", count: 0 },
+  memory: { namespace: "proj-demo", count: 0, exists: true },
   brains: [],
   disk: { engineBytes: 1024, logBytes: 2048 },
   corpora: [

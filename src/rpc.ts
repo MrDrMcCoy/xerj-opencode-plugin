@@ -45,6 +45,11 @@ export interface BrainStatus {
 export interface MemoryStatus {
   readonly namespace: string;
   readonly count: number;
+  /**
+   * False when the namespace's index is absent. An empty store and a lost one
+   * both report `count: 0`, and only this tells them apart.
+   */
+  readonly exists: boolean;
 }
 
 export interface CitedFileStatus {

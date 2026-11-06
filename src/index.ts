@@ -72,7 +72,7 @@ import {
   handleToolResult,
   type ToolResultEvent,
 } from "./hooks/tool-results.ts";
-import { recoverMemoryIndex } from "./memory/health.ts";
+import { memoryIndexMissing, recoverMemoryIndex } from "./memory/health.ts";
 import { startRetention } from "./memory/retain.ts";
 import { migrateMemoryIndex, migrateProjectStorage } from "./memory/migrate.ts";
 import { RemoteSpool } from "./remote/spool.ts";
@@ -287,7 +287,7 @@ export default Plugin.define({
           netTokens: usage.netTokens,
           topFiles: usage.topFiles,
         },
-        memory: { namespace: memoryNs, count: 0 },
+        memory: { namespace: memoryNs, count: 0, exists: false },
         brains: brainStatus(runtime.brain, runtime.brains),
         corpora: corpusHealth(runtime),
         // The engine data and the node log were invisible before: a project
@@ -342,14 +342,25 @@ export default Plugin.define({
           typeof (overview as { edges: unknown }).edges === "object" &&
           (overview as { edges: { total?: unknown } }).edges?.total;
 
-        const corpora = base.corpora.map((row) => ({
-          ...row,
-          docs: datasets.find((dataset) => dataset.name === row.name)?.docs ?? 0,
-          edges:
-            row.name === "project" && typeof edgeTotal === "number"
-              ? edgeTotal
-              : row.edges,
-        }));
+        const corpora = base.corpora.map((row) => {
+          const docs = datasets.find((dataset) => dataset.name === row.name)?.docs ?? 0;
+          // A last pass can outlive its index: a mode change or a reset drops
+          // the index and the run record still claims what it wrote.
+          const missing = docs === 0 && (row.records ?? 0) > 0;
+          return {
+            ...row,
+            docs,
+            records: missing ? 0 : row.records,
+            state: missing ? "missing" : row.state,
+            error: missing
+              ? `index is missing; the last pass wrote ${row.records ?? 0} records`
+              : row.error,
+            edges:
+              row.name === "project" && typeof edgeTotal === "number"
+                ? edgeTotal
+                : row.edges,
+          };
+        });
 
         return {
           ...base,
@@ -368,6 +379,8 @@ export default Plugin.define({
               summary?.count ??
               datasets.find((dataset) => dataset.name === "memory")?.docs ??
               0,
+            exists:
+              summary?.exists ?? datasets.some((dataset) => dataset.name === "memory"),
           },
         };
       } catch (error) {
@@ -940,6 +953,16 @@ export default Plugin.define({
       }).catch((error: unknown) => {
         logger.warn("could not check the memory index", String(error));
       });
+
+      // A corpus without a memory index means memories stored earlier are
+      // gone. An empty store looks the same, so say it once at startup.
+      const indices = await activeClient.indices().catch(() => []);
+      if (memoryIndexMissing(indices, memoryNamespace(projectRoot), prefix)) {
+        logger.warn(
+          "the memory index is missing",
+          "memories stored earlier were not found; the next remember recreates it",
+        );
+      }
 
       if (runtime.memory) {
         startRetention(runtime.memory, config.memory.retain, shutdown.signal, logger);

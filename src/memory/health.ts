@@ -41,6 +41,22 @@ export async function recoverMemoryIndex(options: {
   return true;
 }
 
+/**
+ * True when a project corpus exists but the memory index does not: memories
+ * stored earlier are gone, which an empty store cannot otherwise signal. A
+ * fresh project has no corpus yet, so it reports false.
+ */
+export function memoryIndexMissing(
+  indices: ReadonlyArray<{ index: string }>,
+  namespace: string,
+  projectPrefix: string,
+): boolean {
+  const names = indices.map((entry) => entry.index);
+  const hasMemory = names.includes(`${MEMORY_INDEX_PREFIX}${namespace}`);
+  const hasCorpus = names.some((name) => name.startsWith(`${projectPrefix}-`));
+  return hasCorpus && !hasMemory;
+}
+
 async function backupIndex(nodeDir: string, name: string): Promise<void> {
   const source = join(nodeDir, "data", name);
   const exists = await stat(source).then(() => true, () => false);

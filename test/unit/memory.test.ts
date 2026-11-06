@@ -1,6 +1,7 @@
 import { describe as group, describe, expect, test } from "bun:test";
 import type { Logger } from "../../src/log.ts";
 import type { XerjClient } from "../../src/node/client.ts";
+import { memoryIndexMissing } from "../../src/memory/health.ts";
 import { formatMemories, MemoryStore, normalizeKind } from "../../src/memory/store.ts";
 
 const logger: Logger = {
@@ -235,5 +236,35 @@ describe("MemoryStore.list", () => {
     });
 
     return expect(subject.list(10)).resolves.toEqual([]);
+  });
+});
+
+describe("memoryIndexMissing", () => {
+  test("a corpus without a memory index reports missing", () => {
+    const indices = [
+      { index: "xop-proj-1234-docs", health: "green" },
+      { index: "xop-proj-1234-hidden-docs", health: "green" },
+    ];
+
+    expect(memoryIndexMissing(indices, "proj-1234", "xop-proj-1234")).toBe(true);
+  });
+
+  test("a fresh project has nothing to lose and is not a warning", () => {
+    expect(memoryIndexMissing([], "proj-1234", "xop-proj-1234")).toBe(false);
+  });
+
+  test("a present memory index is fine", () => {
+    const indices = [
+      { index: "xop-proj-1234-docs", health: "green" },
+      { index: ".xerj-memory-proj-1234", health: "green" },
+    ];
+
+    expect(memoryIndexMissing(indices, "proj-1234", "xop-proj-1234")).toBe(false);
+  });
+
+  test("another project's corpus does not count", () => {
+    const indices = [{ index: "xop-other-9999-docs", health: "green" }];
+
+    expect(memoryIndexMissing(indices, "proj-1234", "xop-proj-1234")).toBe(false);
   });
 });

@@ -70,7 +70,7 @@ function snapshot(overrides: Partial<StatusSnapshot> = {}): StatusSnapshot {
       netTokens: 42_000,
       topFiles: [{ path: "src/a.ts", citations: 3, bytes: 4_000 }],
     },
-    memory: { namespace: "proj-demo-1a2b3c4d", count: 2 },
+    memory: { namespace: "proj-demo-1a2b3c4d", count: 2, exists: true },
     brains: [],
     disk: { engineBytes: 1024, logBytes: 2048 },
     corpora: [
@@ -324,5 +324,49 @@ describe("brain corpus rows", () => {
     expect(corpora?.lines[1]).toContain("brain:agents-1a2b");
     expect(corpora?.lines[1]).toContain("28 docs");
     expect(corpora?.lines[1]).toContain("33 edges");
+  });
+});
+
+describe("corpus and memory honesty", () => {
+  function withRows(corpora: StatusSnapshot["corpora"], memory: StatusSnapshot["memory"]) {
+    const base = snapshot();
+    return { ...base, corpora, memory };
+  }
+
+  test("a corpus whose index vanished reports missing, not stale counts", () => {
+    const view = withRows(
+      [
+        { name: "web", state: "missing", docs: 0, lastRunAt: NOW, records: 0, edges: null, error: "index is missing; the last pass wrote 5 records" },
+      ],
+      { namespace: "ns", count: 0, exists: false },
+    );
+
+    const body = panelSections(view, NOW)
+      .flatMap((section) => section.lines)
+      .join("\n");
+
+    // The row reports what is stored (nothing) and why, instead of claiming
+    // the records of a pass whose index is gone.
+    expect(body).toContain("web  missing · 0 docs");
+    expect(body).toContain("index is missing");
+  });
+
+  test("a memory store with no index says so", () => {
+    const view = withRows([], { namespace: "ns", count: 0, exists: false });
+    const body = panelSections(view, NOW)
+      .flatMap((section) => section.lines)
+      .join("\n");
+
+    expect(body).toContain("index missing");
+  });
+
+  test("a healthy memory store does not claim a missing index", () => {
+    const view = withRows([], { namespace: "ns", count: 4, exists: true });
+    const body = panelSections(view, NOW)
+      .flatMap((section) => section.lines)
+      .join("\n");
+
+    expect(body).toContain("4 entries");
+    expect(body).not.toContain("index missing");
   });
 });
