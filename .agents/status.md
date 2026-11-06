@@ -340,6 +340,19 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-05: Memory retention. Capture writes one summary per substantive
+  turn and nothing removed them, so the store grew without limit.
+  `memory.retain` bounds automatic summaries by age, count, and bytes; the
+  three apply in one pass and whichever binds first wins. Defaults are 180
+  days, 500 summaries, and 2 GiB. Explicit memories (facts, decisions,
+  preferences, fixes, notes) never expire, and an undated entry cannot be
+  aged out but still counts toward the size caps. One sweep runs at startup
+  and hourly after, logging what it removed; a failed sweep never throws.
+  Ten plan tests and two runner tests cover it. With the stock count cap,
+  500 summaries at ~1.5 KB each is under a megabyte, so `maxCount` binds
+  long before `maxBytes`; raise the count or set it to 0 for the size cap to
+  matter.
+
 - 2026-11-05: Third batch (0.6.4). Every XERJ process now runs at a
   configurable priority: `node.priority` is `low` by default, POSIX gets
   nice 19/0/-10, Linux adds idle-class I/O through `ionice` for `low`, and
