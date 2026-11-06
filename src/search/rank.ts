@@ -154,7 +154,7 @@ export function dropUncovered(
 }
 
 /** True when `text` carries at least one of `terms`. */
-export function coversAnyTerm(text: string, terms: ReadonlyArray<string>): boolean {
+function coversAnyTerm(text: string, terms: ReadonlyArray<string>): boolean {
   const haystack = text.toLowerCase();
   return terms.some((term) => coversTerm(haystack, term));
 }

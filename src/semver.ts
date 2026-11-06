@@ -42,7 +42,7 @@ function parsePrerelease(value: string | undefined): Array<string | number> {
 }
 
 /** Compares two versions per semver precedence. */
-export function compareVersions(left: Version, right: Version): number {
+function compareVersions(left: Version, right: Version): number {
   for (const key of ["major", "minor", "patch"] as const) {
     if (left[key] !== right[key]) return left[key] < right[key] ? -1 : 1;
   }

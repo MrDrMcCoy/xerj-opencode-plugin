@@ -41,7 +41,7 @@ export async function detectRuntime(options: DetectOptions): Promise<RuntimeTarg
 }
 
 /** Apple Silicon running an x86_64 process under Rosetta 2. */
-export async function detectRosetta(): Promise<boolean> {
+async function detectRosetta(): Promise<boolean> {
   if (process.platform !== "darwin") return false;
 
   try {

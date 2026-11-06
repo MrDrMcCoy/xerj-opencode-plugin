@@ -67,7 +67,7 @@ export function binaryPath(
   return join(root, "bin", `${version}-${target}`, binaryName(platform));
 }
 
-export function binaryName(platform: NodeJS.Platform): string {
+function binaryName(platform: NodeJS.Platform): string {
   return platform === "win32" ? "xerj.exe" : "xerj";
 }
 
@@ -104,10 +104,6 @@ export function releaseCachePath(root: string): string {
   return join(root, "release-cache.json");
 }
 
-export function spoolDir(root: string, prefix: string): string {
-  return join(root, "spool", prefix);
-}
-
 /** Project-local state: ignore file and caches. Never the engine index. */
 export function projectStateDir(projectRoot: string): string {
   return join(projectRoot, ".xerj");
@@ -120,7 +116,7 @@ export function isPathInside(parent: string, child: string): boolean {
 }
 
 /** True when the first path segment below `parent` is a dot-directory. */
-export function isHiddenPathInside(parent: string, child: string): boolean {
+function isHiddenPathInside(parent: string, child: string): boolean {
   if (!isPathInside(parent, child)) return false;
   const first = relative(resolve(parent), resolve(child)).split(sep)[0] ?? "";
   return first.startsWith(".");

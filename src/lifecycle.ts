@@ -202,12 +202,6 @@ export class ProjectLifecycle {
   }
 }
 
-/** Reads the heartbeat files without owning a lifecycle (used by tests/tools). */
-export async function readPeerHeartbeats(nodeDir: string): Promise<string[]> {
-  const directory = nodeClientsDir(nodeDir);
-  return readdir(directory).catch(() => [] as string[]);
-}
-
 /** True when the pid in a heartbeat file is still alive. */
 export function heartbeatAlive(pid: number): boolean {
   try {

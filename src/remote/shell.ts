@@ -34,7 +34,7 @@ export function shellCommands(command: string): string[][] {
  * reference; leaving it inside a token would hide it. Single-quoted text is
  * literal and is copied verbatim.
  */
-export function substituteCommands(command: string): string {
+function substituteCommands(command: string): string {
   const bodies: string[] = [];
   let outer = "";
   let index = 0;
