@@ -108,13 +108,16 @@ describe("MCP server", () => {
       "def",
       "forget",
       "index",
+      "outline",
       "prjdocs",
       "recall",
+      "refs",
       "reindex",
       "remember",
       "search",
       "status",
       "sysdocs",
+      "zoom",
     ]);
     for (const tool of list.tools) expect(tool.inputSchema).toBeDefined();
   }, 180_000);
