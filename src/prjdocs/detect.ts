@@ -3,7 +3,7 @@
 // or when a file extension proves the language is present. Guessing from prose
 // would produce a documentation crawl of things the project never imports.
 
-import { readdir } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 
 export type TechKind = "language" | "framework" | "cloud";
@@ -442,7 +442,7 @@ export async function detectTech(
   const read =
     options.readManifest ??
     (async (path: string): Promise<string | null> =>
-      Bun.file(path).text().catch(() => null));
+      readFile(path, "utf8").catch(() => null));
 
   const refs = new Map<string, TechRef>();
   const add = (ref: TechRef): void => {

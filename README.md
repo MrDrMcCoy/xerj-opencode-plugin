@@ -389,10 +389,13 @@ ships an `xerj-mcp` executable that speaks JSON-RPC on stdio:
 }
 ```
 
-Run it directly to try it:
+The executable needs nothing but Node 20 or later: it is an ESM bundle with a
+`node` shebang, so `npx`, `bunx`, and a direct call all work.
 
 ```
-bun dist/mcp.js --project /path/to/repo
+npx -y @mrdrmccoy/xerj-opencode-plugin@latest xerj-mcp --project /path/to/repo
+bunx @mrdrmccoy/xerj-opencode-plugin@latest xerj-mcp --project /path/to/repo
+node ./node_modules/@mrdrmccoy/xerj-opencode-plugin/dist/mcp.mjs --project .
 ```
 
 Tools: `search`, `def`, `status`, `remember`, `recall`, `forget`, `index`,
