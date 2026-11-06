@@ -275,6 +275,16 @@ export class CorpusService {
     this.spawn(true);
   }
 
+  /**
+   * Forgets a run whose index is gone, when its source is gone too. A spool
+   * that lost every page leaves the record claiming records nothing wrote.
+   */
+  async clearRun(): Promise<void> {
+    this.lastRun = null;
+    await this.options.storage.set(this.storageKey, null).catch(() => {});
+    this.options.onChange?.();
+  }
+
   snapshot(): CorpusSnapshot {
     const settled =
       this.state === "starting" &&

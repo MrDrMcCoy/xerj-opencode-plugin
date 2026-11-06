@@ -88,6 +88,30 @@ afterEach(async () => {
   await Promise.all(running.splice(0).map((item) => item.stop()));
 });
 
+describe("CorpusService plain runs", () => {
+  test("clearRun forgets a run whose index and source are gone", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "xerj-clear-"));
+    const store = storage();
+    const key = "index/lastRun:xop-web-12345678";
+    await store.set(key, { at: 1, records: 5, generation: 2 });
+
+    const instance = new CorpusService({
+      binaryPath: join(projectRoot, "absent-xerj"),
+      nodeUrl: "http://127.0.0.1:9200",
+      projectRoot,
+      prefix: "xop-web-12345678",
+      stateRoot: join(projectRoot, ".xerj"),
+      config: DEFAULT_CONFIG,
+      storage: store,
+      logger,
+    });
+
+    await instance.clearRun();
+    expect(instance.snapshot().lastRun).toBeNull();
+    expect(await store.get(key)).toBeNull();
+  });
+});
+
 describe("CorpusService watch ownership", () => {
   test(
     "a one-shot blocked by another pass is contention, not a failure",

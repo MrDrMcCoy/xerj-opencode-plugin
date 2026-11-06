@@ -111,6 +111,25 @@ describe("digest", () => {
   });
 });
 
+describe("RemoteSpool.isEmpty", () => {
+  test("is true with no page and false once one lands", async () => {
+    const spooler = new RemoteSpool({
+      root,
+      projectRoot: root,
+      prefix: "xop-web-empty",
+      externalPrefix: "xop-ext-empty",
+      maxBytes: 10_000,
+      client,
+      logger,
+    });
+    await spooler.init();
+    expect(await spooler.isEmpty()).toBe(true);
+
+    await spooler.ingestUrl("https://example.com/page", "some page text");
+    expect(await spooler.isEmpty()).toBe(false);
+  });
+});
+
 describe("RemoteSpool.ingestUrl", () => {
   test("writes a document with source metadata", async () => {
     const store = spool();

@@ -1308,6 +1308,9 @@ export default Plugin.define({
         },
         onChange: publishChange,
       });
+      // An empty spool has nothing to index; a run record left from a deleted
+      // index would otherwise read as a corpus that lost its data.
+      if (await runtime.spool.isEmpty()) await runtime.web.clearRun();
       await runtime.web.start();
     };
 

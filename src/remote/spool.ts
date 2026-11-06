@@ -70,6 +70,12 @@ export class RemoteSpool {
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
   }
 
+  /** True when no fetched page is spooled, so the web corpus has no source. */
+  async isEmpty(): Promise<boolean> {
+    const entries = await readdir(this.directory).catch(() => [] as string[]);
+    return !entries.some((name) => name.endsWith(".md"));
+  }
+
   /** Stores a fetched page as markdown and drops any earlier version of it. */
   async ingestUrl(url: string, content: string, title?: string): Promise<StoredDocument | null> {
     const body = redact(truncate(content, this.options.maxBytes)).trim();
