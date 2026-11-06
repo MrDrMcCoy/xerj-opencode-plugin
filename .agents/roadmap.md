@@ -396,10 +396,12 @@ measured; they include tests and the commits that carry them. A status of
 | Notes and smart notes | XL | Not started | — | — |
 
 **Tier S: eleven of twelve done, 9.9 h** against an 8 to 10 h estimate. The
-sidebar rebuild (about 8 h) is the remaining item and is not started. Per-item estimates held within about half an hour except commit
-indexing, where the `git log` record layout cost an extra hour and a half, and
-the auto-search hint, where the dedupe test had to distinguish the hint pass
-from the retrieval pass.
+sidebar rebuild (about 8 h) is the remaining item and is not started.
+
+Per-item estimates held within about half an hour except commit indexing, where
+the `git log` record layout cost an extra hour and a half, and the auto-search
+hint, where the dedupe test had to distinguish the hint pass from the retrieval
+pass.
 
 Tier M so far: **7.5 h** across six items this pass, seven of fourteen with the
 graph overview that predates it. Remaining, all deferred or gated: the
