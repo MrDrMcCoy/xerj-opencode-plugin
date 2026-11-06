@@ -340,6 +340,17 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-05: Pre-release parity and a CI build check (0.7.0). The plugin now
+  exposes the same eleven tools as the MCP server: `reindex`, `sysdocs`, and
+  `prjdocs` joined the eight. The three bodies live in runners that the RPC
+  methods, the TUI commands, and the tools all call, so the surfaces can no
+  longer drift. CI gained a `build` job that builds both bundles and runs the
+  MCP entry point under Node with `--help` plus a real handshake, which is the
+  failure that reached a release once and that the suites cannot see.
+  Verified locally: the Node handshake lists all eleven tools, and the README
+  tool and config tables carry every new key. 698 unit and 12 integration tests
+  pass.
+
 - 2026-11-05: Coverage pass (0.7.0). Measured across unit and integration:
   85.55% to 88.69% lines, 92.62% to 94.96% functions, 698 tests. New suites:
   counters, the latest-version resolver, and the MCP host (settings, paths, the
