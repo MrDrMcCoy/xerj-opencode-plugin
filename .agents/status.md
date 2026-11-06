@@ -262,25 +262,24 @@ test/unit/*.test.ts    pure-function tests
 
 ## Next actions
 
-1. Restart OpenCode to load the in-project storage layout (0.6.0). Setup will
-   move this project's data from the global root into `.xerj`, so the first
-   start after the upgrade is slower; the old node is stopped once so it cannot
-   write into the directory being moved. Then verify that
-   `<project>/.xerj/nodes/<prefix>/data` exists, `memory` reports at least 1,
-   and no legacy `~/.local/share/opencode/xerj/nodes/<prefix>` remains.
-2. Publish with `npm publish --access public` (fresh 2FA when the token is
-   stale). The global config pins the cached version; update the pin after the
-   registry has the new build.
-3. 0.4.5 is `latest` on npm and is the first release whose TUI half loads:
-   the entry is prebuilt, the runtime packages are real dependencies, and JSX
-   binds to the host through a shim. 0.4.2 on the registry is the broken
-   build (optional peers, no `dist`); ignore it.
-4. The shell parser does not follow `xargs`, command substitution, pipelines
-   that transform paths, or `cd` through a pipeline; those reads stay
-   unindexed. An argument that merely mentions a file (`echo a.md`) is
-   indexed too, by design: reference, not access, is the signal.
-5. Brain expansion is only useful when a docs folder is not also in the hidden
-   corpus; consider skipping hidden indexing for folders that have a brain.
+1. Restart OpenCode to load the uncommitted-honesty work: a corpus whose index
+   vanished reports `missing`, the memory row says `index missing`, and a
+   startup warning fires when a project corpus exists without a memory index.
+2. Investigate the live memory loss. On 2026-11-06 the memory index was absent
+   (`exists: false`) while every corpus index survived, with no backup under
+   `embed-backup/` and no warning in the ring. The new warning makes the next
+   occurrence visible; the cause is still unknown. Suspects: the rc.101 data
+   format change, or the embed-mode reconcile before the backup rule existed.
+3. The web corpus reported `docs: 0 · records: 5` with an empty spool and no
+   `xop-web-*` index. The stale-count fix covers the report, but nothing
+   re-creates the corpus because the spool is empty; decide whether a missing
+   spool index should clear the run record.
+4. Publish the next release when the user asks. `v0.7.0` is released and
+   `npm` serves it. `publish.yml` stages when the token requires it; approve
+   the staged version at npmjs.com.
+5. Known coverage gaps need a fake clock or several processes: `mcp/host.ts`
+   runner tools, the plugin's own wiring inside a live setup, supervisor
+   port-scan exhaustion, and watcher restart backoff.
 
 ## Work in progress
 
