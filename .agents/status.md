@@ -340,6 +340,19 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-05: `/xerj-prjdocs` always includes XERJ's own docs and the matching
+  Elasticsearch reference (0.7.0). `src/prjdocs/builtin.ts` lists every `.md`
+  under `docs/` in `xerj-org/xerj` through the GitHub tree API (one request),
+  fetches the raw files six at a time, and titles each by its first heading; the
+  ES source crawls the reference branch for the node's wire version, so 8.13.0
+  means `reference/8.13`. Config: `prjdocs.builtin` (true), `builtinXerjPages`
+  (200), `builtinElasticsearchPages` (20). Builtins are off unless the caller
+  asks, so library calls and tests stay offline; the command and the MCP tool
+  opt in from config. Verified live: 179 XERJ pages plus 10 ES pages in one
+  run, 201 pages in 7 s; "agentic memory recipe" cites
+  `recipes/agentic-memory.md`, and the ES documents carry version 8.13.
+  736 unit tests pass.
+
 - 2026-11-05: README covers every surface (0.7.0). The TUI section is now a
   command table: `/xerj` with its `status`, `reindex`, `remember`, and `search`
   subcommands, plus `/xerj-reindex`, `/xerj-remember`, `/xerj-search`,
