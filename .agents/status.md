@@ -340,6 +340,22 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-05: Standalone MCP server (0.7.0). `xerj-mcp` speaks JSON-RPC over
+  stdio so agents that do not run OpenCode reach the same services:
+  `src/mcp/protocol.ts` handles initialize, ping, tools/list, and tools/call;
+  `server.ts` is the line-delimited transport; `host.ts` builds the binary,
+  node, corpora, memory, ledger, and tools from a project directory alone.
+  Eleven tools: the plugin's eight plus `reindex`, `sysdocs`, and `prjdocs`.
+  `initialize` and `tools/list` answer from static definitions, and the node
+  starts behind the first call that needs it, so a client never waits to
+  connect. Settings come from `XERJ_BIN`, `XERJ_STORAGE_ROOT`, and
+  `XERJ_NODE_URL`; the ledger and log ring live in `mcp-kv.json` under the
+  storage root. `dist/mcp.js` is built by `scripts/build-mcp.ts` and shipped as
+  the `xerj-mcp` bin (verified in the pack file list). 15 unit tests cover the
+  protocol, transport, and storage; 2 integration tests spawn the real entry
+  point against a real binary and assert the eleven-tool list plus a status
+  call that starts the node. 648 unit and 12 integration tests pass.
+
 - 2026-11-05: `.github/workflows/publish.yml` (0.7.0). A `v*` tag now calls
   `ci.yml` as a reusable workflow (it gained `workflow_call`), so the tag runs
   the same typecheck, unit, and integration jobs as `main`; only a green run
