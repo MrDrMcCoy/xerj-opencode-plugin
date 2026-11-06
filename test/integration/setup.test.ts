@@ -168,6 +168,11 @@ describe("plugin setup end to end", () => {
       join(project, ".agents/note.md"),
       "# Note\n\nThe hiddenfolder token marks a project note.\n",
     );
+    // A second docs folder stays a hidden corpus, since the brain owns .agents.
+    await Bun.write(
+      join(project, ".github/note.md"),
+      "# Workflow\n\nThe githubnote token marks a hidden file.\n",
+    );
     const outside = join(root, "outside.md");
     await Bun.write(outside, "# Outside\n\nThe outsidemarker token is not in the project.\n");
 
@@ -176,7 +181,13 @@ describe("plugin setup end to end", () => {
 
     const host = stubHost(project, {
       binary: { path: binaryPath },
-      index: { neural: false, semantic: false, watch: false, auto: true },
+      index: {
+        neural: false,
+        semantic: false,
+        watch: false,
+        auto: true,
+        brain: [".agents"],
+      },
       node: { port: 9830 + Math.floor(Math.random() * 40) },
       remote: { enabled: true },
       memory: { enabled: true },
@@ -217,6 +228,10 @@ describe("plugin setup end to end", () => {
       const hidden = corpora.find((row) => row.name === "hidden");
       expect(hidden?.state).toBe("watching");
       expect(hidden?.docs ?? 0).toBeGreaterThan(0);
+
+      // The brain corpus appears in the same list as the others.
+      const brain = corpora.find((row) => row.name.startsWith("brain:"));
+      expect(brain).toBeDefined();
 
       // A read outside the project spools in the background.
       await host.runHook("execute.after", {

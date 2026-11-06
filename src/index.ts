@@ -918,6 +918,24 @@ function corpusHealth(runtime: Runtime): CorpusHealth[] {
     });
   }
 
+  // A brain is a corpus too: it writes documents and edges for its folder, and
+  // its own failures belong in the same list as the others.
+  for (const brain of brainStatus(runtime.brain, runtime.brains)) {
+    rows.push({
+      name: `brain:${brain.name}`,
+      state:
+        brain.error !== null
+          ? "error"
+          : brain.lastRunAt === null
+            ? "starting"
+            : "watching",
+      docs: brain.docs,
+      lastRunAt: brain.lastRunAt,
+      records: brain.edges,
+      error: brain.error,
+    });
+  }
+
   if (runtime.hidden !== null) {
     const hidden = runtime.hidden.snapshot();
     rows.push({

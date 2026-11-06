@@ -301,3 +301,18 @@ describe("sidebar noise count", () => {
     expect(noisy).toContain("37 skipped");
   });
 });
+
+describe("brain corpus rows", () => {
+  test("a brain appears in the corpora list with its edges", () => {
+    const view = snapshot({
+      corpora: [
+        { name: "project", state: "watching", docs: 900, lastRunAt: NOW, records: 900, error: null },
+        { name: "brain:agents-1a2b", state: "watching", docs: 28, lastRunAt: NOW, records: 33, error: null },
+      ],
+    });
+
+    const corpora = panelSections(view, NOW).find((section) => section.title === "Corpora");
+    expect(corpora?.lines[1]).toContain("brain:agents-1a2b");
+    expect(corpora?.lines[1]).toContain("28 docs");
+  });
+});
