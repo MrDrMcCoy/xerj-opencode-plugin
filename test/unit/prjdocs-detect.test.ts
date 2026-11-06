@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   cargoDependencies,
   classifyDependencies,
@@ -204,5 +207,74 @@ describe("detectTech with a runtime pin", () => {
     const node = refs.find((ref) => ref.id === "node");
     expect(node?.used).toBe("20.11.1");
     expect(node?.kind).toBe("language");
+  });
+});
+
+describe("GPU stacks through detectTech", () => {
+  test("a CUDA project reports cuda with the version its build file pins", async () => {
+    const project = await mkdtemp(join(tmpdir(), "xerj-gpu-"));
+    await mkdir(join(project, "src"), { recursive: true });
+    await writeFile(join(project, "src", "kernel.cu"), "__global__ void k() {}\n");
+    await writeFile(
+      join(project, "CMakeLists.txt"),
+      "find_package(CUDAToolkit 12.4 REQUIRED)\n",
+    );
+
+    const refs = await detectTech(project);
+    const cuda = refs.find((ref) => ref.id === "cuda");
+
+    expect(cuda?.kind).toBe("framework");
+    expect(cuda?.used).toBe("12.4");
+
+    await rm(project, { recursive: true, force: true });
+  });
+
+  test("a Vulkan shader and a build file report vulkan", async () => {
+    const project = await mkdtemp(join(tmpdir(), "xerj-vk-"));
+    await mkdir(join(project, "shaders"), { recursive: true });
+    await writeFile(
+      join(project, "shaders", "triangle.vert"),
+      "#version 450\n#include <vulkan/vulkan.h>\n",
+    );
+
+    const refs = await detectTech(project);
+
+    expect(refs.some((ref) => ref.id === "vulkan")).toBe(true);
+
+    await rm(project, { recursive: true, force: true });
+  });
+
+  test("a project with no GPU toolchain reports none of them", async () => {
+    const project = await mkdtemp(join(tmpdir(), "xerj-nogpu-"));
+    await writeFile(join(project, "index.ts"), "export const x = 1;\n");
+
+    const refs = await detectTech(project);
+
+    expect(refs.filter((ref) => ["cuda", "rocm", "sycl", "vulkan"].includes(ref.id))).toEqual(
+      [],
+    );
+
+    await rm(project, { recursive: true, force: true });
+  });
+});
+
+describe("GPU packages", () => {
+  test("a python GPU package names its stack", () => {
+    const refs = classifyDependencies(
+      pythonRequirements("cupy-cuda12x==13.2.0\npycuda==2024.1\n"),
+      "requirements.txt",
+    );
+
+    expect(refs.map((ref) => ref.id)).toEqual(["cuda"]);
+    expect(refs[0]?.used).toBe("13.2.0");
+  });
+
+  test("a Rust Vulkan crate names Vulkan", () => {
+    const refs = classifyDependencies(
+      cargoDependencies('[dependencies]\nvulkano = "0.34"\n'),
+      "Cargo.toml",
+    );
+
+    expect(refs.map((ref) => ref.id)).toEqual(["vulkan"]);
   });
 });

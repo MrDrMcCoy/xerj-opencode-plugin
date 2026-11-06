@@ -5,6 +5,7 @@
 
 import { readdir, readFile } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
+import { detectGpuStacks, gpuPackages } from "./gpu.ts";
 
 export type TechKind = "language" | "framework" | "cloud";
 
@@ -274,6 +275,9 @@ export function classifyDependencies(
 function dependencyId(name: string): string | null {
   const cloud = CLOUD_PATTERNS.find((pattern) => pattern.test.test(name));
   if (cloud !== undefined) return cloud.id;
+  // `cupy`, `pycuda`, `ash`, and their kin name a GPU toolchain directly.
+  const gpu = gpuPackages().find((pattern) => pattern.test.test(name));
+  if (gpu !== undefined) return gpu.id;
   if (FRAMEWORK_IDS.has(name)) return name;
   // Scoped equivalents: `@angular/core`, `@sveltejs/kit`.
   const scoped = /^@([^/]+)\//.exec(name)?.[1];
@@ -475,6 +479,12 @@ export async function detectTech(
   }
   for (const { id, version } of runtimeVersions(pinned)) {
     add({ id, kind: "language", used: version, evidence: "runtime version" });
+  }
+
+  // GPU toolchains are proved by headers and build files, not by extension
+  // alone, so they get their own pass over a bounded set of files.
+  for (const ref of await detectGpuStacks(files, read, projectRoot)) {
+    add(ref);
   }
 
   for (const [extension, count] of Object.entries(files.extensionCounts)) {

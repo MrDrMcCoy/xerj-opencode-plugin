@@ -239,6 +239,8 @@ export class PrjdocsIndexer {
               maxPages:
                 eager?.maxPages ?? this.options.maxPages ?? maxPagesFor(target.id),
               maxDepth: eager?.maxDepth,
+              maxBytes: target.maxBytes,
+              urlPrefix: target.urlPrefix,
               anyText: eager !== undefined,
               judge:
                 judge === undefined

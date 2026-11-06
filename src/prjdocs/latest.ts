@@ -8,6 +8,9 @@ import type { Logger } from "../log.ts";
 
 const NODE_RELEASES = "https://nodejs.org/dist/index.json";
 const PYTHON_RELEASES = "https://endoflife.date/api/python.json";
+// The CUDA archive page lists every version directory; it is the only public
+// index of CUDA releases that needs no key.
+const CUDA_ARCHIVE = "https://docs.nvidia.com/cuda/archive/";
 
 const REQUEST_TIMEOUT_MS = 5_000;
 
@@ -26,7 +29,7 @@ export class LatestVersions {
   constructor(private readonly options: LatestOptions) {}
 
   async resolve(ref: TechRef): Promise<string | null> {
-    if (ref.id !== "node" && ref.id !== "python") return null;
+    if (ref.id !== "node" && ref.id !== "python" && ref.id !== "cuda") return null;
 
     const ttl = this.options.ttlMs ?? 6 * 60 * 60 * 1000;
     const cached = this.cache.get(ref.id);
@@ -42,6 +45,8 @@ export class LatestVersions {
 
   private async fetchLatest(id: string): Promise<string | null> {
     const fetchImpl = this.options.fetchImpl ?? fetch;
+    if (id === "cuda") return this.fetchCudaLatest(fetchImpl);
+
     const url = id === "node" ? NODE_RELEASES : PYTHON_RELEASES;
     const response = await fetchImpl(url, {
       headers: { "user-agent": "xerj-opencode-plugin (documentation indexer)" },
@@ -63,6 +68,33 @@ export class LatestVersions {
     const cleaned = raw.replace(/^v/, "");
     return /^\d+(\.\d+)*$/.test(cleaned) ? cleaned : null;
   }
+
+  /** Highest `archive/<major>.<minor>.<patch>/` directory on the CUDA site. */
+  private async fetchCudaLatest(fetchImpl: typeof fetch): Promise<string | null> {
+    const response = await fetchImpl(CUDA_ARCHIVE, {
+      headers: { "user-agent": "xerj-opencode-plugin (documentation indexer)" },
+      signal: mergeSignal(this.options.signal, REQUEST_TIMEOUT_MS),
+    });
+    if (!response.ok) return null;
+
+    const html = await response.text().catch(() => "");
+    const versions = [...html.matchAll(/archive\/(\d+)\.(\d+)\.(\d+)\//g)]
+      .map((match) => `${match[1]}.${match[2]}.${match[3]}`);
+    if (versions.length === 0) return null;
+
+    return versions.sort(compareVersions).at(-1) ?? null;
+  }
+}
+
+/** Numeric comparison of dotted versions; the CUDA listing is not sorted. */
+function compareVersions(left: string, right: string): number {
+  const a = left.split(".").map(Number);
+  const b = right.split(".").map(Number);
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    const difference = (a[index] ?? 0) - (b[index] ?? 0);
+    if (difference !== 0) return difference;
+  }
+  return 0;
 }
 
 function mergeSignal(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {

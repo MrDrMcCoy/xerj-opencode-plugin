@@ -14,6 +14,11 @@ export interface DocsSource {
   readonly fallback?: string;
   /** Pages one run may index from this source. */
   readonly maxPages: number;
+  /**
+   * Largest page the crawl accepts. A single-page specification exceeds the
+   * crawler default, and dropping it would leave the stack undocumented.
+   */
+  readonly maxBytes?: number;
 }
 
 export interface DocsTarget {
@@ -26,6 +31,13 @@ export interface DocsTarget {
    * repository or an API dump rather than a site.
    */
   readonly collect?: () => Promise<CrawledPage[]>;
+  /** Per-source page size limit, passed through to the crawler. */
+  readonly maxBytes?: number;
+  /**
+   * Link prefix a versioned crawl stays inside. A docs site often links other
+   * versions from every page, and following those mixes versions in one corpus.
+   */
+  readonly urlPrefix?: string;
 }
 
 /** Substituted into `{major}`, `{minor}`, and `{version}`. */
@@ -244,6 +256,36 @@ const SOURCES: Readonly<Record<string, DocsSource>> = {
     versioned: false,
     maxPages: 8,
   },
+  cuda: {
+    id: "cuda",
+    // The archive hub links every guide: programming, runtime API, driver API,
+    // libdevice. Each guide page fits the default page limit.
+    entry: "https://docs.nvidia.com/cuda/archive/{version}/index.html",
+    versioned: true,
+    fallback: "https://docs.nvidia.com/cuda/index.html",
+    maxPages: 15,
+  },
+  rocm: {
+    id: "rocm",
+    entry: "https://rocm.docs.amd.com/en/docs-{version}/",
+    versioned: true,
+    fallback: "https://rocm.docs.amd.com/en/latest/",
+    maxPages: 15,
+  },
+  sycl: {
+    id: "sycl",
+    // The landing page links the specification, which is one 4 MB document.
+    entry: "https://registry.khronos.org/SYCL/",
+    versioned: false,
+    maxPages: 10,
+    maxBytes: 6_000_000,
+  },
+  vulkan: {
+    id: "vulkan",
+    entry: "https://docs.vulkan.org/guide/latest/index.html",
+    versioned: false,
+    maxPages: 15,
+  },
   openai: {
     id: "openai",
     entry: "https://platform.openai.com/docs",
@@ -269,7 +311,7 @@ export function docsTargets(
   if (source === null) return [];
 
   if (!source.versioned) {
-    return [{ id: source.id, url: source.entry, version: "latest" }];
+    return [{ id: source.id, url: source.entry, version: "latest", maxBytes: source.maxBytes }];
   }
 
   const targets: DocsTarget[] = [];
@@ -279,20 +321,32 @@ export function docsTargets(
     const label = versionLabel(source.id, version);
     if (label === null || versions.has(label)) continue;
     versions.add(label);
+    const url = source.entry
+      .replace("{major}", label.split(".")[0] ?? label)
+      .replace("{minor}", label.split(".").slice(0, 2).join("."))
+      .replace("{version}", label);
     targets.push({
       id: source.id,
-      url: source.entry
-        .replace("{major}", label.split(".")[0] ?? label)
-        .replace("{minor}", label.split(".").slice(0, 2).join("."))
-        .replace("{version}", label),
+      url,
+      // Versioned sites link other versions from every page, so the crawl
+      // stays inside the directory of the version it started from.
+      urlPrefix: versionPrefix(url),
       version: label,
+      maxBytes: source.maxBytes,
     });
   }
 
   // No version known: one unversioned copy is better than a URL with a
   // placeholder still in it.
   if (targets.length === 0) {
-    return [{ id: source.id, url: source.fallback ?? source.entry, version: "latest" }];
+    return [
+      {
+        id: source.id,
+        url: source.fallback ?? source.entry,
+        version: "latest",
+        maxBytes: source.maxBytes,
+      },
+    ];
   }
   return targets;
 }
@@ -312,7 +366,20 @@ export function versionLabel(id: string, version: string): string | null {
     return minor !== undefined && /^\d+$/.test(minor) ? `${major}.${minor}` : null;
   }
   if (id === "node") return major;
+  if (id === "cuda" || id === "rocm") {
+    // Both publish per patch release, and their URLs use all three parts:
+    // 12.4 becomes 12.4.0, while 12.10.1 stays as it is.
+    const minor = parts[1] ?? "0";
+    const patch = parts[2] ?? "0";
+    return `${major}.${minor}.${patch}`;
+  }
   return version.replace(/^[v=^~]+/, "");
+}
+
+/** The directory a versioned URL lives in, with a trailing slash. */
+function versionPrefix(url: string): string {
+  const cut = url.lastIndexOf("/");
+  return cut === -1 ? url : url.slice(0, cut + 1);
 }
 
 /** Pages kept from a target before the crawler moves on. */

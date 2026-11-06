@@ -97,3 +97,38 @@ describe("LatestVersions", () => {
     expect(await latest.resolve(ref("python"))).toBeNull();
   });
 });
+
+describe("CUDA latest", () => {
+  test("the archive listing is read and compared numerically", async () => {
+    const html = [
+      '<a href="archive/12.4.0/">12.4.0</a>',
+      '<a href="archive/12.9.0/">12.9.0</a>',
+      '<a href="archive/12.10.1/">12.10.1</a>',
+    ].join("\n");
+    const requested: string[] = [];
+    const fetchImpl = (async (input: string | URL) => {
+      requested.push(String(input));
+      return new Response(html);
+    }) as unknown as typeof fetch;
+
+    const latest = new LatestVersions({ logger, fetchImpl });
+    const version = await latest.resolve({
+      id: "cuda",
+      kind: "framework",
+      used: null,
+      evidence: "test",
+    });
+
+    expect(version).toBe("12.10.1");
+    expect(requested[0]).toContain("docs.nvidia.com/cuda/archive");
+  });
+
+  test("a listing with no versions is null, not an error", async () => {
+    const fetchImpl = (async () => new Response("<html>nothing</html>")) as unknown as typeof fetch;
+    const latest = new LatestVersions({ logger, fetchImpl });
+
+    expect(
+      await latest.resolve({ id: "cuda", kind: "framework", used: null, evidence: "t" }),
+    ).toBeNull();
+  });
+});

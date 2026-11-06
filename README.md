@@ -367,11 +367,26 @@ Detection is deliberate, not clever:
 - **Cloud APIs** come from dependency names: `@aws-sdk/*`, `@google-cloud/*`,
   `@azure/*`, `stripe`, `twilio`, `@supabase/*`, `wrangler`, `vercel`, and the
   like.
+- **GPU compute stacks** come from what only that toolchain uses:
 
-Each technology maps to one entry URL. Versioned sources (Node, Python) produce
-one URL for the version the project declares and one for the latest release,
-resolved from `nodejs.org/dist/index.json` and `endoflife.date`; everything else
-is an unversioned site with a page budget of 8 to 25.
+  | Stack | Proof |
+  |---|---|
+  | CUDA | `.cu` or `.cuh` files, `cuda_runtime.h`, `cublas`/`cudnn`/`nccl` headers, `__global__`, `cudaMalloc`, `nvcc`, `CUDAExtension`, or `cupy`/`pycuda`/`cuda-python` |
+  | ROCm | `.hip` files, `hip/hip_runtime.h`, `rocblas`/`hipblas`/`miopen` headers, `hipMalloc`, `hipcc`, or a `rocm/dev-*` base image |
+  | SYCL | `sycl/sycl.hpp`, `CL/sycl.hpp`, `sycl::queue`, `-fsycl`, `SYCL_DEVICE_FILTER`, or `adaptivecpp` |
+  | Vulkan | `.glsl`/`.vert`/`.frag`/`.comp`/`.slang` shaders, `vulkan/vulkan.h`, `vkCreate*`, `find_package(Vulkan)`, `glslang`/`shaderc`, or the `ash`/`vulkano` crates |
+
+  A GPU stack is reported only when a header, build file, kernel extension, or
+  version pin proves it. A project that merely mentions CUDA in prose does not
+  get its documentation.
+
+Each technology maps to one entry URL. Versioned sources (Node, Python, CUDA,
+ROCm) produce one URL for the version the project declares and one for the
+latest release. Node and Python resolve theirs from `nodejs.org/dist/index.json`
+and `endoflife.date`, CUDA from its archive listing, and ROCm from the
+`docs-<version>` path; a version the project does not pin falls back to the
+current guide. Everything else is an unversioned site with a page budget of 8
+to 25.
 
 Two sources are indexed on every run, whatever the project uses:
 
