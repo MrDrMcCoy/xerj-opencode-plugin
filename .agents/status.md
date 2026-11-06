@@ -340,6 +340,18 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-05: `.github/workflows/publish.yml` (0.7.0). A `v*` tag now calls
+  `ci.yml` as a reusable workflow (it gained `workflow_call`), so the tag runs
+  the same typecheck, unit, and integration jobs as `main`; only a green run
+  reaches the publish job. That job refuses a tag that disagrees with
+  `package.json`, skips a version the registry already has, and otherwise runs
+  `npm publish --access public --provenance` with `NPM_TOKEN`. Both workflow
+  files parse, and the two guards were exercised locally: `v0.7.0` matches the
+  manifest while `v9.9.9` is rejected, and `npm view` reports 0.6.8 as
+  published and 0.7.0 as not. The workflow is committed but not pushed, so
+  GitHub has not run it yet; the `NPM_TOKEN` secret must exist before the
+  first tag push.
+
 - 2026-11-05: `/xerj-prjdocs eager` (0.7.0). Eager mode removes the two limits
   that keep an ordinary run small - page type and link depth - and replaces
   them with judgement. Each page goes to `ctx.experimental.generate.text` (the
