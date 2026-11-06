@@ -78,14 +78,25 @@ type Command = {
   run: (input?: string) => Promise<unknown>;
 };
 
+interface Toast {
+  message: string;
+  variant?: string;
+}
+
 interface Host {
   readonly calls: Call[];
   readonly commands: Command[];
+  readonly toasts: Toast[];
+  readonly alerts: Array<{ title: string; message: string }>;
   readonly closes: () => number;
   setStatus(handler: () => Promise<StatusSnapshot>): void;
   setLocation(directory: string | undefined): void;
   setPanel(open: boolean): void;
   swapClient(): void;
+  setReindex(handler: () => Promise<unknown>): void;
+  setRemember(handler: () => Promise<unknown>): void;
+  setSearch(handler: () => Promise<unknown>): void;
+  setDialogAnswer(answer: string): void;
 }
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -98,6 +109,12 @@ function makeHost(): Host {
   let generation = 0;
   let panelOpen = false;
   let closeCount = 0;
+  const toasts: Toast[] = [];
+  const alerts: Array<{ title: string; message: string }> = [];
+  let dialogAnswer = "";
+  let reindex = async (): Promise<unknown> => ({ queued: true, records: 900 });
+  let remember = async (): Promise<unknown> => ({ id: "mem-1", created: true });
+  let search = async (): Promise<unknown> => ({ text: "[1] src/a.ts:1\ncode", hits: 1, bytes: 20 });
 
   const rpc = () => {
     const tag = generation;
@@ -111,15 +128,15 @@ function makeHost(): Host {
       },
       reindex: async (_input: unknown, options?: CallOptions) => {
         record("reindex", options);
-        return { queued: true };
+        return reindex();
       },
       remember: async (_input: unknown, options?: CallOptions) => {
         record("remember", options);
-        return { id: "x", created: true };
+        return remember();
       },
       search: async (_input: unknown, options?: CallOptions) => {
         record("search", options);
-        return { text: "", hits: 0, bytes: 0 };
+        return search();
       },
       events: { on: () => () => {} },
     };
@@ -160,8 +177,17 @@ function makeHost(): Host {
         current: () =>
           panelOpen ? { name: "xerj.stats", sessionID: "s" } : undefined,
       },
-      dialog: { alert: async () => {}, prompt: async () => "" },
-      toast: { show: () => {} },
+      dialog: {
+        alert: async (options: { title: string; message: string }) => {
+          alerts.push(options);
+        },
+        prompt: async () => dialogAnswer,
+      },
+      toast: {
+        show: (toast: Toast) => {
+          toasts.push(toast);
+        },
+      },
     },
     theme: {
       text: { base: "white", muted: "gray", faint: "gray" },
@@ -172,6 +198,8 @@ function makeHost(): Host {
   const host: Host = {
     calls,
     commands,
+    toasts,
+    alerts,
     closes: () => closeCount,
     setStatus: (handler) => {
       status = handler;
@@ -184,6 +212,18 @@ function makeHost(): Host {
     },
     swapClient: () => {
       generation += 1;
+    },
+    setReindex: (handler) => {
+      reindex = handler;
+    },
+    setRemember: (handler) => {
+      remember = handler;
+    },
+    setSearch: (handler) => {
+      search = handler;
+    },
+    setDialogAnswer: (answer) => {
+      dialogAnswer = answer;
     },
   };
 
@@ -280,5 +320,164 @@ describe("tui panel close", () => {
     dispose();
 
     expect(host.closes()).toBe(1);
+  });
+});
+
+describe("tui commands", () => {
+  function byId(host: Host, id: string): Command {
+    const command = host.commands.find((candidate) => candidate.id === id);
+    if (!command) throw new Error(`${id} not registered`);
+    return command;
+  }
+
+  test("reindex reports the record count of the finished pass", async () => {
+    const host = makeHost();
+    const { dispose } = await setup(host);
+    await flush();
+
+    await byId(host, "xerj.reindex").run();
+    dispose();
+
+    expect(host.toasts.at(-1)).toEqual({
+      message: "XERJ reindexed · 900 records",
+      variant: "success",
+    });
+  });
+
+  test("reindex says when indexing is disabled", async () => {
+    const host = makeHost();
+    host.setReindex(async () => ({ queued: false }));
+    const { dispose } = await setup(host);
+    await flush();
+
+    await byId(host, "xerj.reindex").run();
+    dispose();
+
+    expect(host.toasts.at(-1)).toEqual({
+      message: "XERJ indexing is disabled",
+      variant: "info",
+    });
+  });
+
+  test("reindex reports a failure instead of staying silent", async () => {
+    const host = makeHost();
+    host.setReindex(async () => {
+      throw new Error("node is down");
+    });
+    const { dispose } = await setup(host);
+    await flush();
+
+    await byId(host, "xerj.reindex").run();
+    dispose();
+
+    expect(host.toasts.at(-1)).toEqual({
+      message: "XERJ is not available",
+      variant: "error",
+    });
+  });
+
+  test("remember uses the typed text and confirms the id", async () => {
+    const host = makeHost();
+    const { dispose } = await setup(host);
+    await flush();
+
+    await byId(host, "xerj.remember").run("the node idles for 30 minutes");
+
+    expect(host.calls.some((call) => call.method.startsWith("remember"))).toBe(true);
+    expect(host.toasts.at(-1)).toEqual({
+      message: "Remembered as mem-1",
+      variant: "success",
+    });
+    dispose();
+  });
+
+  test("remember asks for text when none is given", async () => {
+    const host = makeHost();
+    host.setDialogAnswer("a decision made earlier");
+    const { dispose } = await setup(host);
+    await flush();
+
+    await byId(host, "xerj.remember").run();
+    dispose();
+
+    expect(host.toasts.at(-1)?.message).toBe("Remembered as mem-1");
+  });
+
+  test("remember shows the already-remembered variant", async () => {
+    const host = makeHost();
+    host.setRemember(async () => ({ id: "mem-9", created: false }));
+    const { dispose } = await setup(host);
+    await flush();
+
+    await byId(host, "xerj.remember").run("same fact");
+    dispose();
+
+    expect(host.toasts.at(-1)).toEqual({
+      message: "Already remembered as mem-9",
+      variant: "info",
+    });
+  });
+
+  test("search opens a dialog with the cited passages", async () => {
+    const host = makeHost();
+    const { dispose } = await setup(host);
+    await flush();
+
+    await byId(host, "xerj.search").run("where is the watcher");
+    dispose();
+
+    const alert = host.alerts.at(-1);
+    expect(alert?.title).toContain("1 hit");
+    expect(alert?.message).toContain("src/a.ts:1");
+  });
+
+  test("search reports when nothing matched", async () => {
+    const host = makeHost();
+    host.setSearch(async () => ({ text: "", hits: 0, bytes: 0 }));
+    const { dispose } = await setup(host);
+    await flush();
+
+    await byId(host, "xerj.search").run("unfindable");
+    dispose();
+
+    expect(host.alerts.at(-1)?.message).toBe("No passages matched.");
+  });
+
+  test("the /xerj subcommands dispatch and reject unknown ones", async () => {
+    const host = makeHost();
+    const { run, dispose } = await setup(host);
+    await flush();
+
+    await run("reindex");
+    expect(host.toasts.at(-1)?.message).toContain("reindexed");
+
+    await run("remember a durable fact");
+    expect(host.toasts.at(-1)?.message).toContain("Remembered");
+
+    await run("search the watcher");
+    expect(host.alerts.at(-1)?.title).toContain("XERJ search");
+
+    await run("nonsense");
+    expect(host.toasts.at(-1)).toEqual({
+      message: "Unknown XERJ command: nonsense",
+      variant: "warning",
+    });
+    dispose();
+  });
+
+  test("every command carries the location on its rpc call", async () => {
+    const host = makeHost();
+    const { dispose } = await setup(host);
+    await flush();
+
+    await byId(host, "xerj.reindex").run();
+    await byId(host, "xerj.remember").run("a fact");
+    await byId(host, "xerj.search").run("a query");
+    dispose();
+
+    for (const method of ["reindex", "remember", "search"]) {
+      const call = host.calls.find((entry) => entry.method.startsWith(method));
+      expect(call?.options.location?.directory).toBe("/proj");
+    }
   });
 });
