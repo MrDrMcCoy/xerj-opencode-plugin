@@ -1,6 +1,6 @@
 {
   "name": "@mrdrmccoy/xerj-opencode-plugin",
-  "version": "0.6.8",
+  "version": "0.6.9",
   "description": "XERJ integration for OpenCode: local code and docs search, agent memory, and retrieval accounting.",
   "repository": {
     "type": "git",

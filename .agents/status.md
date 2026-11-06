@@ -340,6 +340,24 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-05: The project corpus is one graph (0.6.9). `index.graph`
+  (default on) runs `autoindex --brain <project>-<hash>` instead of
+  `--no-graph`, so a single corpus carries sections, symbols, `path:line`,
+  and edges: 1064 documents and 254 edges over 97 files here, with
+  `.xerjignore` and `--exclude` honored and deletions reconciled (all
+  measured). The engine refuses `--watch` in graph mode, so a graph project
+  refreshes through the plugin's own directory watcher: 1.7 s per edit
+  incrementally, 105 s cold with neural embeddings. A corpus built in one
+  mode cannot be continued in the other, so `reconcileCorpusMode` records
+  the mode at `<node dir>/corpus-mode` and drops only the project corpus
+  and its journal when it changes (hidden documents, web spool, external
+  files, and memory stay). Retrieval expands project hits one hop, but only
+  along `pathcite`: measured here, `sequence` neighbors cost 11.5 KB per run
+  and changed nothing, while `pathcite` cost 2.3 KB. Recall is unchanged
+  between the flat and graph corpora (51 of 60 either way); the graph's
+  value on this tree is the edge data, not a ranking gain. 554 unit and 10
+  integration tests pass.
+
 - 2026-11-05: Answerability measured, node-layer tests, and shared integration
   setup. The benchmark now pins an anchor token for twenty prompts and reports
   how often the answer text itself is in the block: 14 of 20, with 3 citing the
