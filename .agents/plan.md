@@ -77,7 +77,7 @@ lists the complete set with defaults; this is the shape:
         },
         "node": {
           "priority": "low",
-          "cpus": null
+          "cpus": "odd"
         },
         "index": {
           "graph": true,

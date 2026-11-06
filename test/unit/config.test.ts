@@ -24,8 +24,12 @@ describe("context.rehydrate", () => {
 });
 
 describe("node.cpus", () => {
-  test("defaults to no affinity change", () => {
-    expect(loadConfig(undefined).config.node.cpus).toBeNull();
+  test("defaults to the odd CPUs", () => {
+    expect(loadConfig(undefined).config.node.cpus).toEqual({ kind: "odd" });
+  });
+
+  test("treats an explicit null as no affinity change", () => {
+    expect(loadConfig({ node: { cpus: null } }).config.node.cpus).toBeNull();
   });
 
   test("reads a CPU list", () => {
@@ -54,15 +58,15 @@ describe("node.cpus", () => {
     expect(loadConfig({ node: { cpus: "all" } }).config.node.cpus).toBeNull();
   });
 
-  test("falls back with a warning on a malformed value", () => {
+  test("falls back to odd with a warning on a malformed value", () => {
     const { config, warnings } = loadConfig({ node: { cpus: "3-1" } });
-    expect(config.node.cpus).toBeNull();
+    expect(config.node.cpus).toEqual({ kind: "odd" });
     expect(warnings.some((entry) => entry.includes("node.cpus"))).toBe(true);
   });
 
-  test("falls back with a warning on the wrong type", () => {
+  test("falls back to odd with a warning on the wrong type", () => {
     const { config, warnings } = loadConfig({ node: { cpus: 2 } });
-    expect(config.node.cpus).toBeNull();
+    expect(config.node.cpus).toEqual({ kind: "odd" });
     expect(warnings.some((entry) => entry.includes("node.cpus"))).toBe(true);
   });
 });
@@ -199,11 +203,63 @@ describe("node.priority", () => {
   });
 });
 
+describe("timeouts", () => {
+  test("carry the shipped defaults", () => {
+    const { config } = loadConfig(undefined);
+    expect(config.binary.detectTimeoutMs).toBe(2_000);
+    expect(config.binary.commandTimeoutMs).toBe(60_000);
+    expect(config.binary.requestTimeoutMs).toBe(10_000);
+    expect(config.node.clientTimeoutMs).toBe(5_000);
+    expect(config.node.writeTimeoutMs).toBe(120_000);
+    expect(config.node.probeTimeoutMs).toBe(800);
+    expect(config.node.startupTimeoutMs).toBe(30_000);
+    expect(config.node.stopGraceMs).toBe(5_000);
+    expect(config.remote.fetchTimeoutMs).toBe(10_000);
+    expect(config.context.recallTimeoutMs).toBe(120);
+    expect(config.context.hintTimeoutMs).toBe(150);
+    expect(config.prjdocs.requestTimeoutMs).toBe(15_000);
+    expect(config.prjdocs.latestTimeoutMs).toBe(5_000);
+  });
+
+  test("read an override per key", () => {
+    const { config, warnings } = loadConfig({
+      binary: { detectTimeoutMs: 500, commandTimeoutMs: 5_000 },
+      node: { clientTimeoutMs: 250, writeTimeoutMs: 20_000 },
+      context: { recallTimeoutMs: 50, hintTimeoutMs: 60 },
+      remote: { fetchTimeoutMs: 3_000 },
+      prjdocs: { requestTimeoutMs: 8_000, latestTimeoutMs: 2_000 },
+    });
+
+    expect(config.binary.detectTimeoutMs).toBe(500);
+    expect(config.binary.commandTimeoutMs).toBe(5_000);
+    expect(config.node.clientTimeoutMs).toBe(250);
+    expect(config.node.writeTimeoutMs).toBe(20_000);
+    expect(config.context.recallTimeoutMs).toBe(50);
+    expect(config.context.hintTimeoutMs).toBe(60);
+    expect(config.remote.fetchTimeoutMs).toBe(3_000);
+    expect(config.prjdocs.requestTimeoutMs).toBe(8_000);
+    expect(config.prjdocs.latestTimeoutMs).toBe(2_000);
+    expect(warnings).toHaveLength(0);
+  });
+
+  test("clamp an out-of-range value and warn", () => {
+    const { config, warnings } = loadConfig({
+      node: { startupTimeoutMs: 5 },
+      context: { hintTimeoutMs: 0 },
+    });
+
+    expect(config.node.startupTimeoutMs).toBe(1_000);
+    expect(config.context.hintTimeoutMs).toBe(10);
+    expect(warnings.join("\n")).toContain("node.startupTimeoutMs");
+    expect(warnings.join("\n")).toContain("context.hintTimeoutMs");
+  });
+});
+
 describe("memory.retain", () => {
-  test("defaults bound age and size together", () => {
+  test("defaults to unlimited age and size, and no count cap", () => {
     const retain = DEFAULT_CONFIG.memory.retain;
-    expect(retain.days).toBe(180);
-    // The count cap is off by default: age and size decide retention.
+    // Memories are not expired by age unless a user asks for it.
+    expect(retain.days).toBe(0);
     expect(retain.maxCount).toBe(0);
     expect(retain.maxBytes).toBe(2 * 1024 ** 3);
   });

@@ -55,6 +55,15 @@ export interface ClientObserver {
   onResponse?(status: number): void;
 }
 
+export interface XerjClientOptions {
+  /** Deadline for a read or search. */
+  readonly timeoutMs?: number;
+  /** Deadline for a write; a semantic write embeds before it acknowledges. */
+  readonly writeTimeoutMs?: number;
+  readonly observer?: ClientObserver;
+  readonly resolver?: ClientResolver;
+}
+
 /**
  * Keeps the client pointed at a live node. `ensure` returns the current base
  * URL, starting the node when it is not running; `invalidate` drops a cached
@@ -67,14 +76,17 @@ export interface ClientResolver {
 
 export class XerjClient {
   private current: string;
+  private readonly timeoutMs: number;
+  private readonly writeTimeoutMs: number;
+  private readonly observer: ClientObserver | undefined;
+  private readonly resolver: ClientResolver | undefined;
 
-  constructor(
-    readonly baseUrl: string,
-    private readonly timeoutMs = DEFAULT_TIMEOUT_MS,
-    private readonly observer?: ClientObserver,
-    private readonly resolver?: ClientResolver,
-  ) {
+  constructor(readonly baseUrl: string, options: XerjClientOptions = {}) {
     this.current = baseUrl;
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.writeTimeoutMs = options.writeTimeoutMs ?? WRITE_TIMEOUT_MS;
+    this.observer = options.observer;
+    this.resolver = options.resolver;
   }
 
   /** Replaces the base URL after the node was restarted on another port. */
@@ -176,7 +188,7 @@ export class XerjClient {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
       },
-      WRITE_TIMEOUT_MS,
+      this.writeTimeoutMs,
     );
 
     if (!response.ok) {
@@ -199,7 +211,7 @@ export class XerjClient {
         headers: { "content-type": "application/x-ndjson" },
         body: `${lines}\n`,
       },
-      WRITE_TIMEOUT_MS,
+      this.writeTimeoutMs,
     );
 
     if (!response.ok) {
@@ -228,7 +240,7 @@ export class XerjClient {
         headers: { "content-type": "application/x-ndjson" },
         body: `${lines}\n`,
       },
-      WRITE_TIMEOUT_MS,
+      this.writeTimeoutMs,
     );
 
     if (!response.ok) {

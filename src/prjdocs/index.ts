@@ -40,6 +40,8 @@ export interface PrjdocsOptions {
   readonly maxTargets?: number;
   readonly fetchImpl?: typeof fetch;
   readonly signal?: AbortSignal;
+  /** Deadline for one documentation page request. */
+  readonly requestTimeoutMs?: number;
   /** Resolves the latest release of a technology; null when unknown. */
   readonly latestVersion?: (ref: TechRef) => Promise<string | null>;
   /** Eager mode: no depth cap, any text page, model-judged relevance. */
@@ -335,6 +337,7 @@ export class PrjdocsIndexer {
         logger: this.options.logger,
         fetchImpl: this.options.fetchImpl,
         signal: this.options.signal,
+        requestTimeoutMs: this.options.requestTimeoutMs,
       }).catch((error: unknown) => {
         this.options.logger.debug("docs crawl failed", String(error));
         return [] as CrawledPage[];
@@ -381,6 +384,7 @@ export class PrjdocsIndexer {
       logger: this.options.logger,
       fetchImpl: this.options.fetchImpl,
       signal: this.options.signal,
+      requestTimeoutMs: this.options.requestTimeoutMs,
       xerjMaxPages: this.options.builtin.xerjPages,
       maxPages: this.options.builtin.elasticsearchPages,
       eager: this.options.builtin.eager,

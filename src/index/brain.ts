@@ -57,7 +57,11 @@ export class BrainIndexer {
   private running = false;
 
   constructor(private readonly options: BrainIndexerOptions) {
-    this.client = new XerjClient(options.nodeUrl, undefined, options.observer);
+    this.client = new XerjClient(options.nodeUrl, {
+      timeoutMs: options.config.node.clientTimeoutMs,
+      writeTimeoutMs: options.config.node.writeTimeoutMs,
+      observer: options.observer,
+    });
   }
 
   /** Configured brains, with zeros for the ones that have not run yet. */

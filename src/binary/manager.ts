@@ -53,6 +53,14 @@ export interface InstalledBinary {
   readonly upgraded: boolean;
 }
 
+/** Deadlines for a binary install; each falls back to the shipped default. */
+export interface BinaryTimeouts {
+  /** Archive download and every local command (`tar`, `--version`). */
+  readonly commandMs?: number;
+  /** Release metadata and checksum requests. */
+  readonly requestMs?: number;
+}
+
 export interface EnsureBinaryOptions {
   readonly root: string;
   readonly requested: string;
@@ -60,28 +68,49 @@ export interface EnsureBinaryOptions {
   readonly info: PlatformInfo;
   readonly logger: Logger;
   readonly now?: () => number;
+  readonly timeouts?: BinaryTimeouts;
 }
 
 const COMMAND_TIMEOUT_MS = 60_000;
 const RELEASE_LIST_TIMEOUT_MS = 10_000;
 const RELEASES_API_URL = "https://api.github.com/repos/xerj-org/xerj/releases?per_page=100";
 
+interface ResolvedBinaryTimeouts {
+  readonly commandMs: number;
+  readonly requestMs: number;
+}
+
+function resolveBinaryTimeouts(
+  timeouts?: BinaryTimeouts,
+): ResolvedBinaryTimeouts {
+  return {
+    commandMs: timeouts?.commandMs ?? COMMAND_TIMEOUT_MS,
+    requestMs: timeouts?.requestMs ?? RELEASE_LIST_TIMEOUT_MS,
+  };
+}
+
 export async function ensureBinary(options: EnsureBinaryOptions): Promise<InstalledBinary> {
   const { root, requested, platform, info, logger } = options;
   const now = options.now ?? Date.now;
+  const timeouts = resolveBinaryTimeouts(options.timeouts);
 
-  const installed = await findInstalled(root, platform, info.target);
+  const installed = await findInstalled(
+    root,
+    platform,
+    info.target,
+    timeouts.commandMs,
+  );
 
   if (requested !== "auto") {
     const version = normalizeVersion(requested);
     if (installed && installed.version === version) {
       return { ...installed, upgraded: false };
     }
-    const path = await install(root, version, info, logger);
+    const path = await install(root, version, info, logger, timeouts);
     return { version, path, upgraded: false };
   }
 
-  const latest = await resolveLatest(root, logger, now);
+  const latest = await resolveLatest(root, logger, now, timeouts.requestMs);
   if (!latest) {
     if (installed) return { ...installed, upgraded: false };
     throw new BinaryError("no installed xerj binary and the release channel is unreachable");
@@ -92,7 +121,7 @@ export async function ensureBinary(options: EnsureBinaryOptions): Promise<Instal
   }
 
   try {
-    const path = await install(root, latest, info, logger);
+    const path = await install(root, latest, info, logger, timeouts);
     logger.info(`installed xerj ${latest}`, { path });
     return { version: latest, path, upgraded: installed !== null };
   } catch (error) {
@@ -106,9 +135,12 @@ export async function ensureBinary(options: EnsureBinaryOptions): Promise<Instal
 
 /** Runs `xerj --version` and returns the parsed version. A binary that does
  * not run yields null rather than throwing; callers decide what that means. */
-export async function probeBinaryVersion(path: string): Promise<string | null> {
+export async function probeBinaryVersion(
+  path: string,
+  commandMs = COMMAND_TIMEOUT_MS,
+): Promise<string | null> {
   try {
-    const output = await run(path, ["--version"]);
+    const output = await run(path, ["--version"], { timeoutMs: commandMs });
     const match = /v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/.exec(output);
     return match?.[1] ?? null;
   } catch {
@@ -117,8 +149,12 @@ export async function probeBinaryVersion(path: string): Promise<string | null> {
 }
 
 /** Uses a user-supplied binary, skipping download, upgrade, and detection. */
-export async function externalBinary(path: string, logger: Logger): Promise<InstalledBinary> {
-  const version = await probeBinaryVersion(path);
+export async function externalBinary(
+  path: string,
+  logger: Logger,
+  commandMs?: number,
+): Promise<InstalledBinary> {
+  const version = await probeBinaryVersion(path, commandMs);
   if (!version) {
     throw new BinaryError(`binary.path did not run or report a version: ${path}`);
   }
@@ -131,6 +167,7 @@ async function findInstalled(
   root: string,
   platform: NodeJS.Platform,
   target: string,
+  commandMs: number,
 ): Promise<InstalledBinary | null> {
   const binDir = join(root, "bin");
   const entries = await readdir(binDir, { withFileTypes: true }).catch(() => []);
@@ -146,7 +183,7 @@ async function findInstalled(
   if (!best) return null;
 
   const path = binaryPath(root, best, platform, target);
-  const version = await probeBinaryVersion(path);
+  const version = await probeBinaryVersion(path, commandMs);
   if (!version) return null;
   return { version, path, upgraded: false };
 }
@@ -155,6 +192,7 @@ async function resolveLatest(
   root: string,
   logger: Logger,
   now: () => number,
+  requestMs: number,
 ): Promise<string | null> {
   const cachePath = releaseCachePath(root);
   const cached = parseReleaseCache(await readFileJson(cachePath));
@@ -162,7 +200,7 @@ async function resolveLatest(
   if (cached && cacheIsFresh(cached, now())) return cached.version;
 
   try {
-    const version = await newestTrackedRelease();
+    const version = await newestTrackedRelease(requestMs);
     if (!version) throw new Error("no release at or above the tracking floor");
 
     const next: ReleaseCache = { checkedAt: now(), version };
@@ -178,11 +216,11 @@ async function resolveLatest(
 /** Newest release at or above the tracking floor. Prereleases are not
  * marked latest by GitHub, so the full list is read; the redirect is the
  * fallback when the API is unreachable or rate limited. */
-async function newestTrackedRelease(): Promise<string | null> {
+async function newestTrackedRelease(requestMs: number): Promise<string | null> {
   try {
     const response = await fetch(RELEASES_API_URL, {
       headers: { accept: "application/vnd.github+json" },
-      signal: AbortSignal.timeout(RELEASE_LIST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(requestMs),
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
@@ -198,7 +236,7 @@ async function newestTrackedRelease(): Promise<string | null> {
   } catch {
     const response = await fetch(latestReleaseUrl(), {
       redirect: "follow",
-      signal: AbortSignal.timeout(RELEASE_LIST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(requestMs),
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return versionFromLatestUrl(response.url);
@@ -210,6 +248,7 @@ async function install(
   version: string,
   info: PlatformInfo,
   logger: Logger,
+  timeouts: ResolvedBinaryTimeouts,
 ): Promise<string> {
   if (!parseVersion(version)) throw new BinaryError(`invalid version: ${version}`);
 
@@ -225,10 +264,16 @@ async function install(
 
   try {
     logger.info(`downloading ${asset}`);
-    await download(url, downloadPath);
-    await verifyChecksum(`${url}.sha256`, downloadPath);
+    await download(url, downloadPath, timeouts.commandMs);
+    await verifyChecksum(`${url}.sha256`, downloadPath, timeouts.requestMs);
 
-    await extractArchive(downloadPath, partialDir, info, logger);
+    await extractArchive(
+      downloadPath,
+      partialDir,
+      info,
+      logger,
+      timeouts.commandMs,
+    );
 
     const expected = join(partialDir, archiveRoot(version, info.target), info.binary);
     const binary = (await isFile(expected)) ? expected : await findFile(partialDir, info.binary);
@@ -241,7 +286,7 @@ async function install(
     const installed = join(targetDir, info.binary);
     // A binary for the wrong architecture installs and then fails to exec, so
     // prove it runs before declaring success.
-    const reported = await probeBinaryVersion(installed);
+    const reported = await probeBinaryVersion(installed, timeouts.commandMs);
     if (!reported) {
       await rm(targetDir, { recursive: true, force: true });
       throw new BinaryError(
@@ -266,9 +311,12 @@ async function extractArchive(
   destination: string,
   info: PlatformInfo,
   logger: Logger,
+  commandMs: number,
 ): Promise<void> {
   try {
-    await run("tar", ["-xf", archivePath, "-C", destination]);
+    await run("tar", ["-xf", archivePath, "-C", destination], {
+      timeoutMs: commandMs,
+    });
     return;
   } catch (error) {
     if (info.archive !== "zip" || process.platform !== "win32") throw error;
@@ -281,15 +329,22 @@ async function extractArchive(
         "-Command",
         "Expand-Archive -LiteralPath $env:XERJ_ZIP -DestinationPath $env:XERJ_DST -Force",
       ],
-      { env: { ...process.env, XERJ_ZIP: archivePath, XERJ_DST: destination } },
+      {
+        env: { ...process.env, XERJ_ZIP: archivePath, XERJ_DST: destination },
+        timeoutMs: commandMs,
+      },
     );
   }
 }
 
-async function download(url: string, destination: string): Promise<void> {
+async function download(
+  url: string,
+  destination: string,
+  timeoutMs: number,
+): Promise<void> {
   const response = await fetch(url, {
     redirect: "follow",
-    signal: AbortSignal.timeout(COMMAND_TIMEOUT_MS),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!response.ok || !response.body) {
     throw new BinaryError(`download failed: HTTP ${response.status}`);
@@ -298,8 +353,14 @@ async function download(url: string, destination: string): Promise<void> {
   await pipeline(Readable.fromWeb(response.body), createWriteStream(destination, { mode: 0o600 }));
 }
 
-async function verifyChecksum(checksumUrl: string, filePath: string): Promise<void> {
-  const response = await fetch(checksumUrl, { signal: AbortSignal.timeout(10_000) });
+async function verifyChecksum(
+  checksumUrl: string,
+  filePath: string,
+  timeoutMs: number,
+): Promise<void> {
+  const response = await fetch(checksumUrl, {
+    signal: AbortSignal.timeout(timeoutMs),
+  });
   if (!response.ok) throw new BinaryError(`checksum download failed: HTTP ${response.status}`);
 
   const expected = checksumFrom(await response.text());
@@ -347,6 +408,8 @@ async function readFileJson(path: string): Promise<unknown> {
 
 interface RunOptions {
   readonly env?: NodeJS.ProcessEnv;
+  /** Deadline for the command; defaults to the shipped constant. */
+  readonly timeoutMs?: number;
 }
 
 function run(
@@ -363,7 +426,10 @@ function run(
     let stdout = "";
     let stderr = "";
 
-    const timer = setTimeout(() => child.kill("SIGKILL"), COMMAND_TIMEOUT_MS);
+    const timer = setTimeout(
+      () => child.kill("SIGKILL"),
+      options.timeoutMs ?? COMMAND_TIMEOUT_MS,
+    );
     child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
     child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
     child.on("error", (error) => {

@@ -49,6 +49,8 @@ export interface BuiltinOptions {
    * than the one in use.
    */
   readonly eager?: boolean;
+  /** Deadline for one page request. */
+  readonly requestTimeoutMs?: number;
 }
 
 /** Guide chapters that are about history rather than the current API. */
@@ -111,7 +113,10 @@ export async function listRepoDocs(options: BuiltinOptions): Promise<string[]> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const response = await fetchImpl(TREE_API, {
     headers: { "user-agent": "xerj-opencode-plugin (documentation indexer)" },
-    signal: mergeSignal(options.signal, REQUEST_TIMEOUT_MS),
+    signal: mergeSignal(
+      options.signal,
+      options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS,
+    ),
   });
   if (!response.ok) {
     options.logger.debug("could not list XERJ docs", `status ${response.status}`);
@@ -165,7 +170,10 @@ async function fetchRepoPage(
 
   const response = await fetchImpl(`${RAW_BASE}/${path}`, {
     headers: { "user-agent": "xerj-opencode-plugin (documentation indexer)" },
-    signal: mergeSignal(options.signal, REQUEST_TIMEOUT_MS),
+    signal: mergeSignal(
+      options.signal,
+      options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS,
+    ),
   }).catch(() => null);
   if (response === null || !response.ok) return null;
 
@@ -222,6 +230,7 @@ async function fetchElasticsearchDocs(
           logger: options.logger,
           fetchImpl: options.fetchImpl,
           signal: options.signal,
+          requestTimeoutMs: options.requestTimeoutMs,
           judge: async (page) =>
             /elasticsearch/i.test(`${page.title} ${page.body.slice(0, 2_000)}`),
         }).catch(() => [] as CrawledPage[]),
@@ -256,7 +265,10 @@ async function chapterUrls(
   const listing = options.eager === true ? "index.html" : "rest-apis.html";
   const response = await fetchImpl(`${base}/${listing}`, {
     headers: { "user-agent": "xerj-opencode-plugin (documentation indexer)" },
-    signal: mergeSignal(options.signal, REQUEST_TIMEOUT_MS),
+    signal: mergeSignal(
+      options.signal,
+      options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS,
+    ),
   }).catch(() => null);
 
   const found: string[] = [];

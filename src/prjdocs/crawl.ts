@@ -25,6 +25,8 @@ export interface CrawlOptions {
   readonly urlFilter?: (url: string) => boolean;
   /** Accept `text/*` and markdown, not only HTML. Eager mode needs this. */
   readonly anyText?: boolean;
+  /** Deadline for one page request. */
+  readonly requestTimeoutMs?: number;
   /**
    * Decides whether a page is worth keeping and worth following links from.
    * Without it every page within the budget is kept.
@@ -72,7 +74,10 @@ export async function crawlDocs(options: CrawlOptions): Promise<CrawledPage[]> {
 
     const response = await fetchImpl(next.url, {
       headers: { "user-agent": "xerj-opencode-plugin (documentation indexer)" },
-      signal: mergedSignal(options.signal, REQUEST_TIMEOUT_MS),
+      signal: mergedSignal(
+        options.signal,
+        options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS,
+      ),
     }).catch((error: unknown) => {
       options.logger.debug("docs fetch failed", `${next.url}: ${String(error)}`);
       return null;

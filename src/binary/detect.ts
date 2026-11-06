@@ -26,11 +26,16 @@ export interface DetectOptions {
   readonly libc: Libc;
   readonly target: string | null;
   readonly env?: Readonly<Record<string, string | undefined>>;
+  /** Deadline for host detection commands; defaults to 2 seconds. */
+  readonly timeoutMs?: number;
 }
 
 export async function detectRuntime(options: DetectOptions): Promise<RuntimeTarget> {
   const platform = process.platform;
-  const rosetta = platform === "darwin" ? await detectRosetta() : false;
+  const rosetta =
+    platform === "darwin"
+      ? await detectRosetta(options.timeoutMs ?? SYSCTL_TIMEOUT_MS)
+      : false;
   const arch = effectiveArch(platform, process.arch, options.env ?? process.env, rosetta);
 
   const info = options.target
@@ -41,12 +46,12 @@ export async function detectRuntime(options: DetectOptions): Promise<RuntimeTarg
 }
 
 /** Apple Silicon running an x86_64 process under Rosetta 2. */
-async function detectRosetta(): Promise<boolean> {
+async function detectRosetta(timeoutMs: number): Promise<boolean> {
   if (process.platform !== "darwin") return false;
 
   try {
     const { stdout } = await execFileAsync("sysctl", ["-n", "sysctl.proc_translated"], {
-      timeout: SYSCTL_TIMEOUT_MS,
+      timeout: timeoutMs,
     });
     return isRosetta(stdout);
   } catch {

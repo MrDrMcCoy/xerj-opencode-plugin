@@ -131,6 +131,7 @@ export class McpHost {
     const runtimeTarget = await detectRuntime({
       target: this.config.binary.target,
       libc: this.config.binary.libc,
+      timeoutMs: this.config.binary.detectTimeoutMs,
     });
     const info = runtimeTarget.info;
     if (info === null) {
@@ -143,6 +144,10 @@ export class McpHost {
       platform: runtimeTarget.platform,
       info,
       logger: this.logger,
+      timeouts: {
+        commandMs: this.config.binary.commandTimeoutMs,
+        requestMs: this.config.binary.requestTimeoutMs,
+      },
     });
   }
 
@@ -209,7 +214,11 @@ export class McpHost {
   private async boot(): Promise<void> {
     const explicit = this.config.binary.path;
     if (explicit !== null && explicit.trim().length > 0) {
-      this.binary = await externalBinary(explicit, this.logger);
+      this.binary = await externalBinary(
+        explicit,
+        this.logger,
+        this.config.binary.commandTimeoutMs,
+      );
     } else {
       this.binary = await this.installBinary();
     }
@@ -225,6 +234,9 @@ export class McpHost {
       logMaxBytes: this.config.node.logMaxBytes,
       priority: this.config.node.priority,
       cpus: this.config.node.cpus,
+      startupTimeoutMs: this.config.node.startupTimeoutMs,
+      probeTimeoutMs: this.config.node.probeTimeoutMs,
+      stopGraceMs: this.config.node.stopGraceMs,
       logger: this.logger,
       binary: () => this.binary,
       onSpawned: () => {},
@@ -233,7 +245,10 @@ export class McpHost {
 
     const handle = await this.runtime.ensure();
     this.handle = { port: handle.port, pid: handle.pid };
-    this.client = new XerjClient(handle.baseUrl);
+    this.client = new XerjClient(handle.baseUrl, {
+      timeoutMs: this.config.node.clientTimeoutMs,
+      writeTimeoutMs: this.config.node.writeTimeoutMs,
+    });
 
     this.memory = new MemoryStore(
       this.client,
@@ -360,7 +375,10 @@ export class McpHost {
             typeof raw === "object" && raw !== null && Array.isArray((raw as { keywords?: unknown }).keywords)
               ? ((raw as { keywords: unknown[] }).keywords.filter((entry) => typeof entry === "string") as string[])
               : [];
-          const latest = new LatestVersions({ logger: this.logger });
+          const latest = new LatestVersions({
+            logger: this.logger,
+            requestTimeoutMs: this.config.prjdocs.latestTimeoutMs,
+          });
           const banner = await this.requireClient().info().catch(() => null);
           const summary = await new PrjdocsIndexer({
             client: this.requireClient(),
@@ -378,6 +396,7 @@ export class McpHost {
             logger: this.logger,
             maxTargets: this.config.prjdocs.maxTargets,
             maxPages: this.config.prjdocs.maxPages > 0 ? this.config.prjdocs.maxPages : undefined,
+            requestTimeoutMs: this.config.prjdocs.requestTimeoutMs,
             latestVersion: (ref) => latest.resolve(ref),
             eager: eager
               ? {

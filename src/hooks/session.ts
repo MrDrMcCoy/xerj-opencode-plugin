@@ -344,8 +344,6 @@ function rememberLocations(
 
 // A recall is a bonus, so it never delays a turn for long: three file reads
 // on a slow disk are dropped rather than admitted late.
-const RECALL_DEADLINE_MS = 120;
-
 async function buildRecall(input: {
   readonly options: SessionHookOptions;
   readonly entry: Prepared | undefined;
@@ -358,7 +356,10 @@ async function buildRecall(input: {
   const covered = new Set(entry?.locations ?? []);
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<null>((resolve) => {
-    timer = setTimeout(() => resolve(null), RECALL_DEADLINE_MS);
+    timer = setTimeout(
+      () => resolve(null),
+      options.config.context.recallTimeoutMs,
+    );
   });
 
   try {
@@ -473,8 +474,6 @@ function locationKey(hit: { path: string | null; line: number | null; index: str
  * The best candidate when the gate rejected everything, with a short deadline:
  * a hint is a bonus, so it never delays the turn for long.
  */
-const HINT_TIMEOUT_MS = 150;
-
 async function retrieveHint(
   search: SearchService,
   text: string,
@@ -484,7 +483,10 @@ async function retrieveHint(
   const controller = new AbortController();
   const timer = setTimeout(
     () => controller.abort(),
-    Math.min(HINT_TIMEOUT_MS, options.config.context.timeoutMs),
+    Math.min(
+      options.config.context.hintTimeoutMs,
+      options.config.context.timeoutMs,
+    ),
   );
 
   try {

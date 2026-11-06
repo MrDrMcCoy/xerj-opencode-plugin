@@ -34,6 +34,12 @@ export interface NodeRuntimeOptions {
   readonly embedMode: EmbedMode;
   /** Size at which the node log is rotated aside; 0 disables it. */
   readonly logMaxBytes?: number;
+  /** How long a spawn waits for the node to answer. */
+  readonly startupTimeoutMs?: number;
+  /** Deadline for one health probe. */
+  readonly probeTimeoutMs?: number;
+  /** How long a stop waits after SIGTERM before SIGKILL. */
+  readonly stopGraceMs?: number;
   /** CPU and I/O priority for a spawned node; omitted leaves it alone. */
   readonly priority?: Priority;
   /** CPU set for a spawned node; null or omitted leaves affinity alone. */
@@ -91,7 +97,7 @@ export class NodeRuntime {
         state: "xerj",
       };
     }
-    return detectNode(this.options.nodeDir);
+    return detectNode(this.options.nodeDir, this.options.probeTimeoutMs);
   }
 
   async stop(reason: string): Promise<boolean> {
@@ -102,7 +108,10 @@ export class NodeRuntime {
     // An explicitly configured URL belongs to somebody else; never kill it.
     if (this.options.explicitUrl) return false;
 
-    const stopped = await stopNode(this.options.nodeDir);
+    const stopped = await stopNode(
+      this.options.nodeDir,
+      this.options.stopGraceMs,
+    );
     this.options.logger.info(
       stopped ? "stopped the xerj node" : "xerj node was already stopped",
       { reason, port: handle?.port ?? null },
@@ -126,6 +135,8 @@ export class NodeRuntime {
         preferredPort: this.options.preferredPort,
         persistedPort: await readPersistedPort(this.options.nodeDir),
         explicitUrl: this.options.explicitUrl,
+        startupTimeoutMs: this.options.startupTimeoutMs,
+        probeTimeoutMs: this.options.probeTimeoutMs,
         embedMode: this.options.embedMode,
         logMaxBytes: this.options.logMaxBytes,
         priority: this.options.priority,

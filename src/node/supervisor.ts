@@ -65,7 +65,10 @@ export interface EnsureNodeOptions {
   readonly onPort?: (port: number) => Promise<void>;
   readonly logger: Logger;
   readonly explicitUrl?: string | null;
+  /** How long a spawn waits for the node to answer. */
   readonly startupTimeoutMs?: number;
+  /** Deadline for one health probe. */
+  readonly probeTimeoutMs?: number;
   readonly embedMode?: EmbedMode;
   /** Size at which the node log is rotated aside; 0 disables it. */
   readonly logMaxBytes?: number;
@@ -96,9 +99,14 @@ const PORT_STRIDE = 3;
 const HEALTH_POLL_MS = 250;
 const SPAWN_LOCK_MS = 60_000;
 const PORT_LOCK_POLL_MS = 100;
+const DEFAULT_PROBE_TIMEOUT_MS = 800;
+const DEFAULT_STARTUP_TIMEOUT_MS = 30_000;
 
 /** Identifies a node by `GET /`, so an Elasticsearch on 9200 is not mistaken for XERJ. */
-export async function probeNode(baseUrl: string, timeoutMs = 800): Promise<NodeState> {
+export async function probeNode(
+  baseUrl: string,
+  timeoutMs = DEFAULT_PROBE_TIMEOUT_MS,
+): Promise<NodeState> {
   try {
     const response = await fetch(`${baseUrl}/`, {
       signal: AbortSignal.timeout(timeoutMs),
@@ -115,10 +123,13 @@ export async function probeNode(baseUrl: string, timeoutMs = 800): Promise<NodeS
 
 export async function ensureNode(options: EnsureNodeOptions): Promise<NodeHandle> {
   const { logger } = options;
+  const probeTimeoutMs = options.probeTimeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS;
+  const startupTimeoutMs =
+    options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS;
 
   if (options.explicitUrl) {
     const url = options.explicitUrl.replace(/\/+$/, "");
-    if ((await probeNode(url)) !== "xerj") {
+    if ((await probeNode(url, probeTimeoutMs)) !== "xerj") {
       throw new NodeError(`XERJ is not answering at ${url}`);
     }
     return {
@@ -144,8 +155,14 @@ export async function ensureNode(options: EnsureNodeOptions): Promise<NodeHandle
   // our node stopped, and adopting it would read that project's corpus and then
   // kill its node on our next idle shutdown.
   const detected =
-    options.persistedPort !== null && (await ownsNodeAt(options.persistedPort, storedPid))
-      ? await attach(options.persistedPort, options.binaryVersion, storedPid)
+    options.persistedPort !== null &&
+    (await ownsNodeAt(options.persistedPort, storedPid))
+      ? await attach(
+          options.persistedPort,
+          options.binaryVersion,
+          storedPid,
+          probeTimeoutMs,
+        )
       : null;
   if (detected) return detected;
 
@@ -153,7 +170,7 @@ export async function ensureNode(options: EnsureNodeOptions): Promise<NodeHandle
   // data root, so they take one lock there. Per-project locking would still let
   // two first starts race onto the same free port and share one node.
   const portLock = options.portLockPath ?? join(dirname(options.nodeDir), ".port-lock");
-  if (!(await acquirePortLock(portLock, options.startupTimeoutMs ?? 30_000))) {
+  if (!(await acquirePortLock(portLock, startupTimeoutMs))) {
     throw new NodeError("another process is starting a XERJ node and did not let go");
   }
 
@@ -162,7 +179,12 @@ export async function ensureNode(options: EnsureNodeOptions): Promise<NodeHandle
     const adopted =
       options.persistedPort !== null &&
       (await ownsNodeAt(options.persistedPort, storedPidAgain))
-        ? await attach(options.persistedPort, options.binaryVersion, storedPidAgain)
+        ? await attach(
+            options.persistedPort,
+            options.binaryVersion,
+            storedPidAgain,
+            probeTimeoutMs,
+          )
         : null;
     if (adopted) return adopted;
 
@@ -173,7 +195,12 @@ export async function ensureNode(options: EnsureNodeOptions): Promise<NodeHandle
       );
     }
 
-    const second = await attach(chosen, options.binaryVersion, storedPidAgain);
+    const second = await attach(
+      chosen,
+      options.binaryVersion,
+      storedPidAgain,
+      probeTimeoutMs,
+    );
     if (second) {
       await options.onPort?.(chosen);
       return second;
@@ -193,9 +220,17 @@ export async function ensureNode(options: EnsureNodeOptions): Promise<NodeHandle
     );
     await options.onPort?.(chosen);
 
-    const node = await waitForNode(chosen, options.startupTimeoutMs ?? 30_000, options.binaryVersion);
+    const node = await waitForNode(
+      chosen,
+      startupTimeoutMs,
+      options.binaryVersion,
+      probeTimeoutMs,
+    );
     if (!node) {
-      throw new NodeError(`xerj did not answer on port ${chosen} within 30s`);
+      const seconds = Math.round(startupTimeoutMs / 1000);
+      throw new NodeError(
+        `xerj did not answer on port ${chosen} within ${seconds}s`,
+      );
     }
 
     await writeFile(nodePidPath(options.nodeDir), String(pid), { mode: 0o600 }).catch(() => {});
@@ -210,9 +245,10 @@ async function attach(
   port: number,
   binaryVersion: string,
   pid: number | null,
+  probeTimeoutMs: number,
 ): Promise<NodeHandle | null> {
   const baseUrl = `http://127.0.0.1:${port}`;
-  if ((await probeNode(baseUrl)) !== "xerj") return null;
+  if ((await probeNode(baseUrl, probeTimeoutMs)) !== "xerj") return null;
 
   return {
     baseUrl,
@@ -227,10 +263,11 @@ async function waitForNode(
   port: number,
   timeoutMs: number,
   binaryVersion: string,
+  probeTimeoutMs: number,
 ): Promise<NodeHandle | null> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const found = await attach(port, binaryVersion, null);
+    const found = await attach(port, binaryVersion, null, probeTimeoutMs);
     if (found) return found;
     await sleep(HEALTH_POLL_MS);
   }
@@ -384,14 +421,17 @@ export async function readNodePid(nodeDir: string): Promise<number | null> {
  * Reports whether this project's node is up. The port file and pidfile say what
  * was started; `GET /` is the only proof it still answers.
  */
-export async function detectNode(nodeDir: string): Promise<NodeDetection> {
+export async function detectNode(
+  nodeDir: string,
+  probeTimeoutMs = DEFAULT_PROBE_TIMEOUT_MS,
+): Promise<NodeDetection> {
   const port = await readPersistedPort(nodeDir);
   const pid = await readNodePid(nodeDir);
   if (port === null) return { running: false, port: null, pid, state: "down" };
 
   if (!(await ownsNodeAt(port, pid))) return { running: false, port, pid, state: "down" };
 
-  const state = await probeNode(`http://127.0.0.1:${port}`);
+  const state = await probeNode(`http://127.0.0.1:${port}`, probeTimeoutMs);
   return { running: state === "xerj", port, pid, state };
 }
 

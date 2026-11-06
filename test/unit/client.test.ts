@@ -75,9 +75,11 @@ afterEach(() => {
 function client(
   overrides: { timeout?: number; observer?: (status: number) => void; resolver?: ClientResolver } = {},
 ): XerjClient {
-  return new XerjClient("http://127.0.0.1:9200", overrides.timeout, overrides.observer && {
-    onResponse: overrides.observer,
-  }, overrides.resolver);
+  return new XerjClient("http://127.0.0.1:9200", {
+    timeoutMs: overrides.timeout,
+    observer: overrides.observer && { onResponse: overrides.observer },
+    resolver: overrides.resolver,
+  });
 }
 
 describe("XerjClient.info", () => {
@@ -463,7 +465,9 @@ describe("write timeout", () => {
 
   test("a bulk write outlives the short read timeout", async () => {
     stubFetch(slowFetch(80));
-    const subject = new XerjClient("http://127.0.0.1:9240", 20);
+    const subject = new XerjClient("http://127.0.0.1:9240", {
+      timeoutMs: 20,
+    });
 
     // Embedding a document on a neural node takes seconds; a read timeout
     // would abandon the write after it had already been accepted.
@@ -474,7 +478,9 @@ describe("write timeout", () => {
 
   test("a read still gives up on the short timeout", async () => {
     stubFetch(slowFetch(80));
-    const subject = new XerjClient("http://127.0.0.1:9240", 20);
+    const subject = new XerjClient("http://127.0.0.1:9240", {
+      timeoutMs: 20,
+    });
 
     await expect(subject.get("/slow", "slow read")).rejects.toBeDefined();
   });

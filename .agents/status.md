@@ -339,6 +339,32 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: Defaults and timeouts pass. `node.cpus` now defaults to `odd`
+  instead of leaving affinity alone, so every XERJ process shares a CPU subset
+  with the editor by default; an explicit `null` or `"all"` still disables
+  the change, and a malformed value warns and falls back to `odd`.
+  `memory.retain.days` now defaults to 0, which the retention code already
+  treats as unlimited; the 2 GiB size cap still applies. Thirteen timeout keys
+  joined the options: `binary.detectTimeoutMs` (2000),
+  `binary.commandTimeoutMs` (60000), `binary.requestTimeoutMs` (10000),
+  `node.clientTimeoutMs` (5000), `node.writeTimeoutMs` (120000),
+  `node.probeTimeoutMs` (800), `node.startupTimeoutMs` (30000),
+  `node.stopGraceMs` (5000), `remote.fetchTimeoutMs` (10000),
+  `context.recallTimeoutMs` (120), `context.hintTimeoutMs` (150),
+  `prjdocs.requestTimeoutMs` (15000), and `prjdocs.latestTimeoutMs` (5000).
+  `XerjClient` took an options object so the read and write deadlines travel
+  together without a five-argument positional constructor; `EnsureNodeOptions`
+  and `NodeRuntimeOptions` carry the probe, startup, and stop grace values;
+  the binary manager, docs crawler, latest-version resolver, and `xerj_index`
+  URL fetch all read their configured deadline instead of a module constant.
+  The shipped defaults are unchanged, so nothing behaves differently until a
+  key is set. Internal scheduling intervals (retry backoff, heartbeats, poll
+  periods, cache TTLs, debounce, flush delay) stay constants: they schedule
+  work rather than bound an operation. Unit tests grew to 1027 with a timeout
+  block covering defaults, overrides, and clamping; the README options block
+  and parity test carry every new key, and `plan.md` §3 shows `cpus: "odd"`.
+  Typecheck clean. No release was tagged or pushed.
+
 - 2026-11-06: The pre-compaction window archive is implemented. The
   `compaction` hook receives `event.messages` before the host builds its
   summary, so `archive/window.ts` flattens the text and tool-result bodies the

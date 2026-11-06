@@ -7,6 +7,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DEFAULT_CONFIG } from "../../src/config.ts";
+import { formatCpuSpec } from "../../src/node/priority.ts";
 import { parseJsonc } from "../../src/ui/prefs.ts";
 
 const README = join(import.meta.dir, "..", "..", "README.md");
@@ -46,17 +47,28 @@ function completeExample(): Record<string, unknown> {
   throw new Error("the README has no complete options example");
 }
 
+/** DEFAULT_CONFIG with the parsed CPU spec rendered as its config string. */
+function defaultOptions(): Record<string, unknown> {
+  return {
+    ...DEFAULT_CONFIG,
+    node: {
+      ...DEFAULT_CONFIG.node,
+      cpus: formatCpuSpec(DEFAULT_CONFIG.node.cpus),
+    },
+  } as unknown as Record<string, unknown>;
+}
+
 describe("README config example", () => {
   test("lists every default", () => {
     const example = flatten(completeExample());
-    const defaults = flatten(DEFAULT_CONFIG as unknown as Record<string, unknown>);
+    const defaults = flatten(defaultOptions());
 
     expect([...example.keys()].sort()).toEqual([...defaults.keys()].sort());
   });
 
   test("shows each default value", () => {
     const example = flatten(completeExample());
-    const defaults = flatten(DEFAULT_CONFIG as unknown as Record<string, unknown>);
+    const defaults = flatten(defaultOptions());
 
     for (const [key, value] of defaults) {
       expect(example.get(key), key).toEqual(value);

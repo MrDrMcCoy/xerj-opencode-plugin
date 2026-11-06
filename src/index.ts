@@ -199,10 +199,17 @@ export default Plugin.define({
     const observer = { onResponse: (status: number) => {
       if (status === 429) counters.note429();
     } };
+    // Every client carries the configured deadlines, so a slow node or a slow
+    // embed is bounded by one setting rather than a constant per call site.
+    const clientTimeouts = {
+      timeoutMs: config.node.clientTimeoutMs,
+      writeTimeoutMs: config.node.writeTimeoutMs,
+    } as const;
 
     const host = await detectRuntime({
       libc: config.binary.libc,
       target: config.binary.target,
+      timeoutMs: config.binary.detectTimeoutMs,
       env: process.env,
     });
     const info = host.info;
@@ -333,7 +340,10 @@ export default Plugin.define({
       if (!runtime.node) return base;
 
       try {
-        const client = new XerjClient(runtime.node.baseUrl, undefined, observer);
+        const client = new XerjClient(runtime.node.baseUrl, {
+          ...clientTimeouts,
+          observer,
+        });
         const [indices, summary, overview] = await Promise.all([
           client.indices(),
           client.memorySummary(memoryNs).catch(() => null),
@@ -454,8 +464,12 @@ export default Plugin.define({
         }
         const handle = ensured.handle;
 
-        const client = new XerjClient(handle.baseUrl);
-        const latest = new LatestVersions({ logger, signal: shutdown.signal });
+        const client = new XerjClient(handle.baseUrl, clientTimeouts);
+        const latest = new LatestVersions({
+          logger,
+          signal: shutdown.signal,
+          requestTimeoutMs: config.prjdocs.latestTimeoutMs,
+        });
         // Eager mode asks the host for its model and its search provider; both
         // are optional, and the heuristic covers a missing model.
         const wanted =
@@ -504,6 +518,7 @@ export default Plugin.define({
           maxTargets: config.prjdocs.maxTargets,
           maxPages: config.prjdocs.maxPages > 0 ? config.prjdocs.maxPages : undefined,
           signal: shutdown.signal,
+          requestTimeoutMs: config.prjdocs.requestTimeoutMs,
           latestVersion: (ref) => latest.resolve(ref),
           eager: eagerMode,
         });
@@ -527,7 +542,7 @@ export default Plugin.define({
       if (handle === null) return null;
 
       const index = new CommitIndex({
-        client: new XerjClient(handle.baseUrl),
+        client: new XerjClient(handle.baseUrl, clientTimeouts),
         indexName: `${gitPrefix(projectRoot)}-docs`,
         projectRoot,
         statePath: join(nodeDir, "git", "commits.json"),
@@ -550,7 +565,7 @@ export default Plugin.define({
       if (handle === null) return;
 
       await new ArchiveIndex({
-        client: new XerjClient(handle.baseUrl),
+        client: new XerjClient(handle.baseUrl, clientTimeouts),
         indexName: `${archivePrefix(projectRoot)}-docs`,
         directory: join(nodeDir, "archive"),
         statePath: join(nodeDir, "archive", "index.json"),
@@ -603,7 +618,7 @@ export default Plugin.define({
         }
         const handle = ensured.handle;
 
-        const client = new XerjClient(handle.baseUrl);
+        const client = new XerjClient(handle.baseUrl, clientTimeouts);
         const indexer = new SysdocIndexer({
           client,
           prefix: sysdocsPrefix(hostname()),
@@ -712,7 +727,9 @@ export default Plugin.define({
       ledger,
       logger,
       getClient: () =>
-        runtime.node === null ? null : new XerjClient(runtime.node.baseUrl),
+        runtime.node === null
+          ? null
+          : new XerjClient(runtime.node.baseUrl, clientTimeouts),
       getSearch: () => runtime.search,
       getMemory: () => runtime.memory,
       getSpool: () => runtime.spool,
@@ -857,7 +874,7 @@ export default Plugin.define({
      */
     const reconcileMode = async (handle: NodeHandle): Promise<void> => {
       const rebuilt = await reconcileEmbedMode({
-        client: new XerjClient(handle.baseUrl),
+        client: new XerjClient(handle.baseUrl, clientTimeouts),
         nodeDir,
         stateDir: corpusLayout(projectRoot, prefix, stateRoot).stateDir,
         mode: config.index.neural ? EmbedMode.Neural : EmbedMode.Lexical,
@@ -873,7 +890,7 @@ export default Plugin.define({
       // the engine refuses rather than mixing two authorities. Switching
       // `index.graph` therefore rebuilds the project corpus once.
       const reshaped = await reconcileCorpusMode({
-        client: new XerjClient(handle.baseUrl),
+        client: new XerjClient(handle.baseUrl, clientTimeouts),
         nodeDir,
         stateDir: corpusLayout(projectRoot, prefix, stateRoot).stateDir,
         mode: config.index.graph ? "graph" : "flat",
@@ -1018,6 +1035,9 @@ export default Plugin.define({
       logMaxBytes: config.node.logMaxBytes,
       priority: config.node.priority,
       cpus: config.node.cpus,
+      startupTimeoutMs: config.node.startupTimeoutMs,
+      probeTimeoutMs: config.node.probeTimeoutMs,
+      stopGraceMs: config.node.stopGraceMs,
       logger,
       binary: () => runtime.binary,
       onSpawned: () => counters.noteSpawn(),
@@ -1063,10 +1083,19 @@ export default Plugin.define({
       // writing into the directory being moved.
       const legacyNodeDir = projectNodeDir(root, prefix);
       if (await pathExists(legacyNodeDir)) {
-        if ((await detectNode(legacyNodeDir)).running) {
-          await stopNode(legacyNodeDir).catch((error: unknown) => {
-            logger.warn("could not stop the legacy xerj node", String(error));
-          });
+        const legacy = await detectNode(
+          legacyNodeDir,
+          config.node.probeTimeoutMs,
+        );
+        if (legacy.running) {
+          await stopNode(legacyNodeDir, config.node.stopGraceMs).catch(
+            (error: unknown) => {
+              logger.warn(
+                "could not stop the legacy xerj node",
+                String(error),
+              );
+            },
+          );
         }
       }
 
@@ -1157,8 +1186,16 @@ export default Plugin.define({
     const bootstrapRuntime = async (): Promise<void> => {
       // An explicit path wins over download and detection: the user already
       // built or installed a binary, possibly for a platform we do not ship.
+      const binaryTimeouts = {
+        commandMs: config.binary.commandTimeoutMs,
+        requestMs: config.binary.requestTimeoutMs,
+      };
       const binary = config.binary.path
-        ? await externalBinary(config.binary.path, logger)
+        ? await externalBinary(
+            config.binary.path,
+            logger,
+            config.binary.commandTimeoutMs,
+          )
         : info
           ? await ensureBinary({
               root,
@@ -1166,6 +1203,7 @@ export default Plugin.define({
               platform: process.platform,
               info,
               logger,
+              timeouts: binaryTimeouts,
             })
           : null;
       if (!binary) return;
@@ -1173,15 +1211,14 @@ export default Plugin.define({
 
       // The client resolves the node on every call, so services can be built
       // before the node exists and keep working across an idle restart.
-      client = new XerjClient(
-        `http://127.0.0.1:${config.node.port}`,
-        undefined,
+      client = new XerjClient(`http://127.0.0.1:${config.node.port}`, {
+        ...clientTimeouts,
         observer,
-        {
+        resolver: {
           ensure: async () => (await nodes.ensure()).baseUrl,
           invalidate: () => nodes.invalidate(),
         },
-      );
+      });
       runtime.search = new SearchService(
         client,
         [

@@ -688,7 +688,12 @@ export function buildTools(options: ToolOptions): ReadonlyArray<{
         if (!spool) return unavailable();
 
         if (args.url) {
-          const response = await fetch(args.url, { signal: withTimeout(tool.signal, 10_000) });
+          const response = await fetch(args.url, {
+            signal: withTimeout(
+              tool.signal,
+              options.config.remote.fetchTimeoutMs,
+            ),
+          });
           if (!response.ok) {
             return { content: `Fetch failed: HTTP ${response.status}.`, metadata: { xerj: { indexed: false } } };
           }

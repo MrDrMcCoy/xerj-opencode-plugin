@@ -162,7 +162,10 @@ This is the complete set with its defaults, in
           "version": "auto",             // "auto" tracks the newest release
           "path": null,                  // explicit binary; skips download
           "target": null,                // e.g. "aarch64-apple-darwin"
-          "libc": "musl"                 // "musl" or "gnu" on Linux
+          "libc": "musl",                // "musl" or "gnu" on Linux
+          "detectTimeoutMs": 2000,       // host detection commands
+          "commandTimeoutMs": 60000,     // download and local commands
+          "requestTimeoutMs": 10000      // release metadata and checksums
         },
         "storage": {
           "root": null                   // null means <project>/.xerj
@@ -170,12 +173,17 @@ This is the complete set with its defaults, in
         "node": {
           "url": null,                   // attach to this node; never spawn
           "priority": "low",             // "low", "normal", or "high"
-          "cpus": null,                  // "0-3,8", "odd", "even", "50%"
+          "cpus": "odd",                 // "0-3,8", "odd", "even", "50%"
           "logMaxBytes": 8388608,        // 8 MiB; 0 disables rotation
           "port": 9200,
           "dataDir": null,
           "idleMs": 1800000,             // 30 minutes
-          "shutdownOnIdle": true
+          "shutdownOnIdle": true,
+          "clientTimeoutMs": 5000,       // read and search requests
+          "writeTimeoutMs": 120000,      // writes that embed first
+          "probeTimeoutMs": 800,         // one GET / health probe
+          "startupTimeoutMs": 30000,     // spawn to first answer
+          "stopGraceMs": 5000            // SIGTERM to SIGKILL
         },
         "index": {
           "auto": true,
@@ -196,7 +204,8 @@ This is the complete set with its defaults, in
         },
         "remote": {
           "enabled": true,
-          "maxBytes": 2000000
+          "maxBytes": 2000000,
+          "fetchTimeoutMs": 10000        // xerj_index URL fetch
         },
         "context": {
           "enabled": true,
@@ -207,7 +216,9 @@ This is the complete set with its defaults, in
           "rehydrate": true,             // recall passages after a compaction
           "rehydrateTokens": 600,
           "maxPassages": 8,
-          "timeoutMs": 400
+          "timeoutMs": 400,              // retrieval deadline
+          "recallTimeoutMs": 120,        // post-compaction re-read
+          "hintTimeoutMs": 150           // one-line search hint
         },
         "prjdocs": {
           "maxTargets": 40,
@@ -220,7 +231,9 @@ This is the complete set with its defaults, in
           "builtin": true,
           "builtinXerjPages": 200,
           "builtinElasticsearchPages": 2500,
-          "builtinRefreshDays": 7
+          "builtinRefreshDays": 7,
+          "requestTimeoutMs": 15000,     // one page request
+          "latestTimeoutMs": 5000        // one release lookup
         },
         "sysdocs": {
           "maxDocs": 5000,
@@ -232,7 +245,7 @@ This is the complete set with its defaults, in
           "enabled": true,
           "captureTurns": true,
           "retain": {
-            "days": 180,
+            "days": 0,                   // 0 means unlimited
             "maxCount": 0,               // 0 disables the count cap
             "maxBytes": 2147483648       // 2 GiB
           }
@@ -260,14 +273,22 @@ The same entry works with a checkout path instead of the package name; see
 | `binary.path` | Use this binary; skip download, upgrade, and platform checks. |
 | `binary.target` | Explicit release triple, e.g. `aarch64-apple-darwin`. |
 | `binary.libc` | `musl` (default) or `gnu` on Linux. |
+| `binary.detectTimeoutMs` | Deadline for host detection commands such as `sysctl`. Default 2000. |
+| `binary.commandTimeoutMs` | Deadline for the archive download and every local command (`tar`, `--version`). Default 60000. |
+| `binary.requestTimeoutMs` | Deadline for release metadata and checksum requests. Default 10000. |
 | `storage.root` | Per-project XERJ root. Defaults to `<project>/.xerj`; relative paths resolve inside the project, absolute paths may point elsewhere. |
 | `node.url` | Attach to this node and never spawn one. |
 | `node.logMaxBytes` | Size at which `node.log` rotates to `node.log.1`; `0` disables rotation. Default 8 MiB. |
 | `node.priority` | CPU and I/O priority for every XERJ process: `low` (default), `normal`, or `high`. `low` is nice 19 plus idle-class I/O on Linux, the idle priority class on Windows. |
-| `node.cpus` | CPUs every XERJ process may use: a comma-separated list of indices and ranges (`"0-3,8"`), `odd`, `even`, or a percentage of the available CPUs (`"50%"`, rounded down). `null` (default) leaves affinity unchanged. Linux uses `taskset`; Windows uses `ProcessorAffinity`; macOS has no per-process selection and warns once. |
+| `node.cpus` | CPUs every XERJ process may use: a comma-separated list of indices and ranges (`"0-3,8"`), `odd` (default), `even`, or a percentage of the available CPUs (`"50%"`, rounded down). `null` or `"all"` leaves affinity unchanged. Linux uses `taskset`; Windows uses `ProcessorAffinity`; macOS has no per-process selection and warns once. |
 | `node.port` | Preferred port. The supervisor advances it if taken. |
 | `node.idleMs` | Stop this project's node after this long with no session activity. |
 | `node.shutdownOnIdle` | Set false to keep the node up after the last session closes. |
+| `node.clientTimeoutMs` | Deadline for a read or search request to the node. Default 5000. |
+| `node.writeTimeoutMs` | Deadline for a write. A semantic write embeds before it acknowledges, so this is longer than a read. Default 120000. |
+| `node.probeTimeoutMs` | Deadline for one `GET /` health probe. Default 800. |
+| `node.startupTimeoutMs` | How long a spawn waits for the node to answer. Default 30000. |
+| `node.stopGraceMs` | How long a stop waits after SIGTERM before SIGKILL. Default 5000. |
 | `index.auto` | Run project, hidden, and brain indexing on startup. |
 | `index.watch` | Refresh on file changes. Project-local state forces the plugin's own watcher with one-shot index runs; set false for polling only. |
 | `index.brain` | Folders to index as second brains, e.g. `[".agents"]`. |
@@ -284,21 +305,26 @@ The same entry works with a checkout path instead of the package name; see
 | `prjdocs.builtinXerjPages` | Markdown files taken from the XERJ repository. Default 200. |
 | `prjdocs.builtinElasticsearchPages` | Crawl budget for the Elasticsearch reference; 2500 yields about 630 API pages. Default 2500. |
 | `prjdocs.builtinRefreshDays` | Days before the always-on sources are crawled again. Default 7; `0` always refreshes. |
+| `prjdocs.requestTimeoutMs` | Deadline for one documentation page request. Default 15000. |
+| `prjdocs.latestTimeoutMs` | Deadline for one latest-release lookup. Default 5000. |
 | `sysdocs.maxDocs` | Pages indexed per run. Default 5000. |
 | `sysdocs.maxBytesPerDoc` | Bytes kept per page, head first. Default 64 KiB. |
 | `sysdocs.manDirs` | Extra man roots, searched before the machine roots. Empty means `MANPATH` only. |
 | `sysdocs.infoDirs` | Extra info roots, searched before the machine roots. Empty means `INFOPATH` only. |
-| `memory.retain.days` | Days an automatic summary is kept; `0` disables the age cap. |
+| `memory.retain.days` | Days an automatic summary is kept; `0` (default) means unlimited. |
 | `memory.retain.maxCount` | Summaries kept regardless of age; `0` disables the count cap. |
 | `memory.retain.maxBytes` | Bytes of summary text kept; `0` disables the size cap. |
 | `index.graph` | Index the project as one graph corpus (a "super brain"): sections, symbols, `path:line`, and edges. On by default; `false` restores the flat `--no-graph` corpus with the engine's own watcher. A change rebuilds the project corpus once. |
 | `index.semantic` | Include the semantic retrieval leg. |
 | `index.neural` | Embed passages with the node's neural model (`--embed-mode neural`). Set `false` for lexical embeddings. Changing it rebuilds the project index once; neural indexing is roughly ten times slower than lexical. |
 | `remote.enabled` | Spool and index fetched pages. |
+| `remote.fetchTimeoutMs` | Deadline for a URL fetched by `xerj_index`. Default 10000. |
 | `context.enabled` | Inject retrieved context; the kill switch. |
 | `context.maxTokens` | Ceiling for injected passages. |
 | `context.memoryTokens` | Ceiling for injected memories. |
 | `context.timeoutMs` | Retrieval deadline; miss it and inject nothing. |
+| `context.recallTimeoutMs` | Deadline for re-reading the working set after a compaction. Default 120. |
+| `context.hintTimeoutMs` | Deadline for the one-line search hint when the gate rejects a prompt. Default 150. |
 | `context.rehydrate` | After the host compacts a session, re-inject two or three passages from that session's working set once, under a `<xerj-recall>` marker. A fresh retrieval with hits supersedes it. |
 | `context.rehydrateTokens` | Ceiling for the post-compaction recall, in tokens; 0 disables it. |
 | `memory.captureTurns` | Store each substantive turn's final answer (400+ characters) as a `summary` memory, paired with its prompt. Needs `context.enabled`, which records the prompts. |

@@ -1,4 +1,5 @@
 import {
+  formatCpuSpec,
   Priority as NodePriority,
   parseCpuSpec,
   type CpuSpec,
@@ -20,6 +21,12 @@ export interface BinaryOptions {
   readonly target: string | null;
   /** Linux C library flavour of the downloaded build. */
   readonly libc: Libc;
+  /** Deadline for host detection commands such as `sysctl`. */
+  readonly detectTimeoutMs: number;
+  /** Deadline for the archive download and every local command it runs. */
+  readonly commandTimeoutMs: number;
+  /** Deadline for release metadata and checksum requests. */
+  readonly requestTimeoutMs: number;
 }
 
 export interface NodeOptions {
@@ -34,8 +41,9 @@ export interface NodeOptions {
    */
   readonly priority: NodePriority;
   /**
-   * CPUs every XERJ process may use: indices and ranges, `odd`, `even`, or a
-   * percentage of the available CPUs. Null leaves affinity unchanged.
+   * CPUs every XERJ process may use: indices and ranges, `odd` (the default),
+   * `even`, a percentage of the available CPUs, or `null`/`all` for no
+   * affinity change.
    */
   readonly cpus: CpuSpec | null;
   /** Preferred ES-compatible port; the supervisor may advance it. */
@@ -45,6 +53,19 @@ export interface NodeOptions {
   readonly idleMs: number;
   /** Set false to keep the node running after the last session goes quiet. */
   readonly shutdownOnIdle: boolean;
+  /** Deadline for a read or search request to this node. */
+  readonly clientTimeoutMs: number;
+  /**
+   * Deadline for a write. A semantic write embeds before it acknowledges, so
+   * this is far longer than a read.
+   */
+  readonly writeTimeoutMs: number;
+  /** Deadline for one `GET /` health probe. */
+  readonly probeTimeoutMs: number;
+  /** How long a spawn waits for the node to answer. */
+  readonly startupTimeoutMs: number;
+  /** How long a stop waits after SIGTERM before SIGKILL. */
+  readonly stopGraceMs: number;
 }
 
 export interface IndexOptions {
@@ -79,6 +100,8 @@ export interface IndexOptions {
 export interface RemoteOptions {
   readonly enabled: boolean;
   readonly maxBytes: number;
+  /** Deadline for fetching a URL through `xerj_index`. */
+  readonly fetchTimeoutMs: number;
 }
 
 export interface ContextOptions {
@@ -92,7 +115,12 @@ export interface ContextOptions {
   readonly rehydrate: boolean;
   readonly rehydrateTokens: number;
   readonly maxPassages: number;
+  /** Deadline for one retrieval; a miss injects nothing. */
   readonly timeoutMs: number;
+  /** Deadline for re-reading the working set after a compaction. */
+  readonly recallTimeoutMs: number;
+  /** Deadline for the one-line search hint when the gate rejects a prompt. */
+  readonly hintTimeoutMs: number;
 }
 
 export interface PrjdocsOptions {
@@ -127,6 +155,10 @@ export interface PrjdocsOptions {
    * takes minutes, so it runs on this window rather than on every command.
    */
   readonly builtinRefreshDays: number;
+  /** Deadline for one documentation page request. */
+  readonly requestTimeoutMs: number;
+  /** Deadline for one latest-release lookup. */
+  readonly latestTimeoutMs: number;
 }
 
 export interface SysdocsOptions {
@@ -141,7 +173,7 @@ export interface SysdocsOptions {
 }
 
 export interface MemoryRetainOptions {
-  /** Days an automatic summary is kept; 0 disables the age cap. */
+  /** Days an automatic summary is kept; 0 (the default) means unlimited. */
   readonly days: number;
   /** Summaries kept regardless of age; 0 disables the count cap. */
   readonly maxCount: number;
@@ -193,17 +225,30 @@ export interface LoadedConfig {
 }
 
 export const DEFAULT_CONFIG: Config = {
-  binary: { version: "auto", path: null, target: null, libc: "musl" },
+  binary: {
+    version: "auto",
+    path: null,
+    target: null,
+    libc: "musl",
+    detectTimeoutMs: 2_000,
+    commandTimeoutMs: 60_000,
+    requestTimeoutMs: 10_000,
+  },
   storage: { root: null },
   node: {
     url: null,
     priority: NodePriority.Low,
-    cpus: null,
+    cpus: { kind: "odd" },
     logMaxBytes: 8 * 1024 ** 2,
     port: 9200,
     dataDir: null,
     idleMs: 1_800_000,
     shutdownOnIdle: true,
+    clientTimeoutMs: 5_000,
+    writeTimeoutMs: 120_000,
+    probeTimeoutMs: 800,
+    startupTimeoutMs: 30_000,
+    stopGraceMs: 5_000,
   },
   index: {
     auto: true,
@@ -222,7 +267,7 @@ export const DEFAULT_CONFIG: Config = {
     maxBytes: 2 * 1024 ** 3,
     maxMinutes: 10,
   },
-  remote: { enabled: true, maxBytes: 2_000_000 },
+  remote: { enabled: true, maxBytes: 2_000_000, fetchTimeoutMs: 10_000 },
   context: {
     enabled: true,
     maxTokens: 1500,
@@ -233,6 +278,8 @@ export const DEFAULT_CONFIG: Config = {
     rehydrateTokens: 600,
     maxPassages: 8,
     timeoutMs: 400,
+    recallTimeoutMs: 120,
+    hintTimeoutMs: 150,
   },
   prjdocs: {
     maxTargets: 40,
@@ -246,6 +293,8 @@ export const DEFAULT_CONFIG: Config = {
     builtinXerjPages: 200,
     builtinElasticsearchPages: 2500,
     builtinRefreshDays: 7,
+    requestTimeoutMs: 15_000,
+    latestTimeoutMs: 5_000,
   },
   sysdocs: {
     maxDocs: 5000,
@@ -256,7 +305,7 @@ export const DEFAULT_CONFIG: Config = {
   memory: {
     enabled: true,
     captureTurns: true,
-    retain: { days: 180, maxCount: 0, maxBytes: 2 * 1024 ** 3 },
+    retain: { days: 0, maxCount: 0, maxBytes: 2 * 1024 ** 3 },
   },
   stats: { enabled: true, bytesPerToken: 4, maxBaselineBytes: 128 * 1024 },
   telemetry: { anomaly: false },
@@ -294,6 +343,30 @@ export function loadConfig(
       path: readString(binary.path, null),
       target: readTarget(binary.target, warnings),
       libc: readLibc(binary.libc, warnings),
+      detectTimeoutMs: readInteger(
+        binary.detectTimeoutMs,
+        DEFAULT_CONFIG.binary.detectTimeoutMs,
+        100,
+        60_000,
+        "binary.detectTimeoutMs",
+        warnings,
+      ),
+      commandTimeoutMs: readInteger(
+        binary.commandTimeoutMs,
+        DEFAULT_CONFIG.binary.commandTimeoutMs,
+        1_000,
+        3_600_000,
+        "binary.commandTimeoutMs",
+        warnings,
+      ),
+      requestTimeoutMs: readInteger(
+        binary.requestTimeoutMs,
+        DEFAULT_CONFIG.binary.requestTimeoutMs,
+        1_000,
+        600_000,
+        "binary.requestTimeoutMs",
+        warnings,
+      ),
     },
     node: {
       url: readString(node.url, null) ?? (envUrl ? envUrl : null),
@@ -321,6 +394,46 @@ export function loadConfig(
         node.shutdownOnIdle,
         DEFAULT_CONFIG.node.shutdownOnIdle,
         "node.shutdownOnIdle",
+        warnings,
+      ),
+      clientTimeoutMs: readInteger(
+        node.clientTimeoutMs,
+        DEFAULT_CONFIG.node.clientTimeoutMs,
+        100,
+        600_000,
+        "node.clientTimeoutMs",
+        warnings,
+      ),
+      writeTimeoutMs: readInteger(
+        node.writeTimeoutMs,
+        DEFAULT_CONFIG.node.writeTimeoutMs,
+        1_000,
+        3_600_000,
+        "node.writeTimeoutMs",
+        warnings,
+      ),
+      probeTimeoutMs: readInteger(
+        node.probeTimeoutMs,
+        DEFAULT_CONFIG.node.probeTimeoutMs,
+        50,
+        60_000,
+        "node.probeTimeoutMs",
+        warnings,
+      ),
+      startupTimeoutMs: readInteger(
+        node.startupTimeoutMs,
+        DEFAULT_CONFIG.node.startupTimeoutMs,
+        1_000,
+        600_000,
+        "node.startupTimeoutMs",
+        warnings,
+      ),
+      stopGraceMs: readInteger(
+        node.stopGraceMs,
+        DEFAULT_CONFIG.node.stopGraceMs,
+        0,
+        120_000,
+        "node.stopGraceMs",
         warnings,
       ),
     },
@@ -408,6 +521,14 @@ export function loadConfig(
         "remote.maxBytes",
         warnings,
       ),
+      fetchTimeoutMs: readInteger(
+        remote.fetchTimeoutMs,
+        DEFAULT_CONFIG.remote.fetchTimeoutMs,
+        1_000,
+        600_000,
+        "remote.fetchTimeoutMs",
+        warnings,
+      ),
     },
     context: {
       enabled: readBoolean(context.enabled, DEFAULT_CONFIG.context.enabled, "context.enabled", warnings),
@@ -469,6 +590,22 @@ export function loadConfig(
         50,
         30_000,
         "context.timeoutMs",
+        warnings,
+      ),
+      recallTimeoutMs: readInteger(
+        context.recallTimeoutMs,
+        DEFAULT_CONFIG.context.recallTimeoutMs,
+        10,
+        30_000,
+        "context.recallTimeoutMs",
+        warnings,
+      ),
+      hintTimeoutMs: readInteger(
+        context.hintTimeoutMs,
+        DEFAULT_CONFIG.context.hintTimeoutMs,
+        10,
+        30_000,
+        "context.hintTimeoutMs",
         warnings,
       ),
     },
@@ -552,6 +689,22 @@ export function loadConfig(
         0,
         365,
         "prjdocs.builtinRefreshDays",
+        warnings,
+      ),
+      requestTimeoutMs: readInteger(
+        prjdocs.requestTimeoutMs,
+        DEFAULT_CONFIG.prjdocs.requestTimeoutMs,
+        1_000,
+        600_000,
+        "prjdocs.requestTimeoutMs",
+        warnings,
+      ),
+      latestTimeoutMs: readInteger(
+        prjdocs.latestTimeoutMs,
+        DEFAULT_CONFIG.prjdocs.latestTimeoutMs,
+        500,
+        120_000,
+        "prjdocs.latestTimeoutMs",
         warnings,
       ),
     },
@@ -708,18 +861,25 @@ function readPriority(value: unknown, warnings: string[]): NodePriority {
 }
 
 function readCpuSpec(value: unknown, warnings: string[]): CpuSpec | null {
-  if (value === undefined || value === null) return null;
+  const fallback = DEFAULT_CONFIG.node.cpus;
+  if (value === undefined) return fallback;
+  // An explicit null is how a user asks for no affinity change now that the
+  // default pins indexing to the odd CPUs.
+  if (value === null) return null;
   if (typeof value !== "string") {
-    warnings.push("node.cpus must be a string; leaving CPU affinity unchanged");
-    return null;
+    warnings.push(
+      `node.cpus must be a string; using ${formatCpuSpec(fallback)}`,
+    );
+    return fallback;
   }
 
   const parsed = parseCpuSpec(value);
   if (parsed.error !== null) {
     warnings.push(
-      `node.cpus is invalid (${parsed.error}); leaving CPU affinity unchanged`,
+      `node.cpus is invalid (${parsed.error}); ` +
+        `using ${formatCpuSpec(fallback)}`,
     );
-    return null;
+    return fallback;
   }
   return parsed.spec;
 }

@@ -235,6 +235,20 @@ function formatRun(start: number, end: number): string {
   return start === end ? String(start) : `${start}-${end}`;
 }
 
+/** The configuration form of a CPU spec; `all` means no affinity change. */
+export function formatCpuSpec(spec: CpuSpec | null): string {
+  if (spec === null) return "all";
+  switch (spec.kind) {
+    case "list":
+      return formatCpuList(spec.indexes);
+    case "odd":
+    case "even":
+      return spec.kind;
+    case "percent":
+      return `${spec.percent}%`;
+  }
+}
+
 /** Compresses a sorted index set back into the list form `taskset` takes. */
 export function formatCpuList(indexes: ReadonlyArray<number>): string {
   const sorted = [...new Set(indexes)].sort((a, b) => a - b);

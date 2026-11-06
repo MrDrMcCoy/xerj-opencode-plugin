@@ -22,6 +22,8 @@ export interface LatestOptions {
   readonly signal?: AbortSignal;
   /** Seconds a resolved answer is reused within one process. */
   readonly ttlMs?: number;
+  /** Deadline for one release-metadata request. */
+  readonly requestTimeoutMs?: number;
 }
 
 /** Newest published version per technology id, resolved at most once per TTL. */
@@ -60,7 +62,10 @@ export class LatestVersions {
     const url = id === "node" ? NODE_RELEASES : PYTHON_RELEASES;
     const response = await fetchImpl(url, {
       headers: { "user-agent": "xerj-opencode-plugin (documentation indexer)" },
-      signal: mergeSignal(this.options.signal, REQUEST_TIMEOUT_MS),
+      signal: mergeSignal(
+        this.options.signal,
+        this.options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS,
+      ),
     });
     if (!response.ok) return null;
 
@@ -83,7 +88,10 @@ export class LatestVersions {
   private async fetchCudaLatest(fetchImpl: typeof fetch): Promise<string | null> {
     const response = await fetchImpl(CUDA_ARCHIVE, {
       headers: { "user-agent": "xerj-opencode-plugin (documentation indexer)" },
-      signal: mergeSignal(this.options.signal, REQUEST_TIMEOUT_MS),
+      signal: mergeSignal(
+        this.options.signal,
+        this.options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS,
+      ),
     });
     if (!response.ok) return null;
 
@@ -99,7 +107,10 @@ export class LatestVersions {
   private async fetchRocmLatest(fetchImpl: typeof fetch): Promise<string | null> {
     const response = await fetchImpl(ROCM_LATEST, {
       headers: { "user-agent": "xerj-opencode-plugin (documentation indexer)" },
-      signal: mergeSignal(this.options.signal, REQUEST_TIMEOUT_MS),
+      signal: mergeSignal(
+        this.options.signal,
+        this.options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS,
+      ),
     });
     if (!response.ok) return null;
 
