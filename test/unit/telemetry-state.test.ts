@@ -4,6 +4,8 @@ import {
   serviceState,
   stateBadge,
   stateGlyph,
+  StateTracker,
+  type StateSink,
 } from "../../src/telemetry/state.ts";
 import { JobKind, type JobView } from "../../src/telemetry/types.ts";
 
@@ -112,6 +114,66 @@ describe("JobRegistry", () => {
     expect(registry.load).toBe(0);
     expect(registry.load).toBe(0);
     expect(stale.length).toBe(1);
+  });
+});
+
+describe("StateTracker", () => {
+  function sink(): { calls: string[]; write: StateSink } {
+    const calls: string[] = [];
+    return {
+      calls,
+      write: {
+        noteState: (from, to, at, detail) =>
+          calls.push(`${from}->${to}@${at}:${detail ?? ""}`),
+      },
+    };
+  }
+
+  test("a deferred view records nothing", () => {
+    const log = sink();
+    const tracker = new StateTracker(log.write, "starting", 1_000);
+
+    const view = tracker.view({ name: "ready", detail: null }, 1_500);
+    expect(view).toEqual({ name: "ready", since: 1_500, detail: null });
+    expect(log.calls).toEqual([]);
+  });
+
+  test("settling the same state twice records one transition", () => {
+    const log = sink();
+    const tracker = new StateTracker(log.write, "starting", 1_000);
+
+    tracker.settle({ name: "ready", detail: null }, 1_500);
+    tracker.settle({ name: "ready", detail: null }, 2_000);
+
+    expect(log.calls).toEqual(["starting->ready@1500:"]);
+  });
+
+  test("a disagreeing first pass cannot log a transition pair", () => {
+    const log = sink();
+    const tracker = new StateTracker(log.write, "starting", 1_000);
+
+    // One snapshot: the base pass lacks the node, then the full pass finds a
+    // corpus whose index is gone and settles on degraded.
+    tracker.view({ name: "ready", detail: null }, 1_500);
+    tracker.settle({ name: "degraded", detail: "web index missing" }, 1_505);
+    expect(log.calls).toEqual(["starting->degraded@1505:web index missing"]);
+
+    // The next snapshot sees the same disagreement and records nothing.
+    tracker.view({ name: "ready", detail: null }, 2_000);
+    tracker.settle({ name: "degraded", detail: "web index missing" }, 2_005);
+    expect(log.calls).toHaveLength(1);
+  });
+
+  test("a settled view keeps the original timestamp", () => {
+    const log = sink();
+    const tracker = new StateTracker(log.write, "starting", 1_000);
+    tracker.settle({ name: "ready", detail: null }, 1_500);
+
+    expect(tracker.view({ name: "ready", detail: null }, 9_000)).toEqual({
+      name: "ready",
+      since: 1_500,
+      detail: null,
+    });
   });
 });
 

@@ -101,12 +101,17 @@ import {
   noteNodeCrash,
 } from "./telemetry/lifecycle.ts";
 import { ProcessSampler, type SampleTarget } from "./telemetry/sampler.ts";
-import { JobRegistry, serviceState } from "./telemetry/state.ts";
+import {
+  JobRegistry,
+  serviceState,
+  SettleMode,
+  StateTracker,
+} from "./telemetry/state.ts";
 import {
   TelemetryStore,
   type TelemetryReport,
 } from "./telemetry/store.ts";
-import { JobKind, type OpType, type ServiceState } from "./telemetry/types.ts";
+import { JobKind, type OpType } from "./telemetry/types.ts";
 import { buildTools } from "./tools/search.ts";
 
 interface Runtime {
@@ -337,10 +342,7 @@ export default Plugin.define({
 
     // The current state and when it began; a transition is recorded even when
     // it lasts a second, so the day's dwell split is not guesswork.
-    const stateNow: { name: ServiceState; since: number } = {
-      name: "starting",
-      since: Date.now(),
-    };
+    const states = new StateTracker(telemetry);
 
     /** Maps the report store's shape onto the RPC status shape. */
     // The status is polled from several places and reads the whole op log, so
@@ -411,12 +413,17 @@ export default Plugin.define({
     /**
      * One source for the badge. Precedence lives in `serviceState`, so the
      * sidebar, the panel, and the report read the same answer.
+     *
+     * A snapshot builds it twice: `Defer` for the pass that only knows the run
+     * records, `Record` for the pass that read the datasets. Recording both
+     * would log a false transition pair on every poll where they disagree.
      */
     const stateStatus = (
       corpora: ReadonlyArray<CorpusHealth>,
       memoryExists: boolean,
       nodePhase: "starting" | "ready" | "error" | "disabled",
       nodeState: "stopped" | "starting" | "running" | "error",
+      mode: SettleMode,
     ): StatusSnapshot["state"] => {
       const active = jobs.jobs();
       const result = serviceState({
@@ -432,19 +439,15 @@ export default Plugin.define({
         memoryExists,
         jobs: active,
       });
-
-      const now = Date.now();
-      if (result.name !== stateNow.name) {
-        const from = stateNow.name;
-        stateNow.name = result.name;
-        stateNow.since = now;
-        telemetry.noteState(from, result.name, now, result.detail);
-      }
+      const view =
+        mode === SettleMode.Record
+          ? states.settle(result)
+          : states.view(result);
 
       return {
-        name: result.name,
-        since: stateNow.since,
-        detail: result.detail,
+        name: view.name,
+        since: view.since,
+        detail: view.detail,
         jobs: active,
         today: {
           startingMs: telemetry.dwellFor("starting"),
@@ -522,7 +525,13 @@ export default Plugin.define({
         corpora: baseCorpora,
         // The memory check needs the node, which this base path has not
         // reached. Unknown is not missing: accusing flashed `degraded`.
-        state: stateStatus(baseCorpora, true, runtime.phase, nodeState),
+        state: stateStatus(
+          baseCorpora,
+          true,
+          runtime.phase,
+          nodeState,
+          SettleMode.Defer,
+        ),
         telemetry: await telemetryStatus(),
         // The engine data and the node log were invisible before: a project
         // could occupy gigabytes with only document counts to show for it.
@@ -542,7 +551,18 @@ export default Plugin.define({
         embeddings: false,
       };
 
-      if (!runtime.node) return base;
+      if (!runtime.node) {
+        return {
+          ...base,
+          state: stateStatus(
+            baseCorpora,
+            true,
+            runtime.phase,
+            nodeState,
+            SettleMode.Record,
+          ),
+        };
+      }
 
       try {
         const client = new XerjClient(runtime.node.baseUrl, {
@@ -621,6 +641,7 @@ export default Plugin.define({
             memoryExists(summary, datasets),
             runtime.phase,
             nodeState,
+            SettleMode.Record,
           ),
           map,
           frameworks,
@@ -658,6 +679,7 @@ export default Plugin.define({
             base.memory.exists,
             runtime.phase,
             nodeState,
+            SettleMode.Record,
           ),
           errors: [...base.errors, String(error)],
         };

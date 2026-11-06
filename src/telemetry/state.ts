@@ -168,3 +168,71 @@ export function stateGlyph(state: ServiceState): string {
       return "●";
   }
 }
+
+/** What a status snapshot asks the tracker to do with a computed state. */
+export enum SettleMode {
+  /** Record a transition when the state changed since the last record. */
+  Record = "record",
+  /** Compute only; a later pass of the same snapshot settles it. */
+  Defer = "defer",
+}
+
+/** The one side effect a tracker needs: a recorded transition. */
+export interface StateSink {
+  noteState(
+    from: ServiceState,
+    to: ServiceState,
+    at: number,
+    detail?: string | null,
+  ): void;
+}
+
+/** A state as the UI should render it. */
+export interface StateView {
+  readonly name: ServiceState;
+  readonly since: number;
+  readonly detail: string | null;
+}
+
+/**
+ * The current state and when it began.
+ *
+ * A snapshot computes the state twice: once from run records before the node
+ * is asked, and once from the datasets after. The first pass cannot see a
+ * missing index, so recording it logged a false `ready -> degraded` pair on
+ * every poll where the second pass disagreed. Only the settled answer is
+ * recorded; a deferred view is free.
+ */
+export class StateTracker {
+  private current: ServiceState;
+  private since: number;
+
+  constructor(
+    private readonly sink: StateSink,
+    start: ServiceState = "starting",
+    now: number = Date.now(),
+  ) {
+    this.current = start;
+    this.since = now;
+  }
+
+  /** The state to render, without recording anything. */
+  view(result: ServiceStateResult, now: number = Date.now()): StateView {
+    return {
+      name: result.name,
+      since: result.name === this.current ? this.since : now,
+      detail: result.detail,
+    };
+  }
+
+  /** Records the one state a snapshot settles on; idempotent per state. */
+  settle(result: ServiceStateResult, now: number = Date.now()): StateView {
+    if (result.name !== this.current) {
+      const from = this.current;
+      this.current = result.name;
+      this.since = now;
+      this.sink.noteState(from, result.name, now, result.detail);
+    }
+    return this.view(result, now);
+  }
+}
