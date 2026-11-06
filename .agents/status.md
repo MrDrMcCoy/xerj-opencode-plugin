@@ -384,10 +384,16 @@ publish, and live TUI verification remain.
   removes the whole journal root, and a test asserts a sibling corpus's journal
   goes with it.
 
+  Running the integration suite then found that the registration-time
+  wrapper had been calling every tool with one argument, dropping the context
+  that carries the session id and the abort signal. Every measured tool had
+  lost both since telemetry landed. The wrapper moved to
+  `src/tools/measure.ts`, forwards both arguments, and has its own tests.
+
   This closes status item 3. The live server still runs the module from before
   the fix, so the logged flap continues until the next OpenCode restart; the
-  config loads the working tree, so a restart picks it up. 1082 unit tests
-  pass; typecheck clean.
+  config loads the working tree, so a restart picks it up. 1085 unit and 12
+  integration tests pass; typecheck clean.
 
 - 2026-11-06: Local telemetry confirmed live after an OpenCode restart. The
   store appears at `~/.local/share/opencode/xerj/telemetry`: `ops.ndjson`
