@@ -110,6 +110,63 @@ describe("CorpusService plain runs", () => {
     expect(instance.snapshot().lastRun).toBeNull();
     expect(await store.get(key)).toBeNull();
   });
+
+  test("a no-op pass restamps a stored run", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "xerj-noop-"));
+    const store = storage();
+    const key = "index/lastRun:xop-web-87654321";
+    await store.set(key, { at: 1, records: 5, generation: 2 });
+
+    const instance = new CorpusService({
+      binaryPath: fakeBinary("#!/bin/sh\nexit 0\n"),
+      nodeUrl: "http://127.0.0.1:9200",
+      projectRoot,
+      prefix: "xop-web-87654321",
+      stateRoot: join(projectRoot, ".xerj"),
+      config: {
+        ...DEFAULT_CONFIG,
+        index: { ...DEFAULT_CONFIG.index, watch: false, periodicMs: 60_000 },
+      },
+      storage: store,
+      logger,
+    });
+    running.push(instance);
+
+    // The engine prints no run document when its source has no files, and the
+    // restored record is restamped so freshness still means "last scanned".
+    await instance.start();
+    const run = instance.snapshot().lastRun;
+    expect(run?.records).toBe(5);
+    expect(run?.at).toBeGreaterThan(1);
+  });
+
+  test("a cleared run is not resurrected by the first pass", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "xerj-cleared-"));
+    const store = storage();
+    const key = "index/lastRun:xop-web-11223344";
+    await store.set(key, { at: 1, records: 5, generation: 2 });
+
+    const instance = new CorpusService({
+      binaryPath: fakeBinary("#!/bin/sh\nexit 0\n"),
+      nodeUrl: "http://127.0.0.1:9200",
+      projectRoot,
+      prefix: "xop-web-11223344",
+      stateRoot: join(projectRoot, ".xerj"),
+      config: {
+        ...DEFAULT_CONFIG,
+        index: { ...DEFAULT_CONFIG.index, watch: false, periodicMs: 60_000 },
+      },
+      storage: store,
+      logger,
+    });
+    running.push(instance);
+
+    await instance.clearRun();
+    await instance.start();
+
+    expect(instance.snapshot().lastRun).toBeNull();
+    expect(await store.get(key)).toBeNull();
+  });
 });
 
 describe("CorpusService watch ownership", () => {

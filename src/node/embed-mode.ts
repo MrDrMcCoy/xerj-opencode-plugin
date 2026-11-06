@@ -37,10 +37,16 @@ export async function readEmbedMode(nodeDir: string): Promise<EmbedMode> {
 export async function reconcileEmbedMode(options: {
   readonly client: XerjClient;
   readonly nodeDir: string;
-  readonly stateDir: string;
+  /**
+   * Directory holding every autoindex journal, one subdirectory per corpus
+   * prefix. A mode change drops indices for all of them, so all their journals
+   * are stale: a journal that outlives its index makes the next pass replay an
+   * old run document and never rebuild anything.
+   */
+  readonly journalRoot: string;
   readonly mode: EmbedMode;
 }): Promise<boolean> {
-  const { client, nodeDir, stateDir, mode } = options;
+  const { client, nodeDir, journalRoot, mode } = options;
   const recorded = await readEmbedMode(nodeDir);
   if (recorded === mode) return false;
 
@@ -54,8 +60,8 @@ export async function reconcileEmbedMode(options: {
     if (!index.startsWith(PLUGIN_INDEX_PREFIX)) continue;
     await client.deleteIndex(index);
   }
-  // The journal records documents the dropped indices held, so it goes too.
-  await rm(stateDir, { recursive: true, force: true });
+  // Every journal under this root describes documents a dropped index held.
+  await rm(journalRoot, { recursive: true, force: true });
   await writeFile(embedModePath(nodeDir), mode, { mode: 0o600 });
   return true;
 }

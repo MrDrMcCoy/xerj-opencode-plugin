@@ -29,14 +29,14 @@ function stubClient(indices: string[]): StubClient {
 describe("embedding mode reconciliation", () => {
   let root: string;
   let nodeDir: string;
-  let stateDir: string;
+  let journalRoot: string;
 
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), "opencode-embed-mode-"));
     nodeDir = join(root, "node");
-    stateDir = join(root, "state");
+    journalRoot = join(root, "state");
     await mkdir(nodeDir, { recursive: true });
-    await mkdir(stateDir, { recursive: true });
+    await mkdir(journalRoot, { recursive: true });
   });
 
   afterEach(async () => {
@@ -54,7 +54,7 @@ describe("embedding mode reconciliation", () => {
     const rebuilt = await reconcileEmbedMode({
       client,
       nodeDir,
-      stateDir,
+      journalRoot,
       mode: EmbedMode.Neural,
     });
 
@@ -62,24 +62,38 @@ describe("embedding mode reconciliation", () => {
     expect(deleted).toEqual([]);
   });
 
-  test("a changed mode drops plugin indices and the journal", async () => {
-    await writeFile(join(stateDir, "journal.ndjson"), "{}");
+  test("a changed mode drops plugin indices and every journal", async () => {
+    const projectJournal = join(journalRoot, "xop-proj-1234");
+    const webJournal = join(journalRoot, "xop-web-1234");
+    await mkdir(projectJournal, { recursive: true });
+    await mkdir(webJournal, { recursive: true });
+    await writeFile(join(projectJournal, "journal.ndjson"), "{}");
+    await writeFile(join(webJournal, "journal.ndjson"), "{}");
+
     const { client, deleted } = stubClient([
-      "xop-proj-docs",
-      "xop-web-docs",
+      "xop-proj-1234-docs",
+      "xop-web-1234-docs",
       "autoindex-catalog",
     ]);
 
     const rebuilt = await reconcileEmbedMode({
       client,
       nodeDir,
-      stateDir,
+      journalRoot,
       mode: EmbedMode.Neural,
     });
 
     expect(rebuilt).toBe(true);
-    expect(deleted).toEqual(["xop-proj-docs", "xop-web-docs"]);
-    await expect(readFile(join(stateDir, "journal.ndjson"), "utf8")).rejects.toThrow();
+    expect(deleted).toEqual(["xop-proj-1234-docs", "xop-web-1234-docs"]);
+    // A journal that outlives its index makes the next pass replay an old run
+    // document and never rebuild the index, which is how the web corpus was
+    // silently stranded. Every dropped corpus loses its journal, not one.
+    await expect(
+      readFile(join(projectJournal, "journal.ndjson"), "utf8"),
+    ).rejects.toThrow();
+    await expect(
+      readFile(join(webJournal, "journal.ndjson"), "utf8"),
+    ).rejects.toThrow();
     expect(await readEmbedMode(nodeDir)).toBe(EmbedMode.Neural);
   });
 
@@ -90,7 +104,12 @@ describe("embedding mode reconciliation", () => {
     await writeFile(join(memoryDir, "segment.bin"), "memory-bytes");
     const { client, deleted } = stubClient([memoryName]);
 
-    await reconcileEmbedMode({ client, nodeDir, stateDir, mode: EmbedMode.Neural });
+    await reconcileEmbedMode({
+      client,
+      nodeDir,
+      journalRoot,
+      mode: EmbedMode.Neural,
+    });
 
     expect(deleted).toEqual([memoryName]);
     const backup = join(nodeDir, "embed-backup", EmbedMode.Lexical, memoryName, "segment.bin");
@@ -99,12 +118,17 @@ describe("embedding mode reconciliation", () => {
 
   test("the new mode is recorded so the next start matches", async () => {
     const { client } = stubClient([]);
-    await reconcileEmbedMode({ client, nodeDir, stateDir, mode: EmbedMode.Neural });
+    await reconcileEmbedMode({
+      client,
+      nodeDir,
+      journalRoot,
+      mode: EmbedMode.Neural,
+    });
 
     const again = await reconcileEmbedMode({
       client,
       nodeDir,
-      stateDir,
+      journalRoot,
       mode: EmbedMode.Neural,
     });
     expect(again).toBe(false);

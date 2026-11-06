@@ -1239,7 +1239,7 @@ export default Plugin.define({
       const rebuilt = await reconcileEmbedMode({
         client: new XerjClient(handle.baseUrl, clientTimeouts),
         nodeDir,
-        stateDir: corpusLayout(projectRoot, prefix, stateRoot).stateDir,
+        journalRoot: join(engineDataDir, "state"),
         mode: config.index.neural ? EmbedMode.Neural : EmbedMode.Lexical,
       }).catch((error: unknown) => {
         logger.warn("could not reconcile the embedding mode", {
