@@ -122,6 +122,11 @@ export interface CorpusHealth {
   readonly error: string | null;
 }
 
+export interface DiskStatus {
+  readonly engineBytes: number;
+  readonly logBytes: number;
+}
+
 export interface StatusSnapshot {
   readonly pluginVersion: string;
   readonly updatedAt: number;
@@ -133,6 +138,8 @@ export interface StatusSnapshot {
   readonly memory: MemoryStatus;
   readonly brains: ReadonlyArray<BrainStatus>;
   readonly corpora: ReadonlyArray<CorpusHealth>;
+  /** Bytes on disk for the engine data and the node log. */
+  readonly disk: DiskStatus;
   readonly counters: CounterStatus;
   readonly recent: ReadonlyArray<string>;
   readonly warnings: ReadonlyArray<string>;
@@ -257,6 +264,10 @@ const definition = {
             error: { type: ["string", "null"] },
           }),
         },
+        disk: object({
+          engineBytes: { type: "number" },
+          logBytes: { type: "number" },
+        }),
         corpora: {
           type: "array",
           items: object({

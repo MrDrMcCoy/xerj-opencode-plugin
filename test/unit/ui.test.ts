@@ -72,6 +72,7 @@ function snapshot(overrides: Partial<StatusSnapshot> = {}): StatusSnapshot {
     },
     memory: { namespace: "proj-demo-1a2b3c4d", count: 2 },
     brains: [],
+    disk: { engineBytes: 1024, logBytes: 2048 },
     corpora: [
       { name: "project", state: "watching", docs: 12, lastRunAt: 1, records: 40, error: null },
       { name: "hidden", state: "watching", docs: 4, lastRunAt: 1, records: null, error: null },
@@ -157,6 +158,14 @@ describe("sidebarLines", () => {
 });
 
 describe("panelSections", () => {
+  test("the index section reports what the data occupies", () => {
+    const index = panelSections(snapshot(), NOW).find((section) => section.title === "Index");
+    const text = index?.lines.join("\n") ?? "";
+
+    expect(text).toContain("engine 1.0 KB");
+    expect(text).toContain("log 2.0 KB");
+  });
+
   test("covers every section of the details panel", () => {
     const sections = panelSections(snapshot(), NOW);
     const titles = sections.map((section) => section.title);

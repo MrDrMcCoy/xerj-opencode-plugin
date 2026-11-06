@@ -5,6 +5,7 @@
 import { existsSync } from "node:fs";
 import { mkdir, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { directoryBytes, fileBytes } from "./disk.ts";
 import { Plugin } from "@opencode/plugin";
 import { detectRuntime } from "./binary/detect.ts";
 import { ensureBinary, externalBinary, type InstalledBinary } from "./binary/manager.ts";
@@ -30,6 +31,7 @@ import {
   isOverbroadRoot,
   memoryNamespace,
   nodeDataDir,
+  nodeLogPath,
   projectNodeDir,
   projectPath,
   projectStateDir,
@@ -280,6 +282,14 @@ export default Plugin.define({
         memory: { namespace: memoryNs, count: 0 },
         brains: brainStatus(runtime.brain, runtime.brains),
         corpora: corpusHealth(runtime),
+        // The engine data and the node log were invisible before: a project
+        // could occupy gigabytes with only document counts to show for it.
+        disk: {
+          engineBytes: await directoryBytes(engineDataDir),
+          logBytes:
+            (await fileBytes(nodeLogPath(nodeDir))) +
+            (await fileBytes(`${nodeLogPath(nodeDir)}.1`)),
+        },
         counters: counters.snapshot(),
         recent: await recentMessages(logger),
         warnings: runtime.warnings,

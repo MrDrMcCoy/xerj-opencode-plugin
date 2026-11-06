@@ -162,6 +162,7 @@ export function panelSections(snapshot: StatusSnapshot, now: number): PanelSecti
             ? `${index.lastRecords ?? 0} records`
             : `${formatCount(index.lastFiles)} files → ${formatCount(index.lastRecords ?? 0)} records`,
         ].join(" · "),
+        `engine ${formatBytes(snapshot.disk.engineBytes)} · log ${formatBytes(snapshot.disk.logBytes)}`,
       ],
     },
     {
