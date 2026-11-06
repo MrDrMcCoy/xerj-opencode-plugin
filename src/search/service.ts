@@ -181,7 +181,9 @@ export class SearchService {
     const resolved = dropDuplicateLocations(await this.resolveLines(located, trimmed));
     const shadowed = dropShadowedWholeFiles(resolved, this.hiddenIndex, this.brainSpecs);
     const candidates =
-      options.surface === "context" ? limitPerFile(shadowed, MAX_HITS_PER_FILE) : shadowed;
+      options.surface === "context"
+        ? limitPerFile(shadowed, MAX_HITS_PER_FILE)
+        : shadowed;
     const exclude = options.exclude;
     const hits = (exclude ? candidates.filter((hit) => !exclude(hit)) : candidates).slice(0, k);
     const related = this.brains ? await this.brains.related(hits, options.signal) : [];
