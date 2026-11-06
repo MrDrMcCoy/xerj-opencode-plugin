@@ -339,6 +339,19 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: Toolchains assumed present (0.7.0 plan). The installer no longer
+  treats a missing compiler as a reason to withhold a language: gopls and
+  clangd publish their own binaries, so the server installs and loads whether
+  or not `go` or `clang` exists, and no preflight check looks for them. If a
+  server later needs its compiler, the first query returns that server's own
+  error for that language and every other language keeps working; the panel
+  names the failure. The compilers themselves remain the project's dependency
+  management and are never installed. clangd's size is flagged as large (it
+  ships inside LLVM release archives) and is measured before a version is
+  pinned. Risks gained the load-without-toolchain case and the
+  loads-but-cannot-answer case, replacing the old preflight row; the non-goal
+  now says the plugin never gates a language on the toolchain being present.
+
 - 2026-11-06: LSP servers auto-detect and auto-install (0.7.0 plan). With
   `analysis.lsp.servers` empty, the plugin now detects the project's languages
   and resolves a server in one order: the configured command, the project's

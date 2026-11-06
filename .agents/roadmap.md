@@ -125,7 +125,7 @@ started, no port is opened, and no network call is made.
 | You enable | What it detects and fetches, with every other key left at default |
 |---|---|
 | `analysis.treeSitter.enabled` | Languages from the project's files, the same detection the docs indexer already runs. Grammars for those languages download once, checksum-verified, into `<data root>/grammars/<language>/`, and every later parse reads the cache. A failed download logs once, names the language, and disables only that language |
-| `analysis.lsp.enabled` | Detects the project's languages, then resolves a server for each: `servers[language]`, then the project's `node_modules/.bin`, then `PATH`, then the plugin's own cache. If none is found and `autoInstall` is true, it installs a pinned server into `<data root>/lsp/<language>/<version>/`, probes it with `--version`, and uses it. A language with no installable server logs once and stays unanalysed |
+| `analysis.lsp.enabled` | Detects the project's languages, then resolves a server for each: `servers[language]`, then the project's `node_modules/.bin`, then `PATH`, then the plugin's own cache. If none is found and `autoInstall` is true, it installs a pinned server into `<data root>/lsp/<language>/<version>/`, probes it with `--version`, and uses it. No toolchain check runs first; a language with no known server logs once and stays unanalysed |
 | `share.enabled` | Nothing until `xerj_share` is invoked. The tool then prints the address and expiry before it accepts a request |
 | `hub.enabled` | The cached catalogue only. `hub.network` adds downloads; until then, a missing pack reports which key would fetch it |
 
@@ -157,12 +157,19 @@ Measured from the registry on 2026-11-06. The npm set together is about
 | YAML | `yaml-language-server` | 1.2 MB | npm |
 | Shell | `bash-language-server` | 2.3 MB | npm |
 | Rust | `rust-analyzer` | release asset | GitHub releases |
-| Go | `gopls` | — | needs the project's Go toolchain |
-| C, C++ | `clangd` | — | needs the OS LLVM package |
+| Go | `gopls` | release asset | GitHub releases |
+| C, C++ | `clangd` | LLVM release asset | LLVM releases |
 
-A language whose server needs a compiler the project does not have stays
-unanalysed, with one warning naming the missing toolchain. Installing Go or
-LLVM is the project's dependency management, not this plugin's.
+**Toolchains are assumed present.** The plugin does not check for `go`,
+`cargo`, or `clang` before loading a server, and a missing compiler never
+suppresses a language. gopls and clangd publish their own binaries, so the
+server installs whether or not the toolchain does. If a server later needs
+its compiler and does not find one, the first query returns that server's own
+error for that language, and every other language keeps working.
+
+The compilers themselves are not installed: that stays the project's
+dependency management. clangd arrives inside LLVM release archives, which are
+large, so its size is measured before a version is pinned.
 
 Four safety rules for an install:
 
@@ -287,7 +294,7 @@ Ship these first. None adds a runtime, a grammar, or a write path.
 | Not doing | Why |
 |---|---|
 | Desktop app | A separate binary over another plugin's database; not a plugin feature |
-| Installing a language toolchain (Go, Rust, LLVM) | A server can be fetched; the compiler and sysroot it needs belong to the project. The plugin installs the server and reports the missing toolchain |
+| Installing a language toolchain (Go, Rust, LLVM) | The compiler and sysroot belong to the project and are assumed to be there. The plugin installs the server, never the toolchain, and never gates a language on the toolchain's presence |
 | Bash detach, wait, notifications | The host owns the shell; a second one competes with it |
 | Silent field reports | Sends data outward; opt-in at most, never automatic |
 | Bundling grammars in the npm package | 50 to 100 MB and a per-platform native build matrix |
@@ -309,7 +316,8 @@ Ship these first. None adds a runtime, a grammar, or a write path.
 | Retrieval slows down | Every new query path is measured against the 400 ms budget; a path that misses it becomes a tool, not an injection |
 | Scope creep | One plugin owning search, analysis, archive, and memory is large; each tier lands as a release with its own coverage gate |
 | A gate opens without a decision | Gates default to closed, an upgrade never turns one on, and the panel prints the key that is closed |
-| A gate is open but its toolchain is missing | One probe at enable time; a missing server or grammar logs once, names the key, and leaves the capability off rather than retrying per call |
+| A gate is open but its toolchain is missing | No preflight check. The server loads or installs anyway, and the first query that needs the compiler reports that server's own error for that language alone |
+| A server loads but cannot answer | One error per language, cached for the session, and the panel names it; other languages keep answering |
 | A gated tool leaks memory or processes | The LSP pool has an idle stop and a server cap; a test asserts zero surviving processes after teardown |
 | An installed server is compromised | Pinned version and checksum, `--ignore-scripts` on npm installs, and a `--version` probe before first use |
 | Installed servers fill the disk | Measured at about 26 MB for the npm set; the panel reports each install and a cache purge removes them |
