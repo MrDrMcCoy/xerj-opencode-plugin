@@ -339,6 +339,23 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: Root cause of the `/xerj-prjdocs` failure found and fixed. It was
+  never the node or the crawler: `valueSchema` marked every declared property as
+  required, so the host rejected the call with `rpc.invalid_input` before the
+  handler ran. The command sends `{}` for an ordinary run, but the schema
+  demanded `eager`, and in the working tree also `keywords`; `/xerj-wrapup` had
+  the same fault with `sessionID`. Reproduced against the live server on 0.7.0:
+  `{"input":{}}` answers `Missing key at ["eager"]`. So a normal
+  `/xerj-prjdocs` never worked through the RPC in any published version, and it
+  left no trace because the rejection happens outside the plugin.
+  `valueSchema`/`object` now accept the optional keys; the unit suite validates
+  the exact payloads the TUI sends against the same definition the host uses,
+  and the TUI stub client validates every call. Verified end to end on a
+  private server: `{}` now returns `{"targets":1,"indexed":1,...}`. Also fixed
+  `describe()` to read the plain `{type, message}` shape the RPC client throws,
+  which otherwise printed `[object Object]`. 965 unit and 12 integration tests
+  pass, typecheck clean.
+
 - 2026-11-06: `/xerj-prjdocs` failed in another project with a generic toast.
   The message was the defect: every command catch discarded the reason, so
   "could not read project documentation" could have been an unavailable RPC, a
