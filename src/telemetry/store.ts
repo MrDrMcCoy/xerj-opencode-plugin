@@ -123,6 +123,8 @@ const QUEUE_LIMIT = 5_000;
 const SWEEP_INTERVAL_MS = 10 * 60_000;
 const SIZE_CACHE_MS = 60_000;
 const STALE_LOCK_MS = 60_000;
+/** Below this, a growth rate would be an extrapolation, not a measurement. */
+const MIN_GROWTH_SPAN_MS = 60 * 60_000;
 const MARKER_MAX_AGE_MS = 7 * 24 * 60 * 60_000;
 const README = `XERJ telemetry
 
@@ -150,6 +152,8 @@ export class TelemetryStore {
   private rollupDate = dayKey(Date.now());
   /** Cumulative today, so the panel reads the day and not one flush window. */
   private dayDwell: StateDwell = ZERO_DWELL;
+  /** The state the service is in now; its interval is not closed yet. */
+  private currentState: ServiceState = "starting";
   private opsBytes = 0;
   private timer: ReturnType<typeof setInterval> | null = null;
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
@@ -272,7 +276,7 @@ export class TelemetryStore {
   /** One CPU and RSS sample; the sampler owns the cadence. */
   sample(record: SampleRecord): void {
     if (!this.enabled || this.broken) return;
-    this.samples.push(record);
+    this.samples.push({ prefix: this.options.prefix, ...record });
     if (this.samples.length > QUEUE_LIMIT) this.samples.shift();
   }
 
@@ -283,6 +287,7 @@ export class TelemetryStore {
     const dwell = this.todayDwell();
     const elapsed = Math.max(0, at - (this.lastTransitionAt ?? at));
     this.lastTransitionAt = at;
+    this.currentState = to;
     this.dayDwell = addDwell(this.dayDwell, from, elapsed);
     this.rollup.states = addDwell(dwell, from, elapsed);
     this.record("lifecycle.state", 0, true, {
@@ -294,7 +299,13 @@ export class TelemetryStore {
 
   /** Milliseconds spent in the given state today, as this process saw it. */
   dwellFor(state: ServiceState): number {
-    return dwellValue(this.dayDwell, state);
+    return dwellValue(this.dayDwell, state) + this.pendingDwell(state);
+  }
+
+  /** The open interval of the current state, which no transition closed yet. */
+  private pendingDwell(state: ServiceState): number {
+    if (state !== this.currentState || this.lastTransitionAt === null) return 0;
+    return Math.max(0, Date.now() - this.lastTransitionAt);
   }
 
   async flush(): Promise<void> {
@@ -624,19 +635,25 @@ export class TelemetryStore {
       () => [] as string[],
     );
 
+    // One instance per location, so only this one's rollups describe the day
+    // this panel shows; summing a peer's would count the same wall time twice.
+    const mine = `${this.options.instance}.json`;
     let total = ZERO_DWELL;
     for (const date of dates) {
       const dayStart = Date.parse(`${date}T00:00:00`);
       if (since > 0 && dayStart + 86_400_000 <= since) continue;
       const directory = join(this.options.directory, "rollup", date);
-      const files = await readdir(directory).catch(() => [] as string[]);
-      for (const file of files) {
-        const rollup = await readJson<RollupDelta>(join(directory, file));
-        if (rollup === null) continue;
-        total = mergeDwell(total, rollup.states);
-      }
+      const rollup = await readJson<RollupDelta>(join(directory, mine));
+      if (rollup === null) continue;
+      total = mergeDwell(total, rollup.states);
     }
-    return total;
+
+    return mergeDwell(total, this.pendingDwellByState());
+  }
+
+  private pendingDwellByState(): StateDwell {
+    const pending = this.pendingDwell(this.currentState);
+    return addDwell(ZERO_DWELL, this.currentState, pending);
   }
 
   private async processSummary(since: number): Promise<ProcessSummary | null> {
@@ -657,16 +674,25 @@ export class TelemetryStore {
     }
     if (samples.length === 0) return null;
 
-    const node = samples.filter((sample) => sample.kind === "node");
-    const pool = node.length > 0 ? node : samples;
-    const rss = pool.map((sample) => sample.rssBytes).sort((a, b) => a - b);
-    const busy = pool.filter(
+    // Samples from another project's node share the store; keep this one's.
+    const mine = samples.filter(
+      (sample) => sample.prefix === undefined ||
+        sample.prefix === this.options.prefix,
+    );
+    const node = mine.filter((sample) => sample.kind === "node");
+    const pool = node.length > 0 ? node : mine;
+    // Mixing pids compares a fresh node against a retired one; keep the pid of
+    // the newest sample, which is the node that answers now.
+    const currentPid = pool[pool.length - 1]?.pid;
+    const series = pool.filter((sample) => sample.pid === currentPid);
+    const rss = series.map((sample) => sample.rssBytes).sort((a, b) => a - b);
+    const busy = series.filter(
       (sample) => sample.load > 0 && sample.cpuPct !== null,
     );
-    const idle = pool.filter(
+    const idle = series.filter(
       (sample) => sample.load === 0 && sample.cpuPct !== null,
     );
-    const last = pool[pool.length - 1];
+    const last = series[series.length - 1];
 
     return {
       cpuPct: last?.cpuPct ?? null,
@@ -676,7 +702,7 @@ export class TelemetryStore {
       rssP95: percentile(rss, 95),
       cpuBusy: mean(busy.map((sample) => sample.cpuPct ?? 0)),
       cpuReady: mean(idle.map((sample) => sample.cpuPct ?? 0)),
-      growthMbPerDay: growth(pool),
+      growthMbPerDay: growth(series),
     };
   }
 
@@ -1058,13 +1084,17 @@ function mean(values: ReadonlyArray<number>): number | null {
 /** Resident-set change over the sampled window, in MB per day. */
 export function growth(samples: ReadonlyArray<SampleRecord>): number {
   if (samples.length < 2) return 0;
-  const first = samples[0];
-  const last = samples[samples.length - 1];
+  const ordered = [...samples].sort((left, right) => left.at - right.at);
+  const first = ordered[0];
+  const last = ordered[ordered.length - 1];
   if (first === undefined || last === undefined) return 0;
-  const days = (last.at - first.at) / 86_400_000;
-  if (days <= 0) return 0;
+
+  // A two-minute window says nothing about a day; extrapolating it produced
+  // figures in the tens of gigabytes. Wait for an hour of history.
+  const span = last.at - first.at;
+  if (span < MIN_GROWTH_SPAN_MS) return 0;
   const megabytes = (last.rssBytes - first.rssBytes) / (1024 * 1024);
-  return Math.round((megabytes / days) * 10) / 10;
+  return Math.round((megabytes / (span / 86_400_000)) * 10) / 10;
 }
 
 function parseOp(line: string): OpRecord | null {

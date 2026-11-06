@@ -147,6 +147,8 @@ export interface OpRecord {
 export interface SampleRecord {
   readonly at: number;
   readonly kind: "node" | "watcher" | "index";
+  /** Project prefix, so a report shows this project's node, not a peer's. */
+  readonly prefix?: string;
   readonly pid: number;
   readonly load: number;
   readonly cpuPct: number | null;

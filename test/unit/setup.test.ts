@@ -35,7 +35,8 @@ function stubHost(projectRoot: string, options: Record<string, unknown> = {}): S
   const handlersByName: Record<string, (input?: unknown) => Promise<unknown>> = {};
 
   const ctx = {
-    options,
+    // Telemetry writes to the real data root; these tests must not pollute it.
+    options: { telemetry: { enabled: false }, ...options },
     location: {
       directory: projectRoot,
       project: { canonical: projectRoot },

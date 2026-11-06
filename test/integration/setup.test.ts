@@ -176,6 +176,8 @@ describe("plugin setup end to end", () => {
 
     const host = stubHost(project, {
       binary: { path: binaryPath },
+      // A fixture corpus must not land in the real telemetry store.
+      telemetry: { enabled: false },
       index: {
         neural: false,
         semantic: false,

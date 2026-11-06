@@ -343,7 +343,20 @@ export default Plugin.define({
     };
 
     /** Maps the report store's shape onto the RPC status shape. */
+    // The status is polled from several places and reads the whole op log, so
+    // a short cache keeps a status poll from becoming the slowest thing here.
+    let telemetryCache: {
+      readonly at: number;
+      readonly value: StatusSnapshot["telemetry"];
+    } | null = null;
     const telemetryStatus = async (): Promise<StatusSnapshot["telemetry"]> => {
+      if (
+        telemetryCache !== null &&
+        Date.now() - telemetryCache.at < TELEMETRY_STATUS_CACHE_MS
+      ) {
+        return telemetryCache.value;
+      }
+
       const empty = {
         ops: [],
         starts: [],
@@ -355,13 +368,20 @@ export default Plugin.define({
         disabled: telemetry.disabled,
       };
 
-      if (!telemetry.enabled) return { enabled: false, ...empty };
+      const done = (
+        value: StatusSnapshot["telemetry"],
+      ): StatusSnapshot["telemetry"] => {
+        telemetryCache = { at: Date.now(), value };
+        return value;
+      };
+
+      if (!telemetry.enabled) return done({ enabled: false, ...empty });
 
       const report = await telemetry.report({ window: "day", limit: 20 })
         .catch(() => null);
-      if (report === null) return { enabled: true, ...empty };
+      if (report === null) return done({ enabled: true, ...empty });
 
-      return {
+      return done({
         enabled: true,
         ops: report.rows.map((row) => ({
           op: row.op,
@@ -385,7 +405,7 @@ export default Plugin.define({
         storeBytes: report.storeBytes,
         historyStart: report.historyStart,
         disabled: telemetry.disabled,
-      };
+      });
     };
 
     /**
@@ -1926,6 +1946,9 @@ function formatReport(report: TelemetryReport): string {
     "local only · never sent",
   ].join("\n");
 }
+
+/** How long a status snapshot reuses its telemetry block. */
+const TELEMETRY_STATUS_CACHE_MS = 5_000;
 
 /** One line of an error, for the log ring. */
 function errorText(error: unknown): string {

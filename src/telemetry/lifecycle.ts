@@ -2,7 +2,9 @@
 // one startup: how long setup took, when the node first answered, when the
 // index became usable, and what died on the way.
 
+import { stat } from "node:fs/promises";
 import { readNodePid } from "../node/supervisor.ts";
+import { nodePidPath } from "../paths.ts";
 import type { Logger } from "../log.ts";
 import { BOOT_AT, bootMs } from "./boot-clock.ts";
 import type { TelemetryStore } from "./store.ts";
@@ -34,8 +36,9 @@ export class BootTracker {
   }
 
   /**
-   * Records a crash left by an earlier process, then this boot. Called after
-   * tools, hooks, and RPC are registered, so a failure here cannot block load.
+   * Records this boot, then a crash left by an earlier process. The boot record
+   * goes first so a reader never sees `ready` before the boot that caused it;
+   * the marker is written before the scan so our own pid is found alive.
    */
   async start(
     meta: Readonly<Record<string, number | string | boolean | null>> = {},
@@ -44,25 +47,24 @@ export class BootTracker {
     this.booted = true;
 
     try {
-      const crashed = await this.options.store.takeCrashedBoot();
-      if (crashed !== null) {
-        const at = Date.now() - crashed.at;
-        this.options.store.record("lifecycle.crash", at, true, {
-          bootId: crashed.bootId,
-          bootAt: crashed.at,
-          kind: CrashKind.Plugin,
-          phase: crashed.phase,
-          pid: crashed.pid,
-        });
-        this.options.onCrashedBoot?.();
-      }
-
       this.options.store.record("lifecycle.boot", bootMs(), true, {
         bootId: this.options.bootId,
         bootAt: BOOT_AT,
         ...meta,
       });
       await this.options.store.writeMarker("setup");
+
+      const crashed = await this.options.store.takeCrashedBoot();
+      if (crashed === null) return;
+      const at = Date.now() - crashed.at;
+      this.options.store.record("lifecycle.crash", at, true, {
+        bootId: crashed.bootId,
+        bootAt: crashed.at,
+        kind: CrashKind.Plugin,
+        phase: crashed.phase,
+        pid: crashed.pid,
+      });
+      this.options.onCrashedBoot?.();
     } catch (error) {
       this.options.logger.debug("could not record the boot", String(error));
     }
@@ -160,7 +162,13 @@ export async function noteNodeCrash(
   if (recordedNodeCrashes.has(key)) return null;
   recordedNodeCrashes.add(key);
 
-  store.record("lifecycle.crash", 0, true, {
+  // The pidfile's age is the closest thing to an uptime: it is written once,
+  // at spawn, and removed on every stop this plugin asks for.
+  const written = await stat(nodePidPath(nodeDir)).catch(() => null);
+  const uptime =
+    written === null ? 0 : Math.max(0, Date.now() - written.mtimeMs);
+
+  store.record("lifecycle.crash", uptime, true, {
     kind: CrashKind.Node,
     phase: "running",
     pid,

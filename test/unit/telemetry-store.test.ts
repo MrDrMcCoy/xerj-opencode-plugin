@@ -237,6 +237,55 @@ describe("TelemetryStore", () => {
     expect(built.dwellFor("ready")).toBe(1_500);
     await built.close();
   });
+
+  test("the state it is in now counts, not only closed intervals", async () => {
+    const built = await store();
+    built.noteState("starting", "ready", Date.now() - 400);
+
+    expect(built.dwellFor("ready")).toBeGreaterThanOrEqual(300);
+    await built.close();
+  });
+
+  test("a report carries the day's dwell for this instance", async () => {
+    const built = await store();
+    built.noteState("starting", "ready", Date.now() - 2_000);
+    await built.flush();
+
+    const report = await built.report({ window: "day" });
+    expect(report.states.readyMs).toBeGreaterThanOrEqual(1_500);
+    expect(report.states.busyMs).toBe(0);
+    await built.close();
+  });
+
+  test("another project's node is not this panel's process", async () => {
+    const built = await store();
+    const now = Date.now();
+    built.sample({
+      ...sample(now - 1_000, 2 * 1024 * 1024 * 1024, 11),
+      prefix: "xop-other-99999999",
+    });
+    built.sample(sample(now, 100 * 1024 * 1024, 12));
+    await built.flush();
+
+    const report = await built.report({ window: "day" });
+    expect(report.process?.rssBytes).toBe(100 * 1024 * 1024);
+    await built.close();
+  });
+
+  test("process figures follow the newest pid, not a retired one", async () => {
+    const built = await store();
+    const now = Date.now();
+    built.sample(sample(now - 3_000, 2 * 1024 * 1024 * 1024, 11));
+    built.sample(sample(now - 2_000, 2 * 1024 * 1024 * 1024, 11));
+    built.sample(sample(now - 1_000, 100 * 1024 * 1024, 12));
+    await built.flush();
+
+    const report = await built.report({ window: "day" });
+    expect(report.process?.rssBytes).toBe(100 * 1024 * 1024);
+    expect(report.process?.peakRssBytes).toBe(100 * 1024 * 1024);
+    expect(report.process?.growthMbPerDay).toBe(0);
+    await built.close();
+  });
 });
 
 describe("percentile", () => {
@@ -257,6 +306,22 @@ describe("growth", () => {
     expect(growth(samples)).toBe(100);
     expect(growth(samples.slice(0, 1))).toBe(0);
   });
+
+  test("does not extrapolate a rate from a short window", () => {
+    const samples: SampleRecord[] = [
+      sample(0, 100 * 1024 * 1024),
+      sample(14_000, 101 * 1024 * 1024),
+    ];
+    expect(growth(samples)).toBe(0);
+  });
+
+  test("orders samples by time before subtracting", () => {
+    const samples: SampleRecord[] = [
+      sample(86_400_000, 200 * 1024 * 1024),
+      sample(0, 100 * 1024 * 1024),
+    ];
+    expect(growth(samples)).toBe(100);
+  });
 });
 
 describe("dayKey", () => {
@@ -265,11 +330,11 @@ describe("dayKey", () => {
   });
 });
 
-function sample(at: number, rssBytes: number): SampleRecord {
+function sample(at: number, rssBytes: number, pid = 1): SampleRecord {
   return {
     at,
     kind: "node",
-    pid: 1,
+    pid,
     load: 0,
     cpuPct: null,
     rssBytes,
