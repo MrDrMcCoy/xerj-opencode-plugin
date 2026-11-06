@@ -339,6 +339,26 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: GPU compute documentation (0.7.0). `/xerj-prjdocs` now detects
+  CUDA, ROCm, SYCL, and Vulkan from kernel files (`.cu`, `.cuh`, `.hip`, shader
+  extensions), toolchain headers, distinctive calls (`__global__`,
+  `hipMalloc`, `vkCreate*`, `sycl::queue`), build markers
+  (`find_package(Vulkan)`, `nvcc`, `hipcc`, `-fsycl`), version pins in
+  Dockerfiles and CMake, and their packages (`cupy`, `pycuda`, `ash`,
+  `vulkano`, `adaptivecpp`). New module `src/prjdocs/gpu.ts`.
+  CUDA and ROCm are versioned: CUDA resolves its newest release from the
+  archive listing and uses the `archive/<x.y.z>/` hub, ROCm the
+  `docs-<x.y.z>` path, and a project that pins nothing falls back to the
+  current guide. The CUDA programming guide is a single 3.5 MB page that the
+  crawler's 2 MB limit drops, which is why the entry is the hub that links
+  every guide. A versioned target now carries `urlPrefix`, so a crawl cannot
+  follow a page's links into another version: without it the ROCm 6.2 crawl
+  pulled `latest/`. SYCL uses the Khronos landing page plus the specification
+  with a 6 MB page limit. Measured live: CUDA hub 12 pages/569 KB, ROCm 6.2
+  12 pages with zero outside its version path, SYCL 1.3 MB, Vulkan guide
+  12 pages/64 KB. 797 unit tests pass, `src/prjdocs/gpu.ts` at 100%.
+  The memory index deletion was the user's own reset, not a defect.
+
 - 2026-11-06: Cleanup pass (0.7.0, after the release tag). `src/manifest.ts` now
   holds the manifest reader and writer the project-docs and system-docs
   indexers both kept, which removes 46 duplicated lines and keeps one rule for
