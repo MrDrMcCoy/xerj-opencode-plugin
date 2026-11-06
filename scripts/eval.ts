@@ -10,6 +10,7 @@
 // what a maintainer would open to answer the question, so the number is a
 // proxy for usefulness, not a proof of it.
 
+import { DEFAULT_CONFIG } from "../src/config.ts";
 import { XerjClient } from "../src/node/client.ts";
 import { indexPrefix } from "../src/paths.ts";
 import { SearchService } from "../src/search/service.ts";
@@ -87,8 +88,9 @@ function parseArgs(argv: ReadonlyArray<string>, projectRoot: string): Options {
   return {
     url,
     prefix: flags.get("prefix") ?? process.env.XERJ_PREFIX ?? indexPrefix(projectRoot),
-    k: Number(flags.get("k") ?? 6),
-    maxTokens: Number(flags.get("max-tokens") ?? 1500),
+    // Default to what the plugin ships, so a run reflects production.
+    k: Number(flags.get("k") ?? DEFAULT_CONFIG.context.maxPassages),
+    maxTokens: Number(flags.get("max-tokens") ?? DEFAULT_CONFIG.context.maxTokens),
     surface: (flags.get("surface") ?? "context") === "tool" ? "tool" : "context",
     trust: flags.has("no-trust") ? false : true,
     json: flags.has("json"),
