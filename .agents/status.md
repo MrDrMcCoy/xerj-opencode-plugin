@@ -339,6 +339,20 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: Intel oneAPI awareness (0.7.0). Detection reads the oneAPI
+  headers and namespaces (oneMKL, oneDNN, oneTBB), the Level Zero API
+  (`level_zero/ze_api.h`, `zeInit`), `dpcpp`/`icpx`, `ONEAPI_ROOT`, an
+  `intel/oneapi-*` base image, and Intel's packages (`mkl`,
+  `intel-extension-for-pytorch`, `scikit-learn-intelex`,
+  `oneccl_bindings_for_pytorch`). The SYCL stack no longer reads a oneAPI
+  toolkit version from `intel/oneapi-basekit`; that belongs to oneAPI.
+  The docs source is the UXL Foundation specification, because Intel's own
+  site answers non-browser clients with Access Denied (measured: 403 body,
+  477 bytes). That section shares its host with foundation news, so
+  `DocsSource` gained an unversioned `prefix`, and the crawl stays inside
+  `/specifications/oneapi/`: 3 pages, 18 KB, nothing outside. 801 unit and
+  12 integration tests pass.
+
 - 2026-11-06: GPU compute documentation (0.7.0). `/xerj-prjdocs` now detects
   CUDA, ROCm, SYCL, and Vulkan from kernel files (`.cu`, `.cuh`, `.hip`, shader
   extensions), toolchain headers, distinctive calls (`__global__`,
