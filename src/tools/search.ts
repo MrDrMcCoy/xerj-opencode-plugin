@@ -151,19 +151,23 @@ export function buildTools(options: ToolOptions): ReadonlyArray<{
         });
         await record(options, tool.sessionID, result);
 
-        return result.hits.length === 0
-          ? { content: "No passages matched.", metadata: { xerj: { hits: 0, bytes: 0 } } }
-          : {
-              content: result.text,
-              metadata: {
-                xerj: {
-                  hits: result.hits.length,
-                  bytes: result.bytes,
-                  strategy: result.strategy,
-                  narrowingBytes: result.narrowingBytes,
-                },
-              },
-            };
+        if (result.hits.length === 0) {
+          return {
+            content: await emptySearchHint(options),
+            metadata: { xerj: { hits: 0, bytes: 0 } },
+          };
+        }
+        return {
+          content: result.text,
+          metadata: {
+            xerj: {
+              hits: result.hits.length,
+              bytes: result.bytes,
+              strategy: result.strategy,
+              narrowingBytes: result.narrowingBytes,
+            },
+          },
+        };
       },
     },
     {
@@ -341,6 +345,30 @@ export function buildTools(options: ToolOptions): ReadonlyArray<{
       },
     },
   ];
+}
+
+/**
+ * An empty result carries no information on its own: the model cannot tell a
+ * miss from an index that is still building, so it either retries blindly or
+ * reads files. Say what the index holds and what to try instead.
+ */
+async function emptySearchHint(options: ToolOptions): Promise<string> {
+  const status = await options.snapshot().catch(() => null);
+  const index = status?.index ?? null;
+  if (index !== null && index.docs === 0) {
+    return (
+      `No passages matched: this project is still indexing (${index.state}). ` +
+      "Try again shortly, or read the file directly."
+    );
+  }
+  const held =
+    index === null
+      ? "an unknown number of records"
+      : `${index.docs} records from ${index.lastFiles} files (${index.state})`;
+  return (
+    `No passages matched. The index holds ${held}. ` +
+    "Try different words, a narrower phrase, or xerj_def for a symbol name."
+  );
 }
 
 async function record(
