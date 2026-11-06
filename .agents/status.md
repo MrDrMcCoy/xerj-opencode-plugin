@@ -340,6 +340,22 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-05: Project documentation corpus and `/xerj-prjdocs` (0.7.0).
+  Detection reads `package.json`, `requirements.txt`, `Cargo.toml`, and
+  `go.mod`, plus the runtime pins that name a version (`.nvmrc`,
+  `.node-version`, `.python-version`, `.tool-versions`,
+  `rust-toolchain.toml`, `engines`, `go`, `requires-python`), then maps each
+  technology to one official docs entry in `src/prjdocs/sources.ts` (33
+  sources). Node and Python get a URL per version, longest-lived versions
+  resolved from `nodejs.org/dist/index.json` and `endoflife.date`; the rest are
+  unversioned sites with an 8 to 25 page budget. The crawler stays on one
+  origin, goes two levels deep, skips assets and non-HTML, and records `url`,
+  `title`, `tech`, `version`, `fetched_at` per page, so a page for a version
+  the project no longer uses is pruned next run. Verified live: two
+  technologies and 12 pages in about a second; `.nvmrc` 22 -> 20 indexed the 20
+  pages and pruned the 5 from 22; removing the pin pruned the rest. Bodies are
+  plain `text`, so nothing is embedded. 608 unit and 10 integration tests pass.
+
 - 2026-11-05: System documentation corpus and `/xerj-sysdocs` (0.7.0). The
   command walks `MANPATH`/`INFOPATH` (then the system roots), keeps the first
   copy of each name and section, strips roff control lines while keeping
