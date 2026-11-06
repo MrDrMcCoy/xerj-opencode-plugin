@@ -340,6 +340,17 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-05: README covers every surface (0.7.0). The TUI section is now a
+  command table: `/xerj` with its `status`, `reindex`, `remember`, and `search`
+  subcommands, plus `/xerj-reindex`, `/xerj-remember`, `/xerj-search`,
+  `/xerj-prjdocs [eager]`, and `/xerj-sysdocs`, the panel's three ways to
+  close, and the RPC methods behind them. The MCP section gained client setup
+  for Claude Code and Cursor, the entry arguments, the twelve-tool table, a
+  sample session, and the structuredContent note. The overview now lists the
+  graph corpus, system docs, library docs, datasets, and MCP; the data section
+  names both documentation manifests; and the stale "upgrades require the same
+  major" limitation is corrected to the actual `auto` rule.
+
 - 2026-11-05: Dataset management and dump import/export (0.7.0). `xerj_dataset`
   has six actions (list, describe, create, delete, export, import) and is shared
   by the plugin and the MCP server through `buildTools`, so both surfaces gained
