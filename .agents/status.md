@@ -339,6 +339,23 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: Tier S complete: the sidebar rebuild landed (3.0 h against an 8 h
+  plan). `src/ui/prefs.ts` reads and writes the shared
+  `tui-preferences.jsonc` under key `xerj` with a JSONC-tolerant parser and a
+  merge that leaves AFT's and Magic Context's blocks intact; `order` is not
+  offered because this host's slots take `prepend`/`append` only.
+  `sidebarView` in `src/ui/format.ts` is a pure function producing a header, three
+  collapsed rows, and five sections (corpora, session, savings, runtime, health)
+  with tone hints, so every figure stays server-owned. `src/tui.tsx` renders a
+  bordered box with a `▼ XERJ` badge, version, header click to collapse, an
+  inline `⚠` for an error or warning, and a 150 ms refresh debounce. The
+  collapse signal lives in the setup closure, so a view switch does not reset it.
+  Two defects were caught by the new tests: the render tests wrote the real
+  user preferences file (now isolated through
+  `OPENCODE_TUI_PREFERENCES_FILE`), and the sidebar re-rendered once per event
+  rather than once per burst. 955 unit and 12 integration tests pass, typecheck
+  clean. Tier S is twelve of twelve at 12.9 h estimated.
+
 - 2026-11-06: Sidebar rebuild added to the roadmap as the last Tier S item, not
   started. Read from the installed packages (`aft-opencode` 0.62.0,
   `opencode-magic-context` 0.49.23): both render a full component into
