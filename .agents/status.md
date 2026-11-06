@@ -339,6 +339,20 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: Sidebar rebuild added to the roadmap as the last Tier S item, not
+  started. Read from the installed packages (`aft-opencode` 0.62.0,
+  `opencode-magic-context` 0.49.23): both render a full component into
+  `sidebar.content` with a single-border box, a `▼ LABEL` accent badge header,
+  a version on the right, click-to-collapse through `onMouseDown`, a three-row
+  summary when collapsed, named sections with right-aligned values when
+  expanded, and preferences in `$OPENCODE_CONFIG_DIR/tui-preferences.jsonc`
+  under a per-plugin key with an echo guard against their own file watcher.
+  Ours renders four muted strings with no border, header, state, or prefs. The
+  roadmap row carries the mapping to our existing `StatusSnapshot` sections
+  (corpora, session, savings, runtime, health), the 150 ms debounce, inline
+  failure rows, the `xerj` prefs key, and about 8 h across five pieces. Tier S
+  reads eleven of twelve done.
+
 - 2026-11-06: Post-compaction rehydration added to the roadmap as a Tier M item,
   not started, deferred by the user. Design: on `session.compaction.ended`
   snapshot the per-session injected `path:line` set, which is cleared today, then
