@@ -60,12 +60,6 @@ export interface ImportSummary {
   readonly created: boolean;
 }
 
-/** A parsed dump line pair: the action and the document it applies to. */
-export interface DumpEntry {
-  readonly id: string | null;
-  readonly source: Record<string, unknown>;
-}
-
 export class DatasetService {
   constructor(
     private readonly client: XerjClient,

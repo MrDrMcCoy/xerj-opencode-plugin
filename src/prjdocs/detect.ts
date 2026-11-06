@@ -306,7 +306,7 @@ export interface IngestedFiles {
  * each extension accounts for. Vendored directories are skipped: a dependency's
  * own sources say nothing about what the project uses directly.
  */
-export async function scanProject(
+async function scanProject(
   projectRoot: string,
   maxFiles = 20_000,
 ): Promise<IngestedFiles> {

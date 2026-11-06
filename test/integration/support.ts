@@ -22,7 +22,7 @@ export const quietLogger: Logger = {
 };
 
 /** The shared logger the harness uses for binary downloads. */
-export const harnessLogger = createLogger(
+const harnessLogger = createLogger(
   (() => {
     const store = new Map<string, unknown>();
     return {

@@ -11,10 +11,11 @@
 //     deleted from the index.
 
 import { createHash } from "node:crypto";
-import { readdir, readFile, stat, writeFile, mkdir } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
 import type { Logger } from "../log.ts";
+import { readManifest, writeManifest } from "../manifest.ts";
 import { NodeRequestError, type XerjClient } from "../node/client.ts";
 import { supplementaryRoots, type SupplementaryRoots } from "./roots.ts";
 import {
@@ -250,29 +251,12 @@ export class SysdocIndexer {
     return truncate(decoded, this.options.maxBytesPerDoc ?? 65_536);
   }
 
-  private async readManifest(): Promise<Record<string, ManifestEntry>> {
-    const text = await readFile(this.manifestPath(), "utf8").catch(() => null);
-    if (text === null) return {};
-
-    try {
-      const parsed: unknown = JSON.parse(text);
-      return typeof parsed === "object" && parsed !== null
-        ? (parsed as Record<string, ManifestEntry>)
-        : {};
-    } catch {
-      // A corrupt manifest is not worth failing a run over: everything is
-      // re-ingested once and the file is rewritten.
-      return {};
-    }
+  private readManifest(): Promise<Record<string, ManifestEntry>> {
+    return readManifest(this.manifestPath());
   }
 
-  private async writeManifest(manifest: Record<string, ManifestEntry>): Promise<void> {
-    await mkdir(this.options.stateDir, { recursive: true }).catch(() => {});
-    await writeFile(this.manifestPath(), JSON.stringify(manifest), "utf8").catch(
-      (error: unknown) => {
-        this.options.logger.debug("could not write the system docs manifest", String(error));
-      },
-    );
+  private writeManifest(manifest: Record<string, ManifestEntry>): Promise<void> {
+    return writeManifest(this.manifestPath(), manifest, this.options.logger);
   }
 
   private manifestPath(): string {

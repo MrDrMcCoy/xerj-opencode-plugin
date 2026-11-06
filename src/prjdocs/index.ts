@@ -8,10 +8,10 @@
 // whose URL and body hash are unchanged is skipped.
 
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Logger } from "../log.ts";
 import type { XerjClient } from "../node/client.ts";
+import { readManifest, writeManifest } from "../manifest.ts";
 import { crawlDocs, type CrawledPage } from "./crawl.ts";
 import {
   DocsDiscovery,
@@ -375,53 +375,26 @@ export class PrjdocsIndexer {
     this.mapped = true;
   }
 
-  private async readBuiltinState(): Promise<
-    Record<string, { at: number; version: string }>
-  > {
-    const text = await readFile(this.builtinPath(), "utf8").catch(() => null);
-    if (text === null) return {};
-    try {
-      const parsed: unknown = JSON.parse(text);
-      return typeof parsed === "object" && parsed !== null
-        ? (parsed as Record<string, { at: number; version: string }>)
-        : {};
-    } catch {
-      return {};
-    }
+  private readBuiltinState(): Promise<Record<string, { at: number; version: string }>> {
+    return readManifest(this.builtinPath());
   }
 
-  private async writeBuiltinState(
+  private writeBuiltinState(
     state: Record<string, { at: number; version: string }>,
   ): Promise<void> {
-    await mkdir(this.options.stateDir, { recursive: true }).catch(() => {});
-    await writeFile(this.builtinPath(), JSON.stringify(state), "utf8").catch(() => {});
+    return writeManifest(this.builtinPath(), state, this.options.logger);
   }
 
   private builtinPath(): string {
     return join(this.options.stateDir, BUILTIN_FILE);
   }
 
-  private async readManifest(): Promise<Record<string, ManifestEntry>> {
-    const text = await readFile(this.manifestPath(), "utf8").catch(() => null);
-    if (text === null) return {};
-
-    try {
-      const parsed: unknown = JSON.parse(text);
-      return typeof parsed === "object" && parsed !== null
-        ? (parsed as Record<string, ManifestEntry>)
-        : {};
-    } catch {
-      return {};
-    }
+  private readManifest(): Promise<Record<string, ManifestEntry>> {
+    return readManifest(this.manifestPath());
   }
 
-  private async writeManifest(manifest: Record<string, ManifestEntry>): Promise<void> {
-    await mkdir(this.options.stateDir, { recursive: true }).catch(() => {});
-    await writeFile(this.manifestPath(), JSON.stringify(manifest), "utf8").catch(
-      (error: unknown) => {
-        this.options.logger.debug("could not write the project docs manifest", String(error));
-      },
-    );
+  private writeManifest(manifest: Record<string, ManifestEntry>): Promise<void> {
+    return writeManifest(this.manifestPath(), manifest, this.options.logger);
   }
 
   private manifestPath(): string {
@@ -429,10 +402,10 @@ export class PrjdocsIndexer {
   }
 }
 
-export function documentId(url: string): string {
+function documentId(url: string): string {
   return createHash("sha256").update(url).digest("hex").slice(0, 32);
 }
 
-export function bodyHash(body: string): string {
+function bodyHash(body: string): string {
   return createHash("sha256").update(body).digest("hex").slice(0, 16);
 }

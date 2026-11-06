@@ -17,7 +17,7 @@ export type CorpusMode = "graph" | "flat";
 /** A node built before the option existed ran the flat `--no-graph` corpus. */
 const UNRECORDED_MODE: CorpusMode = "flat";
 
-export function corpusModePath(nodeDir: string): string {
+function corpusModePath(nodeDir: string): string {
   return join(nodeDir, "corpus-mode");
 }
 

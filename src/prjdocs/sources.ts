@@ -25,10 +25,12 @@ export interface DocsTarget {
    * Pages supplied directly instead of crawled, for sources that are a
    * repository or an API dump rather than a site.
    */
-  readonly collect?: () => Promise<import("./crawl.ts").CrawledPage[]>;
+  readonly collect?: () => Promise<CrawledPage[]>;
 }
 
 /** Substituted into `{major}`, `{minor}`, and `{version}`. */
+import type { CrawledPage } from "./crawl.ts";
+
 const SOURCES: Readonly<Record<string, DocsSource>> = {
   typescript: {
     id: "typescript",
@@ -251,7 +253,7 @@ const SOURCES: Readonly<Record<string, DocsSource>> = {
 };
 
 /** The docs source for a technology, or null when none is known. */
-export function docsSource(id: string): DocsSource | null {
+function docsSource(id: string): DocsSource | null {
   return SOURCES[id] ?? null;
 }
 

@@ -5,9 +5,9 @@
 // The handler is pure: a message in, a response out, or null when the message is
 // a notification. That keeps the whole protocol testable without a process.
 
-export const PROTOCOL_VERSION = "2024-11-05";
-export const SERVER_NAME = "xerj";
-export const SERVER_VERSION = "1.0.0";
+const PROTOCOL_VERSION = "2024-11-05";
+const SERVER_NAME = "xerj";
+const SERVER_VERSION = "1.0.0";
 
 export interface JsonRpcRequest {
   readonly jsonrpc: "2.0";

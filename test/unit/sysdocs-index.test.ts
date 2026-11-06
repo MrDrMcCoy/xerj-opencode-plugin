@@ -439,3 +439,64 @@ describe("sysdocs page extraction", () => {
     expect(Object.keys(manifest).length).toBeGreaterThan(0);
   });
 });
+
+describe("sysdocs source reporting", () => {
+  test("no roots means no sources", async () => {
+    const state = await mkdtemp(join(root, "state-empty-"));
+    const fake = fakeClient();
+
+    const summary = await new SysdocIndexer({
+      roots: { man: [], info: [] },
+      client: fake as never,
+      prefix: "xop-sys-test",
+      stateDir: state,
+      logger,
+      manDirs: [],
+      infoDirs: [],
+    }).run();
+
+    expect(summary.discovered).toBe(0);
+    expect(summary.source).toBe("none");
+  });
+
+  test("a manifest that is not an object is replaced", async () => {
+    const { man, info, state } = await fixture();
+    await mkdir(state, { recursive: true });
+    await writeFile(join(state, "sysdocs-manifest.json"), "5");
+    const fake = fakeClient();
+
+    const summary = await new SysdocIndexer({
+      roots: { man: [], info: [] },
+      client: fake as never,
+      prefix: "xop-sys-test",
+      stateDir: state,
+      logger,
+      manDirs: [man],
+      infoDirs: [info],
+    }).run();
+
+    expect(summary.indexed).toBeGreaterThan(0);
+  });
+});
+
+describe("MANPATH handling", () => {
+  test("a MANPATH replaces the default man roots", async () => {
+    const man = join(root, `man-env-${Math.random().toString(36).slice(2)}`);
+    await mkdir(join(man, "man1"), { recursive: true });
+    await writeFile(join(man, "man1/env.1"), ".SH NAME\nenv - from MANPATH\n");
+
+    const previous = process.env.MANPATH;
+    process.env.MANPATH = `${man}::${man}`;
+    try {
+      const pages = await discoverPages({ roots: { man: [], info: [] }, infoDirs: [] });
+      // Empty PATH entries are ignored, and the duplicate root is scanned once.
+      expect(pages).toHaveLength(1);
+      expect(pages[0]?.name).toBe("env");
+      expect(String(pages[0]?.section)).toBe("1");
+      expect(pages[0]?.path.endsWith("man1/env.1")).toBe(true);
+    } finally {
+      if (previous === undefined) delete process.env.MANPATH;
+      else process.env.MANPATH = previous;
+    }
+  });
+});

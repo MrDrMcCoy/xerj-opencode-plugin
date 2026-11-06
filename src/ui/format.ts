@@ -37,7 +37,7 @@ export function formatTokens(value: number): string {
 }
 
 /** Signed variant for the net figure: "~-1.2K" when the plugin costs more than it saves. */
-export function formatSignedTokens(value: number): string {
+function formatSignedTokens(value: number): string {
   if (!Number.isFinite(value)) return "~0";
   const sign = value < 0 ? "-" : "~";
   return `${sign}${formatTokenAmount(Math.abs(value))}`;
@@ -75,7 +75,7 @@ export function formatAge(now: number, at: number | null): string {
 }
 
 /** Time until a future deadline: "in 45m", "in 12s". */
-export function formatUntil(now: number, at: number): string {
+function formatUntil(now: number, at: number): string {
   const seconds = Math.max(0, Math.round((at - now) / THOUSAND));
   if (seconds < 10) return "any moment";
   if (seconds < 60) return `in ${seconds}s`;
