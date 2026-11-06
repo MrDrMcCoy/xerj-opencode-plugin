@@ -388,7 +388,7 @@ indexing, where the `git log` record layout cost an extra hour and a half, and
 the auto-search hint, where the dedupe test had to distinguish the hint pass
 from the retrieval pass.
 
-Tier M so far: **7.5 h** across five items. Remaining: the tree-sitter layer
+Tier M so far: **7.5 h** across six items. Remaining: the tree-sitter layer
 (and the complexity work it enables), `xerj_code`, and `xerj_ask`.
 
 ## Settled decisions
