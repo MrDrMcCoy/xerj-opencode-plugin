@@ -356,8 +356,8 @@ publish, and live TUI verification remain.
 
 - 2026-11-06: The stale web run record is fixed, and the badge no longer flaps.
   The live store showed `ready -> degraded · index is missing; the last pass
-  wrote 5 records` and back again roughly every thirty seconds. Two causes,
-  both fixed.
+  wrote 5 records` and back again roughly every thirty seconds. Three causes,
+  all fixed.
 
   The web corpus spool had lost every page and its `xop-web-*` index was gone,
   but the stored run record still claimed five records. Nothing recreates that
@@ -374,9 +374,19 @@ publish, and live TUI verification remain.
   transition per snapshot); the base pass defers and the full pass settles.
   Four tests.
 
+  The missing index itself had a third cause. An embedding-mode change drops
+  every `xop-*` index but removed only the project corpus's journal, so every
+  other corpus kept a journal describing documents whose index was gone.
+  Reproduced on rc.101 with a scratch prefix: delete the index, keep the
+  journal, and the next pass replays the previous run document (same run id and
+  generation, `records_total: 2`) while no index exists; remove the journal and
+  the same pass rebuilds the index from the files. `reconcileEmbedMode` now
+  removes the whole journal root, and a test asserts a sibling corpus's journal
+  goes with it.
+
   This closes status item 3. The live server still runs the module from before
   the fix, so the logged flap continues until the next OpenCode restart; the
-  config loads the working tree, so a restart picks it up. 1080 unit tests
+  config loads the working tree, so a restart picks it up. 1082 unit tests
   pass; typecheck clean.
 
 - 2026-11-06: Local telemetry confirmed live after an OpenCode restart. The
