@@ -72,6 +72,10 @@ function snapshot(overrides: Partial<StatusSnapshot> = {}): StatusSnapshot {
     },
     memory: { namespace: "proj-demo-1a2b3c4d", count: 2 },
     brains: [],
+    corpora: [
+      { name: "project", state: "watching", docs: 12, lastRunAt: 1, records: 40, error: null },
+      { name: "hidden", state: "watching", docs: 4, lastRunAt: 1, records: null, error: null },
+    ],
     counters: {
       rpcCalls: 42,
       injectedTurns: 7,
@@ -162,6 +166,7 @@ describe("panelSections", () => {
       "Node",
       "Binary",
       "Index",
+      "Corpora",
       "Datasets",
       "Memory",
       "Usage",
@@ -238,5 +243,61 @@ describe("panelSections", () => {
     expect(body).toContain("none yet");
     expect(body).toContain("no warnings");
     expect(body).toContain("never");
+  });
+});
+
+describe("corpus health", () => {
+  test("a failing corpus shows its state, count and error", () => {
+    const view = snapshot({
+      corpora: [
+        { name: "project", state: "watching", docs: 900, lastRunAt: NOW, records: 900, error: null },
+        { name: "hidden", state: "error", docs: 0, lastRunAt: NOW, records: null, error: "timed out" },
+      ],
+    });
+
+    const corpora = panelSections(view, NOW).find((section) => section.title === "Corpora");
+    expect(corpora?.lines[1]).toContain("hidden");
+    expect(corpora?.lines[1]).toContain("error: timed out");
+    expect(corpora?.lines[0]).toContain("900 docs");
+  });
+
+  test("no corpora reads as none yet", () => {
+    const view = snapshot({ corpora: [] });
+    const corpora = panelSections(view, NOW).find((section) => section.title === "Corpora");
+    expect(corpora?.lines).toEqual(["none yet"]);
+  });
+});
+
+describe("sidebar noise count", () => {
+  test("appears only when the gate skipped something", () => {
+    const quiet = sidebarLines(
+      snapshot({
+        counters: {
+          rpcCalls: 1,
+          injectedTurns: 1,
+          nodeSpawns: 1,
+          http429: 0,
+          indexRuns: 1,
+          noiseSkips: 0,
+        },
+      }),
+      NOW,
+    ).join("\n");
+    expect(quiet).not.toContain("skipped");
+
+    const noisy = sidebarLines(
+      snapshot({
+        counters: {
+          rpcCalls: 1,
+          injectedTurns: 0,
+          nodeSpawns: 1,
+          http429: 0,
+          indexRuns: 1,
+          noiseSkips: 37,
+        },
+      }),
+      NOW,
+    ).join("\n");
+    expect(noisy).toContain("37 skipped");
   });
 });

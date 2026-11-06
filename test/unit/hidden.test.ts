@@ -151,3 +151,71 @@ describe("HiddenIndex", () => {
     expect(index.snapshot().docs).toBe(0);
   });
 });
+
+describe("an empty hidden scan", () => {
+  test("warns once when a folder that has files yields nothing", async () => {
+    const project = await mkdtemp(join(root, "empty-"));
+    const agents = join(project, ".agents");
+    await mkdir(agents, { recursive: true });
+    // Only skipped content: a binary and a secret.
+    await writeFile(join(agents, "image.png"), "not text");
+    await writeFile(join(agents, ".env"), "SECRET=1");
+
+    const warned: string[] = [];
+    const index = new HiddenIndex({
+      client: {
+        put: async () => {},
+        search: async () => ({ hits: { hits: [] } }),
+        bulk: async () => {},
+        bulkDelete: async () => {},
+      } as never,
+      projectRoot: project,
+      prefix: "xop-empty-0000",
+      roots: documentRoots(project, [".agents"]),
+      maxBytes: 1024,
+      logger: {
+        ...logger,
+        warn: (message: string) => void warned.push(message),
+      } as Logger,
+      onRun: () => {},
+      onChange: () => {},
+    });
+
+    await index.reindex();
+    await index.reindex();
+    await index.stop();
+
+    expect(warned.filter((line) => line.includes("no documents"))).toHaveLength(1);
+  });
+
+  test("does not warn when the folder has indexable text", async () => {
+    const project = await mkdtemp(join(root, "full-"));
+    await mkdir(join(project, ".agents"), { recursive: true });
+    await writeFile(join(project, ".agents", "note.md"), "# Note\n");
+
+    const warned: string[] = [];
+    const index = new HiddenIndex({
+      client: {
+        put: async () => {},
+        search: async () => ({ hits: { hits: [] } }),
+        bulk: async () => {},
+        bulkDelete: async () => {},
+      } as never,
+      projectRoot: project,
+      prefix: "xop-full-0000",
+      roots: documentRoots(project, [".agents"]),
+      maxBytes: 1024,
+      logger: {
+        ...logger,
+        warn: (message: string) => void warned.push(message),
+      } as Logger,
+      onRun: () => {},
+      onChange: () => {},
+    });
+
+    await index.reindex();
+    await index.stop();
+
+    expect(warned).toEqual([]);
+  });
+});

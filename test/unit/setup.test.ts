@@ -150,6 +150,10 @@ describe("server setup wiring", () => {
       expect(snapshot.pluginVersion).toBeString();
       expect(snapshot.index).toBeDefined();
 
+      // Every corpus this instance maintains reports its own health.
+      const corpora = snapshot.corpora as Array<{ name: string; state: string }>;
+      expect(corpora.map((row) => row.name)).toContain("project");
+
       cleanup?.();
     } finally {
       await rm(project, { recursive: true, force: true });

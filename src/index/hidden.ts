@@ -71,6 +71,7 @@ export class HiddenIndex {
   private readonly watchers: FSWatcher[] = [];
   private interval: ReturnType<typeof setInterval> | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private warnedEmpty = false;
   private running = false;
   private queued = false;
   private mapped = false;
@@ -154,6 +155,21 @@ export class HiddenIndex {
       const files = await this.scan();
       await this.upload(files);
       await this.removeStale(new Set(files.map((file) => file.id)));
+
+      // A configured folder that yields nothing is almost always a fault (a
+      // refused write, a size cap, a wrong path), and silence would read as
+      // "there is nothing to index".
+      if (files.length === 0) {
+        if (!this.warnedEmpty) {
+          this.warnedEmpty = true;
+          this.options.logger.warn(
+            "hidden indexing found no documents",
+            this.options.roots.map((root) => root.label).join(", "),
+          );
+        }
+      } else {
+        this.warnedEmpty = false;
+      }
 
       this.state = { docs: files.length, lastRunAt: Date.now(), error: null };
       this.options.onRun?.();

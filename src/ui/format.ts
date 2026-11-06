@@ -106,6 +106,9 @@ export function sidebarLines(snapshot: StatusSnapshot, now: number): string[] {
     [
       `q ${formatCount(usage.queries)}`,
       `hit ${formatPercent(usage.hitRate)}`,
+      ...(snapshot.counters.noiseSkips > 0
+        ? [`${formatCount(snapshot.counters.noiseSkips)} skipped`]
+        : []),
       `${formatTokens(usage.tokensSaved)} tok saved`,
     ].join("  "),
     `idx ${formatAge(now, index.lastRunAt)} · ${records}`,
@@ -160,6 +163,21 @@ export function panelSections(snapshot: StatusSnapshot, now: number): PanelSecti
             : `${formatCount(index.lastFiles)} files → ${formatCount(index.lastRecords ?? 0)} records`,
         ].join(" · "),
       ],
+    },
+    {
+      title: "Corpora",
+      lines:
+        snapshot.corpora.length === 0
+          ? ["none yet"]
+          : snapshot.corpora.map((corpus) =>
+              [
+                `${corpus.name}  ${corpus.state}`,
+                corpus.docs === null ? null : `${formatCount(corpus.docs)} docs`,
+                corpus.error === null ? null : `error: ${corpus.error}`,
+              ]
+                .filter((part) => part !== null)
+                .join(" · "),
+            ),
     },
     {
       title: "Datasets",

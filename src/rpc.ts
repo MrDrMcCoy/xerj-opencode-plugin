@@ -108,6 +108,20 @@ export interface ConfigStatus {
   readonly contextEnabled: boolean;
 }
 
+/**
+ * One indexed corpus and whether it is actually working. A corpus that exists
+ * but writes nothing (a refused memory index, a hidden folder that fails to
+ * upload) used to be invisible unless its warning happened to be in the ring.
+ */
+export interface CorpusHealth {
+  readonly name: string;
+  readonly state: string;
+  readonly docs: number | null;
+  readonly lastRunAt: number | null;
+  readonly records: number | null;
+  readonly error: string | null;
+}
+
 export interface StatusSnapshot {
   readonly pluginVersion: string;
   readonly updatedAt: number;
@@ -118,6 +132,7 @@ export interface StatusSnapshot {
   readonly usage: UsageStatus;
   readonly memory: MemoryStatus;
   readonly brains: ReadonlyArray<BrainStatus>;
+  readonly corpora: ReadonlyArray<CorpusHealth>;
   readonly counters: CounterStatus;
   readonly recent: ReadonlyArray<string>;
   readonly warnings: ReadonlyArray<string>;
@@ -239,6 +254,17 @@ const definition = {
             docs: { type: "number" },
             edges: { type: "number" },
             lastRunAt: { type: ["number", "null"] },
+            error: { type: ["string", "null"] },
+          }),
+        },
+        corpora: {
+          type: "array",
+          items: object({
+            name: { type: "string" },
+            state: { type: "string" },
+            docs: { type: ["number", "null"] },
+            lastRunAt: { type: ["number", "null"] },
+            records: { type: ["number", "null"] },
             error: { type: ["string", "null"] },
           }),
         },

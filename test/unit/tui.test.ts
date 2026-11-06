@@ -59,6 +59,9 @@ const SNAPSHOT: StatusSnapshot = {
   },
   memory: { namespace: "proj-demo", count: 0 },
   brains: [],
+  corpora: [
+    { name: "project", state: "watching", docs: 12, lastRunAt: 1, records: 40, error: null },
+  ],
   counters: {
     rpcCalls: 0,
     injectedTurns: 0,

@@ -43,6 +43,7 @@ import {
   PLUGIN_VERSION,
   XerjRpc,
   type BrainStatus,
+  type CorpusHealth,
   type DatasetStatus,
   type StatusSnapshot,
 } from "./rpc.ts";
@@ -278,6 +279,7 @@ export default Plugin.define({
         },
         memory: { namespace: memoryNs, count: 0 },
         brains: brainStatus(runtime.brain, runtime.brains),
+        corpora: corpusHealth(runtime),
         counters: counters.snapshot(),
         recent: await recentMessages(logger),
         warnings: runtime.warnings,
@@ -302,8 +304,16 @@ export default Plugin.define({
         );
         const corpus = datasets.filter((dataset) => dataset.name !== "memory");
 
+        // Fill document counts from the same listing, so each corpus row shows
+        // what is actually stored rather than only whether the service runs.
+        const corpora = base.corpora.map((row) => ({
+          ...row,
+          docs: datasets.find((dataset) => dataset.name === row.name)?.docs ?? 0,
+        }));
+
         return {
           ...base,
+          corpora,
           index: {
             prefix,
             docs: corpus.reduce((total, dataset) => total + dataset.docs, 0),
@@ -877,6 +887,55 @@ function corpusStatus(corpus: CorpusService | null): Pick<
     restarts: snapshot?.restarts ?? 0,
     lastError: snapshot?.lastError ?? null,
   };
+}
+
+/**
+ * One row per corpus this instance maintains, so a corpus that fails to write
+ * is visible even when its index is empty. State and errors come from the
+ * running services; document counts are filled in from the index listing.
+ */
+function corpusHealth(runtime: Runtime): CorpusHealth[] {
+  const rows: CorpusHealth[] = [
+    {
+      name: "project",
+      state: runtime.corpus?.snapshot().state ?? "disabled",
+      docs: null,
+      lastRunAt: runtime.corpus?.snapshot().lastRun?.at ?? null,
+      records: runtime.corpus?.snapshot().lastRun?.records ?? null,
+      error: runtime.corpus?.snapshot().lastError ?? null,
+    },
+  ];
+
+  if (runtime.web !== null) {
+    const run = runtime.web.snapshot();
+    rows.push({
+      name: "web",
+      state: run.state,
+      docs: null,
+      lastRunAt: run.lastRun?.at ?? null,
+      records: run.lastRun?.records ?? null,
+      error: run.lastError,
+    });
+  }
+
+  if (runtime.hidden !== null) {
+    const hidden = runtime.hidden.snapshot();
+    rows.push({
+      name: "hidden",
+      state:
+        hidden.error !== null
+          ? "error"
+          : hidden.lastRunAt === null
+            ? "starting"
+            : "watching",
+      docs: hidden.docs,
+      lastRunAt: hidden.lastRunAt,
+      records: null,
+      error: hidden.error,
+    });
+  }
+
+  return rows;
 }
 
 /** Groups the node's indices into the corpora this plugin maintains. */
