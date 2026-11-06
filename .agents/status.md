@@ -340,6 +340,21 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: Cleanup pass (0.7.0, after the release tag). `src/manifest.ts` now
+  holds the manifest reader and writer the project-docs and system-docs
+  indexers both kept, which removes 46 duplicated lines and keeps one rule for
+  a corrupt file. Exports with no importer became module-internal (`docsSource`,
+  `documentId`, `bodyHash`, `scanProject`, `corpusModePath`, the MCP protocol
+  constants, two formatting helpers, the harness logger), and the unused
+  `DumpEntry` interface is gone. `prjdocs/sources.ts` used an inline `import()`
+  type that the parser rejected; a normal type import replaced it. Six manifest
+  tests cover a missing file, a round trip, a corrupt file, non-object values,
+  directory creation, and a failed write that logs. Unit coverage 87.8% of
+  lines, 94.0% of functions; 768 unit tests pass. Remaining gaps need a fake
+  clock or several processes: `mcp/host.ts` runner tools, the plugin's own
+  wiring in a live setup, supervisor port-scan exhaustion, and watcher restart
+  backoff.
+
 - 2026-11-06: v0.7.0 tagged, pushed, and staged on npm. The first tag run
   failed on two sysdocs tests that passed locally: neither isolated `roots`, so
   the indexer also scanned `/usr/share/man`, which timed out one test and made
