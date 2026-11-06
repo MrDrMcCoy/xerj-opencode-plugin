@@ -348,7 +348,7 @@ publish, and live TUI verification remain.
   (two summaries pruned by a size cap, a decision kept). The TUI render bodies
   now run under a recorded JSX runtime, so the sidebar line, the corpora rows,
   the close hint, and the foreign-panel null are asserted: `src/tui.tsx` 79%
-  lines, 97% functions. Two node leaks were found and fixed: thirty-four XERJ
+  lines, 97% functions. A node leak was found and fixed: thirty-four XERJ
   nodes and twenty-two watchers had accumulated from unit setup tests that
   resolved the managed binary and bootstrapped a real runtime; those tests now
   point at a missing binary, and the end-to-end test waits for its node to
