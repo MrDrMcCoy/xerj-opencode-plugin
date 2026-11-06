@@ -340,6 +340,19 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-05: Dataset management and dump import/export (0.7.0). `xerj_dataset`
+  has six actions (list, describe, create, delete, export, import) and is shared
+  by the plugin and the MCP server through `buildTools`, so both surfaces gained
+  it at once. Export pages through `_search` and writes the `_bulk` dump format
+  (action line plus source line), which `elasticdump` and `_bulk` read back;
+  import streams line by line, creates a missing target index, batches writes,
+  counts malformed lines as skipped, and generates ids when a dump has none.
+  Indexes the plugin maintains (`xop-*`, `.xerj-*`, `.xerj_*`) are reported as
+  managed and need `force` to delete. Verified on the live node: create with a
+  mapping, two documents, export to NDJSON, delete, import back, counts read 2
+  and the mapping survived. 21 service tests and 8 tool tests; 727 unit tests
+  pass.
+
 - 2026-11-05: Pre-release parity and a CI build check (0.7.0). The plugin now
   exposes the same eleven tools as the MCP server: `reindex`, `sysdocs`, and
   `prjdocs` joined the eight. The three bodies live in runners that the RPC
