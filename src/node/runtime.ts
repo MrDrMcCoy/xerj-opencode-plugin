@@ -32,6 +32,8 @@ export interface NodeRuntimeOptions {
   /** Attach to this URL and never spawn or stop anything. */
   readonly explicitUrl: string | null;
   readonly embedMode: EmbedMode;
+  /** Size at which the node log is rotated aside; 0 disables it. */
+  readonly logMaxBytes?: number;
   /** CPU and I/O priority for a spawned node; omitted leaves it alone. */
   readonly priority?: Priority;
   readonly logger: Logger;
@@ -123,6 +125,7 @@ export class NodeRuntime {
         persistedPort: await readPersistedPort(this.options.nodeDir),
         explicitUrl: this.options.explicitUrl,
         embedMode: this.options.embedMode,
+        logMaxBytes: this.options.logMaxBytes,
         priority: this.options.priority,
         onPort: (port) => persistPort(this.options.nodeDir, port),
         logger: this.options.logger,

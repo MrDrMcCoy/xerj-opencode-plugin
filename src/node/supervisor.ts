@@ -25,6 +25,7 @@ import {
   nodePidPath,
   nodePortPath,
 } from "../paths.ts";
+import { rotateNodeLog } from "./log-file.ts";
 import { applyPriority, type Priority } from "./priority.ts";
 
 export type NodeState = "xerj" | "foreign" | "down";
@@ -61,6 +62,8 @@ export interface EnsureNodeOptions {
   readonly explicitUrl?: string | null;
   readonly startupTimeoutMs?: number;
   readonly embedMode?: EmbedMode;
+  /** Size at which the node log is rotated aside; 0 disables it. */
+  readonly logMaxBytes?: number;
   /** CPU and I/O priority for the spawned process; omitted leaves it alone. */
   readonly priority?: Priority;
 }
@@ -177,6 +180,7 @@ export async function ensureNode(options: EnsureNodeOptions): Promise<NodeHandle
       options.nodeDir,
       options.embedMode ?? EmbedMode.Neural,
       options.priority,
+      options.logMaxBytes ?? 0,
       logger,
     );
     await options.onPort?.(chosen);
@@ -275,10 +279,14 @@ async function spawnNode(
   nodeDir: string,
   embedMode: EmbedMode,
   priority: Priority | undefined,
+  logMaxBytes: number,
   logger: Logger,
 ): Promise<number> {
   await mkdir(dataDir, { recursive: true, mode: 0o700 });
   await mkdir(nodeDir, { recursive: true, mode: 0o700 });
+
+  // The node never rotates its own log, so bound it before it grows.
+  await rotateNodeLog(nodeDir, logMaxBytes);
 
   const log = await open(nodeLogPath(nodeDir), "a", 0o600);
   const child = spawn(

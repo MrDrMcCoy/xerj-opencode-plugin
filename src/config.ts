@@ -19,6 +19,8 @@ export interface BinaryOptions {
 }
 
 export interface NodeOptions {
+  /** Size at which `node.log` is rotated aside; 0 disables rotation. */
+  readonly logMaxBytes: number;
   /** Attach to an existing node instead of spawning one. */
   readonly url: string | null;
   /**
@@ -124,6 +126,7 @@ export const DEFAULT_CONFIG: Config = {
   node: {
     url: null,
     priority: NodePriority.Low,
+    logMaxBytes: 8 * 1024 ** 2,
     port: 9200,
     dataDir: null,
     idleMs: 1_800_000,
@@ -193,6 +196,14 @@ export function loadConfig(
     node: {
       url: readString(node.url, null) ?? (envUrl ? envUrl : null),
       priority: readPriority(node.priority, warnings),
+      logMaxBytes: readInteger(
+        node.logMaxBytes,
+        DEFAULT_CONFIG.node.logMaxBytes,
+        0,
+        1024 ** 3,
+        "node.logMaxBytes",
+        warnings,
+      ),
       port: readInteger(node.port, DEFAULT_CONFIG.node.port, 1, 65_535, "node.port", warnings),
       dataDir: readString(node.dataDir, null),
       idleMs: readInteger(

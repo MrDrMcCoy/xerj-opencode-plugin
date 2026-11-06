@@ -591,6 +591,7 @@ export default Plugin.define({
       portLockPath: join(root, "nodes", ".port-lock"),
       explicitUrl: config.node.url,
       embedMode: config.index.neural ? EmbedMode.Neural : EmbedMode.Lexical,
+      logMaxBytes: config.node.logMaxBytes,
       priority: config.node.priority,
       logger,
       binary: () => runtime.binary,

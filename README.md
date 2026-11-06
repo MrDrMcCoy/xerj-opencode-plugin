@@ -182,6 +182,7 @@ The same entry works with a checkout path instead of the package name; see
 | `binary.libc` | `musl` (default) or `gnu` on Linux. |
 | `storage.root` | Per-project XERJ root. Defaults to `<project>/.xerj`; relative paths resolve inside the project, absolute paths may point elsewhere. |
 | `node.url` | Attach to this node and never spawn one. |
+| `node.logMaxBytes` | Size at which `node.log` rotates to `node.log.1`; `0` disables rotation. Default 8 MiB. |
 | `node.priority` | CPU and I/O priority for every XERJ process: `low` (default), `normal`, or `high`. `low` is nice 19 plus idle-class I/O on Linux, the idle priority class on Windows. |
 | `node.port` | Preferred port. The supervisor advances it if taken. |
 | `node.idleMs` | Stop this project's node after this long with no session activity. |
