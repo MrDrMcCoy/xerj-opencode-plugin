@@ -340,6 +340,18 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-05: Live audit of the loaded 0.6.4 found the hidden corpus empty.
+  Cause: the client gave every request five seconds, and a write carrying a
+  `semantic_text` field is embedded before it is acknowledged, which takes
+  seconds per document on a neural node. The embed-mode change had dropped
+  `xop-*`, and every hidden re-upload timed out after the engine accepted it,
+  leaving a mapping and no documents. Writes (`bulk`, `bulkDelete`, index
+  creation) now allow two minutes while reads keep the short timeout. Verified
+  by running the real indexer against the live node: the four `.agents`
+  documents are back and searchable. Also verified live: `node.priority` is
+  applied (nice 19 and idle I/O class on the node and the resident watcher),
+  memory is healthy with 12 entries, and `npm` now serves 0.6.4.
+
 - 2026-11-05: Coverage and readability pass. The server part gained its
   first tests (`test/unit/setup.test.ts` drives the real `setup` against a
   stub host): tools, hooks, RPC methods, the overbroad-root refusal, a
