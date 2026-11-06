@@ -386,6 +386,13 @@ Two sources are indexed on every run, whatever the project uses:
   budget on chapter summaries and reaches no endpoints. Links outside the
   branch are not followed, so the company blog and other products stay out.
 
+Eager mode (`/xerj-prjdocs eager`, or `prjdocs.eager: true`) widens the
+Elasticsearch crawl from the API chapters to the whole guide, keeping the API
+pages and adding concepts, configuration, and operations. Three families stay
+out because they describe versions other than the one in use: release notes,
+migration guides, and deprecated APIs. The same rule filters links, so a
+chapter that cites a migration page does not drag it in.
+
 Set `prjdocs.builtin: false` to skip both, and size them with
 `prjdocs.builtinXerjPages` (200) and `prjdocs.builtinElasticsearchPages`
 (2500, which yields roughly 630 API pages). `prjdocs.builtinRefreshDays`

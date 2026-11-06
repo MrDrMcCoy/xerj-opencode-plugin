@@ -66,6 +66,8 @@ export interface BuiltinOptions {
    * refreshes.
    */
   readonly refreshDays: number;
+  /** Crawl the whole Elasticsearch guide, minus its history chapters. */
+  readonly eager?: boolean;
 }
 
 export interface EagerOptions {
@@ -146,6 +148,7 @@ export class PrjdocsIndexer {
               signal: this.options.signal,
               xerjMaxPages: this.options.builtin?.xerjPages,
               maxPages: this.options.builtin?.elasticsearchPages,
+              eager: this.options.builtin?.eager,
             },
           )
         : [];

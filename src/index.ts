@@ -413,6 +413,7 @@ export default Plugin.define({
             xerjPages: config.prjdocs.builtinXerjPages,
             elasticsearchPages: config.prjdocs.builtinElasticsearchPages,
             refreshDays: config.prjdocs.builtinRefreshDays,
+            eager: eagerMode !== undefined,
           },
           prefix: prjdocsPrefix(projectRoot),
           projectRoot,

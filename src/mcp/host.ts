@@ -343,6 +343,7 @@ export class McpHost {
               xerjPages: this.config.prjdocs.builtinXerjPages,
               elasticsearchPages: this.config.prjdocs.builtinElasticsearchPages,
               refreshDays: this.config.prjdocs.builtinRefreshDays,
+              eager,
             },
             prefix: prjdocsPrefix(this.projectRoot),
             projectRoot: this.projectRoot,

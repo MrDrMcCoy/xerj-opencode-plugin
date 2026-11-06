@@ -21,6 +21,8 @@ export interface CrawlOptions {
    * origin alone is too loose a boundary.
    */
   readonly urlPrefix?: string;
+  /** Extra per-link test; a link it rejects is never fetched. */
+  readonly urlFilter?: (url: string) => boolean;
   /** Accept `text/*` and markdown, not only HTML. Eager mode needs this. */
   readonly anyText?: boolean;
   /**
@@ -106,6 +108,7 @@ export async function crawlDocs(options: CrawlOptions): Promise<CrawledPage[]> {
       if (url === null || seen.has(url)) continue;
       if (originOf(url) !== origin) continue;
       if (options.urlPrefix !== undefined && !url.startsWith(options.urlPrefix)) continue;
+      if (options.urlFilter !== undefined && !options.urlFilter(url)) continue;
       if (!looksLikeDocs(url)) continue;
       queue.push({ url, depth: next.depth + 1 });
     }

@@ -43,7 +43,17 @@ export interface BuiltinOptions {
   readonly xerjMaxPages?: number;
   /** Pages to take from the Elasticsearch reference. */
   readonly maxPages?: number;
+  /**
+   * Crawl the whole guide, not only the API chapters. Release notes, migration
+   * guides, and deprecated-API pages stay out: they describe versions other
+   * than the one in use.
+   */
+  readonly eager?: boolean;
 }
+
+/** Guide chapters that are about history rather than the current API. */
+const EXCLUDED_CHAPTERS =
+  /(release-notes|release-highlights|whats-new|migrat|breaking-change|removed-feature|deprecat|changelog|upgrade)/i;
 
 /** One always-on documentation source and the pages it yields. */
 export interface BuiltinSource {
@@ -188,6 +198,10 @@ async function fetchElasticsearchDocs(
   const collected = new Map<string, CrawledPage>();
 
   const chapters = await chapterUrls(base, fetchImpl, options);
+  // Eager mode roams the whole guide; the history chapters are no part of the
+  // API a project is written against.
+  const keep = (url: string): boolean =>
+    options.eager !== true || !EXCLUDED_CHAPTERS.test(url);
   const perChapter = Math.max(5, Math.floor(total / Math.max(1, chapters.length)));
 
   // Four chapters at a time: enough to keep the network busy without turning a
@@ -195,15 +209,16 @@ async function fetchElasticsearchDocs(
   for (let start = 0; start < chapters.length; start += 4) {
     if (collected.size >= total || options.signal?.aborted === true) break;
 
-    const batch = chapters.slice(start, start + 4);
+    const batch = chapters.slice(start, start + 4).filter(keep);
     const results = await Promise.all(
       batch.map((entry) =>
         crawlDocs({
           entry,
           maxPages: perChapter,
-          maxDepth: 3,
+          maxDepth: options.eager === true ? 4 : 3,
           anyText: true,
           urlPrefix: `${base}/`,
+          urlFilter: keep,
           logger: options.logger,
           fetchImpl: options.fetchImpl,
           signal: options.signal,
@@ -236,7 +251,10 @@ async function chapterUrls(
 ): Promise<string[]> {
   const { absolute, linksIn } = await import("./crawl.ts");
 
-  const response = await fetchImpl(`${base}/rest-apis.html`, {
+  // Eager mode takes its chapters from the guide's own index, which covers the
+  // concepts chapters as well as the API groups.
+  const listing = options.eager === true ? "index.html" : "rest-apis.html";
+  const response = await fetchImpl(`${base}/${listing}`, {
     headers: { "user-agent": "xerj-opencode-plugin (documentation indexer)" },
     signal: mergeSignal(options.signal, REQUEST_TIMEOUT_MS),
   }).catch(() => null);
@@ -245,7 +263,7 @@ async function chapterUrls(
   if (response !== null && response.ok) {
     const html = await response.text().catch(() => "");
     for (const href of linksIn(html)) {
-      const url = absolute(href, `${base}/rest-apis.html`);
+      const url = absolute(href, `${base}/${listing}`);
       if (url === null || !url.startsWith(`${base}/`)) continue;
       if (!url.endsWith(".html")) continue;
       if (found.includes(url)) continue;
@@ -255,6 +273,9 @@ async function chapterUrls(
 
   if (found.length === 0) {
     return ES_SEEDS.map((seed) => `${base}/${seed}`);
+  }
+  if (options.eager === true) {
+    return [base + "/index.html", ...found.filter((url) => !EXCLUDED_CHAPTERS.test(url))];
   }
   // `rest-apis.html` itself first: it summarizes every API group.
   return [`${base}/rest-apis.html`, ...found.filter((url) => !url.endsWith("rest-apis.html"))];

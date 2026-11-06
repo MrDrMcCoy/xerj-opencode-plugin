@@ -602,3 +602,75 @@ describe("page titles and asset links", () => {
     expect(requested.some((url) => url.endsWith(".js"))).toBe(false);
   });
 });
+
+describe("eager elasticsearch guide coverage", () => {
+  const guide = `<html><body>
+      <a href="getting-started.html">Start</a>
+      <a href="concepts.html">Concepts</a>
+      <a href="rest-apis.html">API</a>
+      <a href="release-notes.html">Release notes</a>
+      <a href="migrating-8.13.html">Migrating</a>
+      <a href="deprecated-apis.html">Deprecated</a>
+    </body></html>`;
+
+  function fetcher(requested: string[]): typeof fetch {
+    return (async (input: string | URL) => {
+      const url = String(input);
+      requested.push(url);
+      if (url.endsWith("/index.html")) return new Response(guide);
+      return new Response(
+        `<html><head><title>Elasticsearch guide</title></head><body><p>${longBody}</p></body></html>`,
+        { headers: { "content-type": "text/html" } },
+      );
+    }) as unknown as typeof fetch;
+  }
+
+  test("eager mode crawls the guide's chapters", async () => {
+    const requested: string[] = [];
+    const pages = await elasticsearchDocsSource("8.13.0", {
+      logger,
+      fetchImpl: fetcher(requested),
+      maxPages: 60,
+      eager: true,
+    }).collect();
+
+    expect(requested.some((url) => url.endsWith("/concepts.html"))).toBe(true);
+    expect(pages.some((page) => page.url.endsWith("/concepts.html"))).toBe(true);
+  });
+
+  test("release notes, migration, and deprecated pages stay out", async () => {
+    const requested: string[] = [];
+    const pages = await elasticsearchDocsSource("8.13.0", {
+      logger,
+      fetchImpl: fetcher(requested),
+      maxPages: 60,
+      eager: true,
+    }).collect();
+
+    const urls = pages.map((page) => page.url).join(" ");
+    expect(urls).not.toContain("release-notes");
+    expect(urls).not.toContain("migrating-");
+    expect(urls).not.toContain("deprecated-");
+    expect(requested.some((url) => url.includes("release-notes"))).toBe(false);
+  });
+
+  test("the default crawl still starts from the API chapters", async () => {
+    const requested: string[] = [];
+    const fetchImpl = (async (input: string | URL) => {
+      const url = String(input);
+      requested.push(url);
+      if (url.endsWith("rest-apis.html")) {
+        return new Response(`<a href="indices.html">i</a><a href="cat.html">c</a>`);
+      }
+      return new Response(
+        `<html><head><title>Elasticsearch API</title></head><body><p>${longBody}</p></body></html>`,
+        { headers: { "content-type": "text/html" } },
+      );
+    }) as unknown as typeof fetch;
+
+    await elasticsearchDocsSource("8.13.0", { logger, fetchImpl, maxPages: 20 }).collect();
+
+    expect(requested.some((url) => url.endsWith("/rest-apis.html"))).toBe(true);
+    expect(requested.some((url) => url.endsWith("/index.html"))).toBe(false);
+  });
+});
