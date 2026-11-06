@@ -339,6 +339,18 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: History search over the turn archive (Tier M, 1.0 h). Each
+  archived turn is one document in `<prefix>-archive-docs`, idempotent by a hash
+  of session and ordinal, with a manifest at `<node dir>/archive/index.json` so
+  a turn that pruning removed also leaves the index. The corpus joins the search
+  prefixes, so `xerj_search` reaches earlier conversation, and it appears as its
+  own `archive` dataset instead of inflating the project row. Five module tests.
+  939 unit and 12 integration tests pass, typecheck clean. Tier M now has six of
+  nine items done (7.5 h estimated): import graph, regex and glob search,
+  structural search, the archive, expand, and history search. Remaining: the
+  tree-sitter layer with the complexity work it enables, `xerj_code`, and
+  `xerj_ask`.
+
 - 2026-11-06: Tier M started and four items done (6.5 h estimated). Added
   `xerj_imports` (import graph and cycles without a parser: relative
   specifiers with extension swapping, Python modules, same-module Go paths,

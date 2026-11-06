@@ -373,7 +373,7 @@ measured; they include tests and the commits that carry them. A status of
 | `xerj_ask` and hub packs | M | Not started | — | Gated by `hub.enabled`, `hub.network` |
 | Turn archive | M | Done | 1.5 h | `archive/turns.ts`: one NDJSON file per session under `<node dir>/archive`, 4 KB per turn, oldest half dropped past `context.archive.maxBytes`; prompts and answers both archived; eight module tests |
 | `xerj_expand` | M | Done | 0.5 h | Prints `[n] U:`/`[n] A:` for a turn range, or says the archive is off; wired for the plugin and the MCP server |
-| History search | M | Not started | — | Needs the archive |
+| History search | M | Done | 1.0 h | `archive/index.ts` bulk-loads one document per turn into `<prefix>-archive-docs`, idempotent by session and ordinal, with a manifest so a pruned turn leaves the index; the archive is now a search prefix and its own dataset row; five module tests |
 | LSP pool | L | Not started | — | Gated by `analysis.lsp.enabled` |
 | Server installer | L | Not started | — | — |
 | `xerj_callers`, `xerj_impact` | L | Not started | — | Needs the pool |
@@ -388,8 +388,8 @@ indexing, where the `git log` record layout cost an extra hour and a half, and
 the auto-search hint, where the dedupe test had to distinguish the hint pass
 from the retrieval pass.
 
-Tier M so far: **6.5 h** across four items. Remaining: history search, the
-tree-sitter layer, complexity and duplicates, `xerj_code`, and `xerj_ask`.
+Tier M so far: **7.5 h** across five items. Remaining: the tree-sitter layer
+(and the complexity work it enables), `xerj_code`, and `xerj_ask`.
 
 ## Settled decisions
 
