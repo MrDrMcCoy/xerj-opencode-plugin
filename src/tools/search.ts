@@ -48,6 +48,37 @@ const DEF_INPUT = {
   additionalProperties: false,
 } as const;
 
+const REFS_INPUT = {
+  type: "object",
+  properties: {
+    symbol: { type: "string", description: "Function, type, constant, or class name." },
+    k: { type: "number", description: "How many declarations to list (1-50, default 20)." },
+  },
+  required: ["symbol"],
+  additionalProperties: false,
+} as const;
+
+const OUTLINE_INPUT = {
+  type: "object",
+  properties: {
+    path: { type: "string", description: "File path, relative to the project." },
+    k: { type: "number", description: "How many symbols to list (1-50, default 50)." },
+  },
+  required: ["path"],
+  additionalProperties: false,
+} as const;
+
+const ZOOM_INPUT = {
+  type: "object",
+  properties: {
+    path: { type: "string", description: "File path, relative to the project." },
+    symbol: { type: "string", description: "Declaration name inside that file." },
+    k: { type: "number", description: "How many matches to return (1-10, default 2)." },
+  },
+  required: ["path", "symbol"],
+  additionalProperties: false,
+} as const;
+
 const STATUS_INPUT = {
   type: "object",
   properties: {},
@@ -234,6 +265,96 @@ export function buildTools(options: ToolOptions): ReadonlyArray<{
 
         return result.hits.length === 0
           ? { content: "No declaration matched.", metadata: { xerj: { hits: 0, bytes: 0 } } }
+          : {
+              content: result.text,
+              metadata: { xerj: { hits: result.hits.length, bytes: result.bytes } },
+            };
+      },
+    },
+    {
+      name: "refs",
+      description:
+        "List the declarations that use a symbol, as path:line. Use it before renaming or changing a signature, instead of grepping the tree.",
+      input: REFS_INPUT,
+      options: { namespace: "xerj" },
+      execute: async (input, context) => {
+        const args = input as { symbol: string; k?: number };
+        const tool = context as { sessionID: string; signal: AbortSignal };
+        const search = options.getSearch();
+        if (!search) return unavailable();
+
+        const result = await search.references(args.symbol, {
+          k: args.k,
+          maxTokens: options.config.context.maxTokens,
+          signal: tool.signal,
+        });
+        await record(options, tool.sessionID, result);
+
+        return result.hits.length === 0
+          ? {
+              content: `No declaration in the index uses ${args.symbol}.`,
+              metadata: { xerj: { hits: 0, bytes: 0 } },
+            }
+          : {
+              content: result.text,
+              metadata: { xerj: { hits: result.hits.length, bytes: result.bytes } },
+            };
+      },
+    },
+    {
+      name: "outline",
+      description:
+        "List the symbols a file declares, with line numbers, without reading the file. Use it to decide what to zoom into.",
+      input: OUTLINE_INPUT,
+      options: { namespace: "xerj" },
+      execute: async (input, context) => {
+        const args = input as { path: string; k?: number };
+        const tool = context as { sessionID: string; signal: AbortSignal };
+        const search = options.getSearch();
+        if (!search) return unavailable();
+
+        const result = await search.outline(args.path, {
+          k: args.k,
+          maxTokens: options.config.context.maxTokens,
+          signal: tool.signal,
+        });
+        await record(options, tool.sessionID, result);
+
+        return result.hits.length === 0
+          ? {
+              content: `No symbols indexed for ${args.path}.`,
+              metadata: { xerj: { hits: 0, bytes: 0 } },
+            }
+          : {
+              content: result.text,
+              metadata: { xerj: { hits: result.hits.length, bytes: result.bytes } },
+            };
+      },
+    },
+    {
+      name: "zoom",
+      description:
+        "Return one declaration's source by file and symbol name. Cheaper than reading the file when you only need that function or type.",
+      input: ZOOM_INPUT,
+      options: { namespace: "xerj" },
+      execute: async (input, context) => {
+        const args = input as { path: string; symbol: string; k?: number };
+        const tool = context as { sessionID: string; signal: AbortSignal };
+        const search = options.getSearch();
+        if (!search) return unavailable();
+
+        const result = await search.symbol(args.path, args.symbol, {
+          k: args.k === undefined ? undefined : Math.min(10, args.k),
+          maxTokens: 1200,
+          signal: tool.signal,
+        });
+        await record(options, tool.sessionID, result);
+
+        return result.hits.length === 0
+          ? {
+              content: `No declaration named ${args.symbol} in ${args.path}.`,
+              metadata: { xerj: { hits: 0, bytes: 0 } },
+            }
           : {
               content: result.text,
               metadata: { xerj: { hits: result.hits.length, bytes: result.bytes } },

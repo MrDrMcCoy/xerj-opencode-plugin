@@ -39,7 +39,14 @@ export interface SearchResult {
   readonly hits: ReadonlyArray<SearchHit>;
   readonly bytes: number;
   readonly text: string;
-  readonly strategy: "hybrid" | "lexical" | "semantic" | "definition";
+  readonly strategy:
+    | "hybrid"
+    | "lexical"
+    | "semantic"
+    | "definition"
+    | "references"
+    | "outline"
+    | "symbol";
   readonly narrowingBytes: number;
 }
 
@@ -286,6 +293,119 @@ export class SearchService {
 
     const hits = await this.resolveLines(result.hits.slice(0, k), trimmed);
     return formatResult(hits, "definition", budget, result.narrowing);
+  }
+
+  /**
+   * Where a symbol is used. The engine stores each declaration record with its
+   * source in `code`, so a match on that field finds the enclosing declaration
+   * of every use. The line is the declaration's start, not the call itself:
+   * symbol records carry no offsets, and reading the file to sharpen it would
+   * cost more than the citation saves.
+   */
+  async references(symbol: string, options: SearchOptions = {}): Promise<SearchResult> {
+    const trimmed = symbol.trim();
+    if (trimmed.length === 0) return emptyResult("references");
+
+    const indices = await this.codeIndices();
+    if (indices.length === 0) return emptyResult("references");
+
+    const k = clamp(options.k ?? 20, 1, MAX_K);
+    const result = await this.leg(
+      indices.join(","),
+      {
+        size: k,
+        _source: DEFINITION_SOURCE,
+        query: { match: { code: trimmed } },
+      },
+      options.signal,
+    );
+
+    return listResult(result, "references", options.maxTokens);
+  }
+
+  /** Every symbol in one file, in line order, without the file's body. */
+  async outline(path: string, options: SearchOptions = {}): Promise<SearchResult> {
+    const relative = this.relativePath(path);
+    if (relative === null) return emptyResult("outline");
+
+    const indices = await this.codeIndices();
+    if (indices.length === 0) return emptyResult("outline");
+
+    const result = await this.leg(
+      indices.join(","),
+      {
+        size: clamp(options.k ?? MAX_K, 1, MAX_K),
+        _source: DEFINITION_SOURCE,
+        sort: [{ start_line: { order: "asc", missing: "_last" } }],
+        query: { term: { ax_path: relative } },
+      },
+      options.signal,
+    );
+
+    const hits = [...result.hits].sort(
+      (left, right) => (left.startLine ?? 0) - (right.startLine ?? 0),
+    );
+    return listResult({ hits, narrowing: result.narrowing }, "outline", options.maxTokens);
+  }
+
+  /** One declaration's source, by file and symbol name. */
+  async symbol(
+    path: string,
+    name: string,
+    options: SearchOptions = {},
+  ): Promise<SearchResult> {
+    const relative = this.relativePath(path);
+    if (relative === null || name.trim().length === 0) return emptyResult("symbol");
+
+    const indices = await this.codeIndices();
+    if (indices.length === 0) return emptyResult("symbol");
+
+    const result = await this.leg(
+      indices.join(","),
+      {
+        size: clamp(options.k ?? 3, 1, MAX_K),
+        _source: DEFINITION_SOURCE,
+        sort: [{ start_line: { order: "asc", missing: "_last" } }],
+        query: {
+          bool: {
+            must: [{ term: { ax_path: relative } }, { term: { name: name.trim() } }],
+          },
+        },
+      },
+      options.signal,
+    );
+
+    // Symbol records carry `start_line`, while the formatter reads `line`.
+    const hits = result.hits
+      .slice(0, clamp(options.k ?? 3, 1, MAX_K))
+      .map((hit) => ({ ...hit, line: hit.startLine }));
+    return formatResult(
+      hits,
+      "symbol",
+      budgetChars(options.maxTokens ?? 1200),
+      result.narrowing,
+    );
+  }
+
+  /** Indices whose mapping carries source text per symbol record. */
+  private async codeIndices(): Promise<string[]> {
+    const indices = await this.indices();
+    return Object.entries(indices)
+      .filter(([, fields]) => "code" in fields)
+      .map(([name]) => name);
+  }
+
+  /**
+   * A project-relative path. An absolute path outside the project keeps its
+   * own form, because a symbol record can also be a spooled page.
+   */
+  private relativePath(input: string): string | null {
+    const trimmed = input.trim();
+    if (trimmed.length === 0) return null;
+    const absolute = isAbsolute(trimmed) ? trimmed : resolve(this.projectRoot, trimmed);
+    const relativePath = relative(this.projectRoot, absolute);
+    if (relativePath.startsWith("..") || isAbsolute(relativePath)) return trimmed;
+    return relativePath.replace(/^\.\//, "");
   }
 
   private async leg(
@@ -635,6 +755,36 @@ function narrowingBytes(response: unknown): number {
 function budgetChars(maxTokens: number | undefined): number {
   const tokens = maxTokens ?? 800;
   return Math.max(400, tokens * 4);
+}
+
+/** One line per hit: location, kind, and name, with no body text. */
+function listResult(
+  result: LegResult,
+  strategy: SearchResult["strategy"],
+  maxTokens: number | undefined,
+): SearchResult {
+  const budget = budgetChars(maxTokens);
+  const lines: string[] = [];
+  let used = 0;
+
+  for (const [index, hit] of result.hits.entries()) {
+    const line = hit.startLine === null ? "" : `:${hit.startLine}`;
+    const kind = hit.kind === null ? "" : ` [${hit.kind}]`;
+    const name = hit.title === null ? "" : ` ${hit.title}`;
+    const row = `${index + 1}. ${hit.path ?? hit.index}${line}${kind}${name}`;
+    if (used + row.length + 1 > budget) break;
+    lines.push(row);
+    used += row.length + 1;
+  }
+
+  const text = lines.join("\n");
+  return {
+    hits: result.hits,
+    text,
+    bytes: Buffer.byteLength(text, "utf8"),
+    strategy,
+    narrowingBytes: result.narrowing,
+  };
 }
 
 function emptyResult(strategy: SearchResult["strategy"]): SearchResult {

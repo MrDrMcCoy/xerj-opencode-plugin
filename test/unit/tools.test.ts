@@ -168,6 +168,86 @@ describe("the rest of the tool surface", () => {
     expect(result.metadata.xerj).toMatchObject({ hits: 1 });
   });
 
+  test("refs lists the declarations that use a symbol", async () => {
+    const calls: Array<{ symbol: string; k?: number }> = [];
+    const run = allTools({
+      search: {
+        references: async (symbol: string, options: { k?: number }) => {
+          calls.push({ symbol, k: options.k });
+          return { hits: [{ path: "src/a.ts", line: 12 }], text: "1. src/a.ts:12", bytes: 15 };
+        },
+      } as unknown as SearchService,
+    });
+    const result = await run("refs", { symbol: "buildTools" });
+
+    expect(result.content).toContain("src/a.ts:12");
+    expect(result.metadata.xerj).toMatchObject({ hits: 1 });
+    expect(calls).toEqual([{ symbol: "buildTools", k: undefined }]);
+  });
+
+  test("refs says so when the symbol is unused", async () => {
+    const run = allTools({
+      search: {
+        references: async () => ({ hits: [], text: "", bytes: 0 }),
+      } as unknown as SearchService,
+    });
+    const result = await run("refs", { symbol: "unusedThing" });
+
+    expect(result.content).toContain("No declaration in the index uses unusedThing");
+  });
+
+  test("outline lists a file's symbols", async () => {
+    const run = allTools({
+      search: {
+        outline: async () => ({
+          hits: [{ path: "src/a.ts", line: 3 }],
+          text: "1. src/a.ts:3 [function] run",
+          bytes: 30,
+        }),
+      } as unknown as SearchService,
+    });
+    const result = await run("outline", { path: "src/a.ts" });
+
+    expect(result.content).toContain("src/a.ts:3");
+    expect(result.metadata.xerj).toMatchObject({ hits: 1 });
+  });
+
+  test("outline reports a file with no indexed symbols", async () => {
+    const run = allTools({
+      search: { outline: async () => ({ hits: [], text: "", bytes: 0 }) } as unknown as SearchService,
+    });
+    const result = await run("outline", { path: "notes.md" });
+
+    expect(result.content).toContain("No symbols indexed for notes.md");
+  });
+
+  test("zoom returns one declaration and caps k", async () => {
+    const seen: Array<{ path: string; name: string; k?: number }> = [];
+    const run = allTools({
+      search: {
+        symbol: async (path: string, name: string, options: { k?: number }) => {
+          seen.push({ path, name, k: options.k });
+          return { hits: [{ path, line: 7 }], text: "[1] src/a.ts:7\nfunction run() {}", bytes: 40 };
+        },
+      } as unknown as SearchService,
+    });
+    const result = await run("zoom", { path: "src/a.ts", symbol: "run", k: 40 });
+
+    expect(result.content).toContain("function run()");
+    expect(seen[0]?.k).toBe(10);
+  });
+
+  test("zoom reports a missing symbol", async () => {
+    const run = allTools({
+      search: {
+        symbol: async () => ({ hits: [], text: "", bytes: 0 }),
+      } as unknown as SearchService,
+    });
+    const result = await run("zoom", { path: "src/a.ts", symbol: "nope" });
+
+    expect(result.content).toContain("No declaration named nope in src/a.ts");
+  });
+
   test("remember reports whether it was new", async () => {
     const run = allTools({
       memory: {

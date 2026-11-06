@@ -86,13 +86,16 @@ describe("McpHost", () => {
       "def",
       "forget",
       "index",
+      "outline",
       "prjdocs",
       "recall",
+      "refs",
       "reindex",
       "remember",
       "search",
       "status",
       "sysdocs",
+      "zoom",
     ]);
     // Every tool carries a description and a JSON schema; a client rejects one
     // that does not.

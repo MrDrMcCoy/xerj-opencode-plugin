@@ -475,3 +475,120 @@ describe("symbol and title leg", () => {
     expect(result.hits.length).toBeGreaterThan(0);
   });
 });
+
+describe("symbol navigation", () => {
+  const codeMappings = {
+    "xop-p-docs": { ax_path: "keyword", code: "text", name: "keyword", start_line: "integer" },
+  };
+
+  function codeHit(name: string, line: number, code = "export function x() {}"): unknown {
+    return {
+      _index: "xop-p-docs",
+      _id: `id-${name}-${line}`,
+      _score: 3,
+      _source: {
+        ax_path: "src/a.ts",
+        name,
+        kind: "function",
+        start_line: line,
+        code,
+      },
+    };
+  }
+
+  test("references list the declarations that use a symbol", async () => {
+    const client = fakeClient({
+      mappingsResult: codeMappings,
+      searchResults: [{ hits: { hits: [codeHit("caller", 12), codeHit("other", 40)] } }],
+    });
+
+    const result = await service(client).references("buildTools");
+
+    expect(result.strategy).toBe("references");
+    expect(result.text).toContain("src/a.ts:12");
+    expect(result.text).toContain("src/a.ts:40");
+    expect(result.hits).toHaveLength(2);
+    const body = client.searches[0]?.body as { query?: unknown };
+    expect(body.query).toEqual({ match: { code: "buildTools" } });
+  });
+
+  test("an outline is ordered by line and carries kind and name", async () => {
+    const client = fakeClient({
+      mappingsResult: codeMappings,
+      searchResults: [{ hits: { hits: [codeHit("second", 40), codeHit("first", 3)] } }],
+    });
+
+    const result = await service(client).outline("src/a.ts");
+
+    expect(result.strategy).toBe("outline");
+    const rows = result.text.split("\n");
+    expect(rows[0]).toContain("src/a.ts:3");
+    expect(rows[0]).toContain("first");
+    expect(rows[1]).toContain("src/a.ts:40");
+    const body = client.searches[0]?.body as { query?: unknown };
+    expect(body.query).toEqual({ term: { ax_path: "src/a.ts" } });
+  });
+
+  test("zoom returns one declaration's source", async () => {
+    const client = fakeClient({
+      mappingsResult: codeMappings,
+      searchResults: [
+        { hits: { hits: [codeHit("buildTools", 7, "export function buildTools(options) {")] } },
+      ],
+    });
+
+    const result = await service(client).symbol("src/a.ts", "buildTools");
+
+    expect(result.strategy).toBe("symbol");
+    expect(result.text).toContain("src/a.ts:7");
+    expect(result.text).toContain("export function buildTools");
+    const body = client.searches[0]?.body as { query?: { bool?: unknown } };
+    expect(body.query?.bool).toEqual({
+      must: [{ term: { ax_path: "src/a.ts" } }, { term: { name: "buildTools" } }],
+    });
+  });
+
+  test("an absolute path inside the project becomes relative", async () => {
+    const client = fakeClient({
+      mappingsResult: codeMappings,
+      searchResults: [{ hits: { hits: [] } }],
+    });
+
+    await service(client).outline(join(root, "src", "a.ts"));
+
+    const body = client.searches[0]?.body as { query?: unknown };
+    expect(body.query).toEqual({ term: { ax_path: "src/a.ts" } });
+  });
+
+  test("a path outside the project is used as given", async () => {
+    const client = fakeClient({
+      mappingsResult: codeMappings,
+      searchResults: [{ hits: { hits: [] } }],
+    });
+
+    await service(client).outline("/elsewhere/notes.md");
+
+    const body = client.searches[0]?.body as { query?: unknown };
+    expect(body.query).toEqual({ term: { ax_path: "/elsewhere/notes.md" } });
+  });
+
+  test("an index without a code field answers nothing", async () => {
+    const client = fakeClient({
+      mappingsResult: { "xop-p-docs": { body: "semantic_text" } },
+    });
+
+    expect((await service(client).references("x")).hits).toEqual([]);
+    expect((await service(client).outline("src/a.ts")).hits).toEqual([]);
+    expect((await service(client).symbol("src/a.ts", "x")).hits).toEqual([]);
+  });
+
+  test("an empty symbol or path makes no request", async () => {
+    const client = fakeClient({ mappingsResult: codeMappings });
+
+    await service(client).references("   ");
+    await service(client).outline("");
+    await service(client).symbol("src/a.ts", "  ");
+
+    expect(client.searches).toEqual([]);
+  });
+});
