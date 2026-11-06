@@ -283,12 +283,13 @@ test/unit/*.test.ts    pure-function tests
 
 ## Work in progress
 
-Local telemetry is designed in `roadmap.md` (Tier S, about 8.5 h) and not
-started. It records every operation's type, duration, outcome, and up to 160
-characters of redacted caller text into bounded NDJSON files under
-`<data root>/telemetry`, keeps a per-type ring of samples plus a per-day
-rollup, and tracks boot phases, crashes, and restarts through a per-instance
-marker. Exposed through `xerj_telemetry` and the panel. On by default, local
+Local telemetry is designed in `roadmap.md` (Tier S, about 10.5 h) and not
+started. It records every operation's type, duration, outcome, idle/busy load,
+and up to 160 characters of redacted caller text into bounded NDJSON files
+under `<data root>/telemetry`, keeps a per-type ring of samples plus a per-day
+rollup, tracks boot phases, crashes, and restarts through a per-instance
+marker, and publishes a five-state service model (`ready`, `busy`, `degraded`,
+`starting`, `stopped`) to both the UI and the report. On by default, local
 only, capped at 128 MiB.
 
 Nothing else. M0–M6 and in-project storage are committed; only the restart,

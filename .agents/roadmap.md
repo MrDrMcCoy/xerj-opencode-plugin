@@ -267,7 +267,7 @@ root, and it stays in this tier because it needs no process and no network.
 | Sidebar rebuild | AFT and Magic Context, layout only | Bordered box with a `▼ XERJ` accent header, click to collapse, three summary rows when collapsed and named sections when expanded; per-section on/off and collapse memory in the shared `tui-preferences.jsonc` under key `xerj` (`order` is not offered: this host's slots take `prepend`/`append` only); inline `⚠` for a failing corpus; 150 ms refresh debounce | Collapsed and expanded views both render from `StatusSnapshot` alone, a click survives a view switch, and formatting stays pure and tested |
 | **Config example formatting** | This plugin | Rewrite the complete-default options block in the README (and the copy in `plan.md` §3) as one key per line, grouped by section, with a comment naming the default and its unit; the README block omits 21 defaults today, including `node.logMaxBytes`, `index.graph`, `index.git`, `index.gitLimit`, `context.archiveEnabled`, `context.archiveMaxBytes`, every `prjdocs.*`, and every `sysdocs.*`; the `plan.md` copy is staler still (`context.maxPassages` reads 4 against a default of 8) | The block parses as JSONC, its key set equals `DEFAULT_CONFIG`, and a test fails when a new option lands without updating the example |
 | **CPU affinity (`node.cpus`)** | This plugin | Confine every XERJ process to a chosen CPU set: explicit indices and inclusive ranges, `odd` (the default), `even`, or a percentage of the CPUs available to the process, rounded down | `node.cpus: "0-3,8"` confines the node and every index run on Linux, `"50%"` resolves against the available CPU count, `null` or `"all"` leaves affinity unchanged, and an unsupported platform behaves as it does today |
-| **Local telemetry** | This plugin | Record every operation with its type, duration, and outcome into bounded files under the XERJ data root, plus boot phases, crashes, and restarts, so the plugin's own performance can be measured and improved | `xerj_telemetry` reports count, error rate, p50/p95, and total time per type, and the last ten boots with their setup/ready/indexed figures and crash counts; with telemetry on, retrieval p50 and p95 do not move and no flush lands inside a turn; the store never exceeds `telemetry.maxBytes` |
+| **Local telemetry** | This plugin | Record every operation with its type, duration, and outcome into bounded files under the XERJ data root, plus boot phases, crashes, restarts, and the split between idle and busy time, so the plugin's own performance can be measured and improved | `xerj_telemetry` reports count, error rate, p50/p95 split by idle and busy, total time per type, the last ten boots, and crash counts; the sidebar and panel show `ready`, `busy` with the running job, `degraded`, `starting`, or `stopped`; with telemetry on, retrieval p50 and p95 do not move and no flush lands inside a turn; the store never exceeds `telemetry.maxBytes` |
 
 ### CPU affinity value syntax
 
@@ -378,7 +378,7 @@ new file. Groups and their types:
 | hooks | `hook.prompt`, `hook.context`, `hook.tool` |
 | graph | `graph.ego`, `graph.overview` |
 | archive | `archive.append`, `archive.expand` |
-| lifecycle | `lifecycle.boot`, `lifecycle.ready`, `lifecycle.indexed`, `lifecycle.crash`, `lifecycle.restart` |
+| lifecycle | `lifecycle.boot`, `lifecycle.ready`, `lifecycle.indexed`, `lifecycle.state`, `lifecycle.crash`, `lifecycle.restart` |
 
 Two of those groups are wrapped generically rather than at each call site.
 `buildTools` times every tool it returns, and the RPC registration times every
@@ -393,7 +393,7 @@ One JSON object per line, so `tail`, `jq`, and a line-oriented reader all work
 without a parser dependency:
 
 ```jsonc
-{"at":1762470000000,"op":"search","ms":12,"ok":true,
+{"at":1762470000000,"op":"search","ms":12,"ok":true,"load":0,
  "prefix":"xop-xerj-opencode-plugin-1a2b3c4d",
  "meta":{"hits":6,"bytes":8120,"leg":"fused"}}
 ```
@@ -511,6 +511,83 @@ The report shows the last ten boots as `setup 12 ms · ready 1.2 s · indexed
 per day. One node that dies after four minutes is a different problem from one
 that runs all day and stops on idle, and only the uptime separates them.
 
+#### Ready versus busy
+
+`node.phase` already reports `starting`, `ready`, `error`, and `disabled`, and
+each corpus reports `starting`, `watching`, or `idle`. Neither answers the
+question a user asks during a cold start: "it says ready, so why is search
+slow?" A node that answers and is also building the index is ready to serve
+and busy doing work. Those are different facts with different consequences,
+and today the sidebar shows only the corpus state.
+
+One place computes five service states and publishes them to both the UI and
+telemetry:
+
+| State | Means | Shown as |
+|---|---|---|
+| `starting` | setup done, node not answering yet | `◐ starting · 1.4 s` |
+| `ready` | node answers, no job running | `● ready` |
+| `busy` | node answers, at least one job running | `◐ busy · indexing · 12 s` |
+| `degraded` | ready, but a corpus errors or an index is missing | `▲ degraded · memory missing` |
+| `stopped` | node down after an idle stop | `○ stopped` |
+
+Busy does not mean unready. A query still answers during an index pass; it can
+answer slower, because the node shares its scan pool with the indexer. Saying
+`busy` instead of `ready` is what keeps the badge honest, and recording the
+load is what lets the telemetry separate the two cases later.
+
+Precedence is `starting`, `stopped`, `degraded`, `busy`, `ready`. A broken
+index outranks a slow one for the badge, and the running jobs stay listed in
+the expanded view and the panel. The existing `⚠` line for a failing corpus
+stays where it is.
+
+The jobs that make the state busy are the long ones, named by a `JobKind`
+enum: `spawn`, `index`, `embed`, `hidden`, `web`, `brain`, `git`, `archive`,
+`prjdocs`, `sysdocs`, `install`. A reference-counted registry means the
+project index and the web pass can overlap without the first to finish
+clearing the state. `snapshot.embeddings` folds into an `embed` job and is
+removed once the panel reads jobs.
+
+Each job carries its kind, a short label, and a start time. The elapsed figure
+is computed in the UI from the start time on a one-second tick while busy, so
+the sidebar counts up without an RPC per second; the state itself only changes
+through the snapshot, which is pushed on the existing `updated` event and
+falls back to the 30-second poll.
+
+A job past its deadline is the failure that matters here: a leaked job would
+report `busy` forever. Each kind gets a deadline (index 30 minutes, docs 20,
+install 10, the rest 5), and a job past it is marked stale, stops counting
+toward the state, and warns once.
+
+Transitions are telemetry too. `lifecycle.state` records `from`, `to`, and a
+reason, and the per-day rollup accumulates the time spent in each state, so
+the day reads `ready 6h 12m · busy 48m · degraded 3m · starting 1.2s`. A
+transition is recorded even when it lasts a second; only the UI update is
+debounced, by the sidebar's existing 150 ms.
+
+Every operation record carries `load`, the number of jobs running when it
+started. 0 means idle. The report groups latency by idle and busy, so a p95
+measured during an index pass is not mistaken for a retrieval regression.
+
+The snapshot gains one block:
+
+```ts
+state: {
+  name: "starting" | "ready" | "busy" | "degraded" | "stopped";
+  since: number;          // epoch ms of the current state
+  detail: string | null;  // "indexing", "memory missing"
+  jobs: ReadonlyArray<{ kind: string; label: string; startedAt: number }>;
+  today: Readonly<{
+    startingMs: number; readyMs: number; busyMs: number; degradedMs: number;
+  }>;
+}
+```
+
+The sidebar header becomes `▼ XERJ ● ready` or `▼ XERJ ◐ busy · indexing`,
+and the expanded view gains a `State` section with the current state's age, the
+running jobs, and the day's dwell split. The panel opens with the same section
+above corpora, so the first thing it answers is "what is it doing right now".
+
 #### The size limit
 
 `telemetry.maxBytes` defaults to 134217728 (128 MiB) and covers the whole
@@ -535,9 +612,11 @@ files are also written by another process.
 `xerj_telemetry` takes `op` (a type, a prefix like `tool.`, or omitted for
 all), `window` (`session`, `day`, or `all`, default `day`), `sort` (`count`,
 `p95`, `total`, or `errors`), and `limit` (default 20). It returns one row per
-type: count, errors, p50, p95, max, and total milliseconds; a `starts` block
-with the last ten boots, their setup/ready/indexed figures, and the crash and
-restart counts; the store's size; and the date the surviving history starts.
+type: count, errors, p50, p95, max, and total milliseconds, split into idle and
+busy by `load`; a `starts` block with the last ten boots, their
+setup/ready/indexed figures, and the crash and restart counts; a `state` block
+with the day's dwell split; the store's size; and the date the surviving
+history starts.
 
 The panel gains a telemetry section with the five busiest types, the last
 boot's `ready` figure, any unclean shutdown, and the line
@@ -583,6 +662,8 @@ two sentences, because that is where a model and a user will read them.
 | a boot marker survives a crash | the next start records the crash and rewrites the marker; nothing blocks setup |
 | two instances leave markers | each has its own file and pid; a marker whose pid is alive is ignored |
 | the previous run was killed before any milestone | the crash record carries `phase: "setup"`, which is still a signal |
+| a job leaks and never ends | a job past its per-kind deadline stops counting toward busy and warns once; the badge cannot stick on `busy` |
+| a job flaps on and off | every transition is recorded; only the UI update is debounced |
 
 #### Tests
 
@@ -603,6 +684,15 @@ records a crash and a restart with the attempt number; an idle stop records
 `lifecycle.restart` with `reason: "idle"` and no crash; `maxText: 160`
 clips a long string and redacts a bearer token inside it.
 
+State tests: the precedence order holds when several conditions are true;
+two overlapping jobs keep the state busy until both end; a job past its
+deadline stops counting and warns once; every transition records `from`,
+`to`, and a reason; dwell time sums across a day boundary and across a
+restart; a one-second busy period is recorded even though the UI update is
+debounced; every operation record carries the load that was running;
+`xerj_telemetry` splits p50/p95 by idle and busy; the sidebar renders each of
+the five states and counts the busy elapsed from `startedAt` with no RPC.
+
 Integration: drive one retrieval and one tool call with telemetry on, then
 assert both appear in `ops.ndjson` and in their rings, and that the count in
 the rollup matches. Then stop the node through the plugin and assert the next
@@ -613,9 +703,9 @@ time on this repository with telemetry off and on. On must be within noise,
 and no flush may appear inside a turn. If it does not hold, the flush moves
 off the turn path or the feature ships off by default.
 
-Effort: about 8.5 hours. Store and sweep 2 h, span API and generic wraps
-1.5 h, lifecycle records and crash detection 1.5 h, report and tool 1.5 h,
-tests 2 h.
+Effort: about 10.5 hours. Store and sweep 2 h, span API and generic wraps
+1.5 h, lifecycle records and crash detection 1.5 h, service state and the
+two UI surfaces 1.5 h, report and tool 1.5 h, tests 2.5 h.
 
 ## Tier M: one to three weeks, high suitability
 
@@ -691,6 +781,8 @@ tests 2 h.
 | Telemetry captures private text | `meta` is a fixed set of scalar fields, error messages are never recorded, and caller text is clipped at `telemetry.maxText` (160) and passed through `redact()` first; prompts and file bodies are never recorded |
 | Two instances corrupt the rings | Appends are atomic under O_APPEND; only the lock owner rewrites a file, and a stale lock is taken over after 60 s |
 | A crash is miscounted as a clean stop, or twice | The marker is removed on every teardown path, an idle stop is recorded as `idle` and not as a crash, and node crashes are deduped by pid and pidfile mtime |
+| The badge says `ready` while work is running | Every long job registers in one reference-counted registry: corpus runs, embeddings, docs runs, and installs; a test asserts `busy` for each |
+| The badge sticks on `busy` after a leaked job | Each kind has a deadline, and a job past it stops counting toward the state and warns once |
 | A leftover crash marker blocks startup | The marker is read after setup has registered its tools, never before; a read failure is a warning and a fresh marker |
 
 ## Sequencing and gates
@@ -737,7 +829,7 @@ measured; they include tests and the commits that carry them. A status of
 | `prjdocs` keyword surfacing | S | Done | 0.2 h | `config.prjdocsKeywords` in the status, a panel line, and the command description |
 | Config example formatting | S | Done | 0.5 h | README block is one key per line with comments; `test/unit/config-example.test.ts` compares every flattened key and value with `DEFAULT_CONFIG`; `plan.md` §3 is a readable subset that points at the README for the full set |
 | CPU affinity (`node.cpus`) | S | Done | 1.5 h | `src/node/priority.ts` parses lists, ranges, `odd`, `even`, and percentages; resolves against `/proc/self/status` on Linux; applies `taskset -a -pc`, `ProcessorAffinity`, or one macOS warning; wired into node, watcher, and brain spawns; 29 unit tests |
-| Local telemetry | S | Not started | — | Design settled: ops log, per-type rings, and per-day rollups under `<data root>/telemetry`, a closed `OpType` set, generic wraps for tools and RPC, owner-only compaction, a 128 MiB sweep, and lifecycle records for boot phases, crashes, and restarts. About 8.5 h |
+| Local telemetry | S | Not started | — | Design settled: ops log, per-type rings, and per-day rollups under `<data root>/telemetry`, a closed `OpType` set, generic wraps for tools and RPC, owner-only compaction, a 128 MiB sweep, lifecycle records for boot phases, crashes, and restarts, and a five-state service model (`ready`, `busy`, `degraded`, `starting`, `stopped`) shared by the UI and the report. About 10.5 h |
 | Graph overview in the panel | M | Done (earlier) | 0 h this pass | Brains already report docs and live edges; the corpora list covers the rest |
 | Import graph and cycles | M | Done | 2.0 h | `analysis/imports.ts` plus `xerj_imports`; relative, Python, Go, and Rust specifiers resolve against project files, unresolved ones are counted; ten module tests and four tool tests |
 | Regex and glob search | M | Done | 1.5 h | `analysis/find.ts` plus `xerj_find`: glob-to-regex with `**` spanning folders, line-numbered matches, secret files skipped, 200-match cap; ten module tests and three tool tests |
