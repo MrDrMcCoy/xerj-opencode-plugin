@@ -42,16 +42,25 @@ async function resolveBinary(root: string): Promise<string | null> {
 
 interface Captured {
   readonly ctx: Record<string, unknown>;
-  readonly tools: Array<{ name: string; execute: (input: never) => Promise<unknown> }>;
+  readonly tools: Array<{
+    name: string;
+    execute: (input: never, context?: never) => Promise<unknown>;
+  }>;
   readonly status: () => Promise<Record<string, unknown>>;
+  readonly call: (method: string, input?: unknown) => Promise<unknown>;
   readonly callSearch: (query: string) => Promise<string>;
+  readonly runTool: (name: string, input: unknown) => Promise<string>;
+  readonly runHook: (name: string, event: unknown) => Promise<void>;
 }
 
 function stubHost(projectRoot: string, options: Record<string, unknown>): Captured {
   const store = new Map<string, unknown>();
   const tools: Captured["tools"] = [];
+  const handlerMap: Record<string, (input?: unknown) => Promise<unknown>> = {};
+  const hooks: Record<string, (event: unknown) => Promise<void>> = {};
   let status: () => Promise<Record<string, unknown>> = async () => ({});
   let search: ((query: string) => Promise<string>) | null = null;
+  const handlers: Record<string, (input?: unknown) => Promise<unknown>> = {};
 
   const ctx = {
     options,
@@ -67,7 +76,9 @@ function stubHost(projectRoot: string, options: Record<string, unknown>): Captur
           add: (tool: { name: string }) => void tools.push(tool as never),
         } as never);
       },
-      hook: async () => {},
+      hook: async (name: string, handler: (event: unknown) => Promise<void>) => {
+        hooks[name] = handler;
+      },
     },
     session: { hook: async () => {} },
     rpc: {
@@ -76,6 +87,11 @@ function stubHost(projectRoot: string, options: Record<string, unknown>): Captur
           | (() => Promise<Record<string, unknown>>)
           | undefined;
         if (statusHandler) status = () => statusHandler();
+        for (const [name, handler] of Object.entries(handlers)) {
+          handlerMap[name] = handler as unknown as
+            | ((input?: unknown) => Promise<unknown>)
+            | undefined as never;
+        }
         const searchHandler = handlers.search as unknown as
           | ((input: { query: string }) => Promise<{ text: string }>)
           | undefined;
@@ -100,9 +116,27 @@ function stubHost(projectRoot: string, options: Record<string, unknown>): Captur
     ctx: ctx as unknown as Record<string, unknown>,
     tools,
     status: () => status(),
+    call: async (method, input) => {
+      const handler = handlerMap[method];
+      if (!handler) throw new Error(`${method} is not registered`);
+      return handler(input);
+    },
     callSearch: async (query) => {
       if (!search) throw new Error("search is not registered");
       return search(query);
+    },
+    runHook: async (name, event) => {
+      const hook = hooks[name];
+      if (!hook) throw new Error(`${name} hook is not registered`);
+      await hook(event);
+    },
+    runTool: async (name, input) => {
+      const tool = tools.find((candidate) => candidate.name === name);
+      if (!tool) throw new Error(`${name} tool is not registered`);
+      const result = (await tool.execute(input as never, {
+        signal: new AbortController().signal,
+      } as never)) as { content: string };
+      return result.content;
     },
   };
 }
@@ -130,6 +164,12 @@ describe("plugin setup end to end", () => {
     const project = join(root, "project");
     await Bun.write(join(project, "src/alpha.ts"), "export const zephyrmarker = 42;\n");
     await Bun.write(join(project, "docs/guide.md"), "# Guide\n\nBuild notes.\n");
+    await Bun.write(
+      join(project, ".agents/note.md"),
+      "# Note\n\nThe hiddenfolder token marks a project note.\n",
+    );
+    const outside = join(root, "outside.md");
+    await Bun.write(outside, "# Outside\n\nThe outsidemarker token is not in the project.\n");
 
     const previous = process.env.XDG_DATA_HOME;
     process.env.XDG_DATA_HOME = join(root, "data-home");
@@ -138,8 +178,8 @@ describe("plugin setup end to end", () => {
       binary: { path: binaryPath },
       index: { neural: false, semantic: false, watch: false, auto: true },
       node: { port: 9830 + Math.floor(Math.random() * 40) },
-      remote: { enabled: false },
-      memory: { enabled: false },
+      remote: { enabled: true },
+      memory: { enabled: true },
     });
 
     const cleanup = (await plugin.setup(host.ctx as never)) as () => void;
@@ -151,8 +191,9 @@ describe("plugin setup end to end", () => {
       while (Date.now() < deadline) {
         const snapshot = await host.status();
         const index = snapshot.index as { docs: number };
+        const node = snapshot.node as { phase: string };
         docs = index.docs;
-        if (docs > 0) break;
+        if (docs > 0 && node.phase === "ready") break;
         await Bun.sleep(500);
       }
 
@@ -166,8 +207,55 @@ describe("plugin setup end to end", () => {
       const text = await host.callSearch("zephyrmarker");
       expect(text).toContain("src/alpha.ts");
 
-      const statusTool = host.tools.find((tool) => tool.name === "status");
-      expect(statusTool).toBeDefined();
+      // The hidden folder is indexed beside the project corpus, and the
+      // corpora section reports it.
+      const corpora = (await host.status()).corpora as Array<{
+        name: string;
+        docs: number | null;
+        state: string;
+      }>;
+      const hidden = corpora.find((row) => row.name === "hidden");
+      expect(hidden?.state).toBe("watching");
+      expect(hidden?.docs ?? 0).toBeGreaterThan(0);
+
+      // A read outside the project spools in the background.
+      await host.runHook("execute.after", {
+        tool: "read",
+        status: "completed",
+        sessionID: "s1",
+        input: { filePath: outside },
+        result: { content: "The outsidemarker token is not in the project." },
+      });
+      const externalDeadline = Date.now() + 20_000;
+      let externalDocs = 0;
+      while (Date.now() < externalDeadline) {
+        const snapshot = await host.status();
+        const index = snapshot.index as { datasets?: Array<{ name: string; docs: number }> };
+        externalDocs = index.datasets?.find((row) => row.name === "external")?.docs ?? 0;
+        if (externalDocs > 0) break;
+        await Bun.sleep(300);
+      }
+      expect(externalDocs).toBeGreaterThan(0);
+
+      // The status tool answers through the same wiring.
+      const statusTool = await host.runTool("status", {});
+      expect(statusTool).toContain("pluginVersion");
+      expect(statusTool).toContain("corpora");
+
+      // The tool surface reaches the same index through the real client.
+      const tool = await host.runTool("search", { query: "zephyrmarker" });
+      expect(tool).toContain("src/alpha.ts");
+
+      // Memory round-trips through the real node.
+      const remembered = (await host.call("remember", {
+        text: "the end-to-end test stores this fact",
+      })) as { id?: string };
+      expect(typeof remembered.id).toBe("string");
+
+      // A reindex reports the records it covered.
+      const reindexed = (await host.call("reindex")) as { queued: boolean };
+      expect(reindexed.queued).toBe(true);
+
       expect(DEFAULT_CONFIG.context.maxPassages).toBeGreaterThan(0);
     } finally {
       cleanup();
