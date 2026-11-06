@@ -340,6 +340,26 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-05: Coverage and readability pass. The server part gained its
+  first tests (`test/unit/setup.test.ts` drives the real `setup` against a
+  stub host): tools, hooks, RPC methods, the overbroad-root refusal, a
+  configuration warning, and the handlers' not-ready answers, so the layer
+  where both shipped wiring faults lived is now guarded. The tool-result
+  hook moved to `src/hooks/tool-results.ts`, one function per signal, with
+  fourteen tests; it had none because it was only reachable through a live
+  server. Lifecycle, client, anomaly, and retention suites reached their
+  failure branches. Overall lines 83% -> 85.5%, functions 91%: `src/index.ts`
+  from 0 to 49%, `client.ts` 73 -> 81%, `lifecycle.ts` 70 -> 88%,
+  `anomaly.ts` 69 -> 100%, `tui.tsx` 71 -> 74%. TUI render functions stay
+  untested: the JSX runtime refuses to run without the host renderer, so
+  only the pure line and panel builders are covered.
+  Readability: `candidatesFrom`, `pickNeighbors`, `comparePrerelease`,
+  `bootstrapRuntime`, `indexerStart`, and the turn-capture handler were
+  split into named steps; the highest remaining complexity is 15. Dead
+  helpers and stale exports are gone. Hidden indexing now skips folders a
+  brain already covers, compared by resolved path. 502 unit and 9
+  integration tests pass.
+
 - 2026-11-05: Memory retention. Capture writes one summary per substantive
   turn and nothing removed them, so the store grew without limit.
   `memory.retain` bounds automatic summaries by age, count, and bytes; the
