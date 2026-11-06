@@ -6,7 +6,7 @@ import type { BrainSpec, DocumentRoot } from "../paths.ts";
 // leaving an empty search to explain itself.
 
 /** Dot-directories that commonly hold project notes. */
-export const DOC_FOLDERS = [".agents", ".github", ".claude"] as const;
+const DOC_FOLDERS = [".agents", ".github", ".claude"] as const;
 
 /**
  * The docs folders present in this project. Used as the default hidden corpus

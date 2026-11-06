@@ -4,7 +4,7 @@
 
 import { existsSync } from "node:fs";
 import { mkdir, stat, writeFile } from "node:fs/promises";
-import { isAbsolute, join, resolve, sep } from "node:path";
+import { join, resolve } from "node:path";
 import { Plugin } from "@opencode/plugin";
 import { detectRuntime } from "./binary/detect.ts";
 import { ensureBinary, externalBinary, type InstalledBinary } from "./binary/manager.ts";
@@ -437,111 +437,120 @@ export default Plugin.define({
     let client: XerjClient | null = null;
     let indexerStart: Promise<void> | null = null;
 
+    /** Tells the UI that a corpus changed, so the sidebar refreshes. */
+    const publishChange = (): void => {
+      runtime.search?.invalidate();
+      void registration.events
+        .emit("updated", { updatedAt: Date.now() })
+        .catch(() => {});
+    };
+
+    /**
+     * Runs before any pass so a mode change rebuilds from an empty corpus
+     * rather than mixing vectors from two embedders. A failure is logged and
+     * indexing continues: an unreconciled mode is a warning, not a stop.
+     */
+    const reconcileMode = async (handle: NodeHandle): Promise<void> => {
+      const rebuilt = await reconcileEmbedMode({
+        client: new XerjClient(handle.baseUrl),
+        nodeDir,
+        stateDir: corpusLayout(projectRoot, prefix, stateRoot).stateDir,
+        mode: config.index.neural ? EmbedMode.Neural : EmbedMode.Lexical,
+      }).catch((error: unknown) => {
+        logger.warn("could not reconcile the embedding mode", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return false;
+      });
+      if (rebuilt) logger.info("rebuilding indices for the embedding mode");
+    };
+
+    const startProjectIndexer = async (handle: NodeHandle): Promise<void> => {
+      if (runtime.corpus !== null || overbroad) return;
+
+      runtime.corpus = new CorpusService({
+        binaryPath: runtime.binary?.path ?? "",
+        nodeUrl: handle.baseUrl,
+        projectRoot,
+        prefix,
+        stateRoot,
+        config,
+        storage,
+        logger,
+        priority: config.node.priority,
+        onRun: () => counters.noteIndexRun(),
+        onChange: publishChange,
+      });
+      await runtime.corpus.start();
+    };
+
+    const startWebIndexer = async (handle: NodeHandle): Promise<void> => {
+      if (runtime.web !== null || runtime.spool === null || client === null) return;
+
+      runtime.web = new CorpusService({
+        binaryPath: runtime.binary?.path ?? "",
+        nodeUrl: handle.baseUrl,
+        projectRoot: runtime.spool.directory,
+        prefix: webPrefix(projectRoot),
+        stateRoot,
+        config,
+        storage,
+        logger,
+        priority: config.node.priority,
+        onRun: () => counters.noteIndexRun(),
+        onChange: publishChange,
+      });
+      await runtime.web.start();
+    };
+
+    const startHiddenIndexer = async (): Promise<void> => {
+      if (runtime.hidden !== null || runtime.hiddenRoots.length === 0 || client === null) {
+        return;
+      }
+
+      runtime.hidden = new HiddenIndex({
+        client,
+        projectRoot,
+        prefix,
+        roots: runtime.hiddenRoots,
+        maxBytes: config.index.hiddenMaxBytes,
+        logger,
+        onRun: () => counters.noteIndexRun(),
+        onChange: publishChange,
+      });
+      if (config.index.auto && !overbroad) await runtime.hidden.start();
+    };
+
+    const startBrainIndexer = (handle: NodeHandle): void => {
+      if (runtime.brains.length === 0 || overbroad) return;
+
+      runtime.brain = new BrainIndexer({
+        binaryPath: runtime.binary?.path ?? "",
+        nodeUrl: handle.baseUrl,
+        stateRoot,
+        config,
+        specs: runtime.brains,
+        logger,
+        observer,
+        onRun: () => counters.noteIndexRun(),
+        onChange: publishChange,
+      });
+
+      // One-shot: graph indexing cannot run in watch mode. `index.auto` gates
+      // startup runs only; an explicit reindex still works.
+      if (config.index.auto) void runtime.brain.runAll();
+    };
+
     /** Starts the indexers for a live node; idempotent per node lifetime. */
     const startIndexers = (handle: NodeHandle): Promise<void> => {
       if (indexerStart) return indexerStart;
 
       indexerStart = (async () => {
-        // Runs before any pass so a mode change rebuilds from an empty corpus.
-        const rebuilt = await reconcileEmbedMode({
-          client: new XerjClient(handle.baseUrl),
-          nodeDir,
-          stateDir: corpusLayout(projectRoot, prefix, stateRoot).stateDir,
-          mode: config.index.neural ? EmbedMode.Neural : EmbedMode.Lexical,
-        }).catch((error: unknown) => {
-          logger.warn("could not reconcile the embedding mode", {
-            error: error instanceof Error ? error.message : String(error),
-          });
-          return false;
-        });
-        if (rebuilt) logger.info("rebuilding indices for the embedding mode");
-
-        if (runtime.corpus === null && !overbroad) {
-          runtime.corpus = new CorpusService({
-            binaryPath: runtime.binary?.path ?? "",
-            nodeUrl: handle.baseUrl,
-            projectRoot,
-            prefix,
-            stateRoot,
-            config,
-            storage,
-            logger,
-            priority: config.node.priority,
-            onRun: () => counters.noteIndexRun(),
-            onChange: () => {
-              runtime.search?.invalidate();
-              void registration.events
-                .emit("updated", { updatedAt: Date.now() })
-                .catch(() => {});
-            },
-          });
-          await runtime.corpus.start();
-        }
-
-        if (runtime.web === null && runtime.spool && client) {
-          runtime.web = new CorpusService({
-            binaryPath: runtime.binary?.path ?? "",
-            nodeUrl: handle.baseUrl,
-            projectRoot: runtime.spool.directory,
-            prefix: webPrefix(projectRoot),
-            stateRoot,
-            config,
-            storage,
-            logger,
-            priority: config.node.priority,
-            onRun: () => counters.noteIndexRun(),
-            onChange: () => {
-              runtime.search?.invalidate();
-              void registration.events
-                .emit("updated", { updatedAt: Date.now() })
-                .catch(() => {});
-            },
-          });
-          await runtime.web.start();
-        }
-
-        if (runtime.hidden === null && runtime.hiddenRoots.length > 0 && client) {
-          runtime.hidden = new HiddenIndex({
-            client,
-            projectRoot,
-            prefix,
-            roots: runtime.hiddenRoots,
-            maxBytes: config.index.hiddenMaxBytes,
-            logger,
-            onRun: () => counters.noteIndexRun(),
-            onChange: () => {
-              runtime.search?.invalidate();
-              void registration.events
-                .emit("updated", { updatedAt: Date.now() })
-                .catch(() => {});
-            },
-          });
-
-          if (config.index.auto && !overbroad) await runtime.hidden.start();
-        }
-
-        if (runtime.brains.length > 0 && !overbroad) {
-          runtime.brain = new BrainIndexer({
-            binaryPath: runtime.binary?.path ?? "",
-            nodeUrl: handle.baseUrl,
-            stateRoot,
-            config,
-            specs: runtime.brains,
-            logger,
-            observer,
-            onRun: () => counters.noteIndexRun(),
-            onChange: () => {
-              runtime.search?.invalidate();
-              void registration.events
-                .emit("updated", { updatedAt: Date.now() })
-                .catch(() => {});
-            },
-          });
-
-          // One-shot: graph indexing cannot run in watch mode. `index.auto`
-          // gates startup runs only; an explicit reindex still works.
-          if (config.index.auto) void runtime.brain.runAll();
-        }
+        await reconcileMode(handle);
+        await startProjectIndexer(handle);
+        await startWebIndexer(handle);
+        await startHiddenIndexer();
+        startBrainIndexer(handle);
       })().finally(() => {
         indexerStart = null;
       });
