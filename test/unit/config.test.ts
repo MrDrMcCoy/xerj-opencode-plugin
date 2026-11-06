@@ -133,3 +133,34 @@ describe("node.priority", () => {
     expect(loaded.warnings.join("\n")).toContain("node.priority must be one of");
   });
 });
+
+describe("memory.retain", () => {
+  test("defaults bound age and size together", () => {
+    const retain = DEFAULT_CONFIG.memory.retain;
+    expect(retain.days).toBe(90);
+    expect(retain.maxCount).toBe(500);
+    expect(retain.maxBytes).toBe(4_000_000);
+  });
+
+  test("each cap can be disabled with zero", () => {
+    const loaded = loadConfig({
+      memory: { retain: { days: 0, maxCount: 0, maxBytes: 0 } },
+    });
+    expect(loaded.config.memory.retain).toEqual({ days: 0, maxCount: 0, maxBytes: 0 });
+  });
+
+  test("partial configuration keeps the other defaults", () => {
+    const loaded = loadConfig({ memory: { retain: { days: 7 } } });
+    expect(loaded.config.memory.retain).toEqual({
+      days: 7,
+      maxCount: 500,
+      maxBytes: 4_000_000,
+    });
+  });
+
+  test("a malformed value warns and falls back", () => {
+    const loaded = loadConfig({ memory: { retain: { maxCount: "many" } } });
+    expect(loaded.config.memory.retain.maxCount).toBe(500);
+    expect(loaded.warnings.join("\n")).toContain("memory.retain.maxCount");
+  });
+});

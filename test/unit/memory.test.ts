@@ -192,3 +192,48 @@ group("MemoryStore.forget", () => {
     expect(await store.forget("abc")).toBe(true);
   });
 });
+
+describe("MemoryStore.list", () => {
+  function withClient(
+    memoryList: () => Promise<Array<{ id: string; text: string; metadata: Record<string, unknown> }>>,
+  ): MemoryStore {
+    return new MemoryStore({ memoryList } as unknown as XerjClient, "proj-test", logger);
+  }
+
+  test("maps id, kind, created, and byte size", () => {
+    const subject = withClient(async () => [
+      {
+        id: "m1",
+        text: "the node idles for thirty minutes",
+        metadata: { kind: "summary", created: "2026-11-01T00:00:00.000Z" },
+      },
+    ]);
+
+    return expect(subject.list(10)).resolves.toEqual([
+      {
+        id: "m1",
+        kind: "summary",
+        created: "2026-11-01T00:00:00.000Z",
+        bytes: 33,
+      },
+    ]);
+  });
+
+  test("treats missing or malformed metadata as unknown", () => {
+    const subject = withClient(async () => [
+      { id: "m1", text: "x", metadata: { kind: 7, created: null } },
+    ]);
+
+    return expect(subject.list(10)).resolves.toEqual([
+      { id: "m1", kind: "", created: null, bytes: 1 },
+    ]);
+  });
+
+  test("a failed list returns nothing instead of throwing", () => {
+    const subject = withClient(async () => {
+      throw new Error("node is down");
+    });
+
+    return expect(subject.list(10)).resolves.toEqual([]);
+  });
+});

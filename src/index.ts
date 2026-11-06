@@ -54,6 +54,7 @@ import {
 } from "./memory/capture.ts";
 import { detectDocsFolders, unindexedDocsHint } from "./index/hint.ts";
 import { recoverMemoryIndex } from "./memory/health.ts";
+import { startRetention } from "./memory/retain.ts";
 import { migrateMemoryIndex, migrateProjectStorage } from "./memory/migrate.ts";
 import { RemoteSpool } from "./remote/spool.ts";
 import { shellReadPaths } from "./remote/shell.ts";
@@ -816,6 +817,13 @@ export default Plugin.define({
       }
 
       await startIndexers(runtime.node);
+
+      // Automatic memory grows with every turn, so its age and size caps are
+      // enforced at startup and once an hour after that. Explicit memories are
+      // exempt; only capture-written summaries expire.
+      if (config.memory.enabled && runtime.memory) {
+        startRetention(runtime.memory, config.memory.retain, shutdown.signal, logger);
+      }
 
       runtime.phase = "ready";
       logger.info("xerj is ready", {

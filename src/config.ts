@@ -68,10 +68,21 @@ export interface ContextOptions {
   readonly timeoutMs: number;
 }
 
+export interface MemoryRetainOptions {
+  /** Days an automatic summary is kept; 0 disables the age cap. */
+  readonly days: number;
+  /** Summaries kept regardless of age; 0 disables the count cap. */
+  readonly maxCount: number;
+  /** Bytes of summary text kept; 0 disables the size cap. */
+  readonly maxBytes: number;
+}
+
 export interface MemoryOptions {
   readonly enabled: boolean;
   /** Store each substantive turn's final answer as a `summary` memory. */
   readonly captureTurns: boolean;
+  /** Age and size caps for automatic summaries. Explicit memories never expire. */
+  readonly retain: MemoryRetainOptions;
 }
 
 export interface StatsOptions {
@@ -140,7 +151,11 @@ export const DEFAULT_CONFIG: Config = {
     maxPassages: 6,
     timeoutMs: 400,
   },
-  memory: { enabled: true, captureTurns: true },
+  memory: {
+    enabled: true,
+    captureTurns: true,
+    retain: { days: 90, maxCount: 500, maxBytes: 4_000_000 },
+  },
   stats: { enabled: true, bytesPerToken: 4, maxBaselineBytes: 128 * 1024 },
   telemetry: { anomaly: false },
 };
@@ -161,6 +176,7 @@ export function loadConfig(
   const remote = asObject(root.remote);
   const context = asObject(root.context);
   const memory = asObject(root.memory);
+  const retain = asObject(memory.retain);
   const stats = asObject(root.stats);
   const telemetry = asObject(root.telemetry);
 
@@ -302,6 +318,32 @@ export function loadConfig(
         "memory.captureTurns",
         warnings,
       ),
+      retain: {
+        days: readInteger(
+          retain.days,
+          DEFAULT_CONFIG.memory.retain.days,
+          0,
+          3_650,
+          "memory.retain.days",
+          warnings,
+        ),
+        maxCount: readInteger(
+          retain.maxCount,
+          DEFAULT_CONFIG.memory.retain.maxCount,
+          0,
+          100_000,
+          "memory.retain.maxCount",
+          warnings,
+        ),
+        maxBytes: readInteger(
+          retain.maxBytes,
+          DEFAULT_CONFIG.memory.retain.maxBytes,
+          0,
+          10_000_000_000,
+          "memory.retain.maxBytes",
+          warnings,
+        ),
+      },
     },
     stats: {
       enabled: readBoolean(stats.enabled, DEFAULT_CONFIG.stats.enabled, "stats.enabled", warnings),

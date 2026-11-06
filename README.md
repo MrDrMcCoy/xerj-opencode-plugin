@@ -159,7 +159,9 @@ This is the complete set with its defaults, in
         "remote":  { "enabled": true, "maxBytes": 2000000 },
         "context": { "enabled": true, "maxTokens": 1500, "memoryTokens": 400,
                      "maxPassages": 6, "timeoutMs": 400 },
-        "memory":  { "enabled": true, "captureTurns": true },
+        "memory":  { "enabled": true, "captureTurns": true,
+                     "retain": { "days": 90, "maxCount": 500,
+                                 "maxBytes": 4000000 } },
         "stats":   { "enabled": true, "bytesPerToken": 4,
                      "maxBaselineBytes": 131072 },
         "telemetry": { "anomaly": false }
@@ -189,6 +191,9 @@ The same entry works with a checkout path instead of the package name; see
 | `index.brain` | Folders to index as second brains, e.g. `[".agents"]`. |
 | `index.hidden` | Hidden folders to index as plain documents. Empty means "the docs folders that exist": `.agents`, `.github`, `.claude`. Set a list to choose exactly what is indexed. |
 | `index.hiddenMaxBytes` | Per-file ceiling for hidden documents. |
+| `memory.retain.days` | Days an automatic summary is kept; `0` disables the age cap. |
+| `memory.retain.maxCount` | Summaries kept regardless of age; `0` disables the count cap. |
+| `memory.retain.maxBytes` | Bytes of summary text kept; `0` disables the size cap. |
 | `index.semantic` | Include the semantic retrieval leg. |
 | `index.neural` | Embed passages with the node's neural model (`--embed-mode neural`). Set `false` for lexical embeddings. Changing it rebuilds the project index once; neural indexing is roughly ten times slower than lexical. |
 | `remote.enabled` | Spool and index fetched pages. |

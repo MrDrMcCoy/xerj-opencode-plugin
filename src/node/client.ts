@@ -24,6 +24,12 @@ export interface MemorySummary {
   readonly exists: boolean;
 }
 
+export interface MemoryRecord {
+  readonly id: string;
+  readonly text: string;
+  readonly metadata: Record<string, unknown>;
+}
+
 export interface IndexSummary {
   readonly index: string;
   readonly docs: number;
@@ -277,6 +283,28 @@ export class XerjClient {
       count: toNumber(result.count),
       exists: result.exists === true,
     };
+  }
+
+  /** One page of a namespace, newest first is not guaranteed; callers sort. */
+  async memoryList(namespace: string, size: number): Promise<ReadonlyArray<MemoryRecord>> {
+    const result = await this.get(
+      `/_memory/${encodeURIComponent(namespace)}?size=${Math.max(1, size)}`,
+      "memory list failed",
+    );
+    if (!isRecord(result) || !Array.isArray(result.entries)) return [];
+
+    return result.entries.flatMap((entry): MemoryRecord[] => {
+      if (!isRecord(entry) || typeof entry.id !== "string" || typeof entry.text !== "string") {
+        return [];
+      }
+      return [
+        {
+          id: entry.id,
+          text: entry.text,
+          metadata: isRecord(entry.metadata) ? entry.metadata : {},
+        },
+      ];
+    });
   }
 
   async memoryForget(namespace: string, id: string): Promise<boolean> {

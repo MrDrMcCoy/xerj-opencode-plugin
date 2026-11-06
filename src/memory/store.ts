@@ -7,6 +7,7 @@
 import { createHash } from "node:crypto";
 import type { Logger } from "../log.ts";
 import { XerjClient, type MemoryHit } from "../node/client.ts";
+import type { RetainEntry } from "./retain.ts";
 
 export type MemoryKind =
   | "fact"
@@ -59,6 +60,23 @@ export class MemoryStore {
       text,
       metadata,
     });
+  }
+
+  /** One page of this namespace, for retention. Newest first is not assumed. */
+  async list(limit: number): Promise<ReadonlyArray<RetainEntry>> {
+    const records = await this.client
+      .memoryList(this.namespace, limit)
+      .catch((error: unknown) => {
+        this.logger.debug("memory list failed", String(error));
+        return [];
+      });
+
+    return records.map((record) => ({
+      id: record.id,
+      kind: typeof record.metadata.kind === "string" ? record.metadata.kind : "",
+      created: typeof record.metadata.created === "string" ? record.metadata.created : null,
+      bytes: Buffer.byteLength(record.text, "utf8"),
+    }));
   }
 
   async recall(query: string, k = 3): Promise<ReadonlyArray<MemoryHit>> {
