@@ -310,15 +310,14 @@ covered.
 their own corpus (`xop-sys-<host hash>`). The corpus keeps `path`, `abs_path`,
 `title`, `source`, and `mtime` per page, so a citation reads `man/git.1`.
 
-The first run reads and indexes every page: 3648 pages in about six seconds on
-this machine, roughly 33 MB. A manifest records each page's path, mtime, size,
-and document id, so later runs skip unchanged pages (under 100 ms) and delete
-the documents of pages that are gone.
+A manifest records each page's path, mtime, size, and document id, so a first
+run indexes everything (3648 pages in about six seconds here, 33 MB) and later
+runs skip unchanged pages in under 100 ms. A page that disappeared from disk is
+deleted from the corpus.
 
-`body` is plain `text`, not `semantic_text`, so nothing is embedded. A machine's
-man pages are thousands of long documents; embedding them with the local model
-would take hours and add little to reference prose, which is already dense with
-the words people search for.
+`body` is plain `text`, not `semantic_text`, so no page is embedded. A machine
+holds thousands of long pages, embedding them with the local model takes hours,
+and reference prose already carries the words people search for.
 
 ## Data locations
 
