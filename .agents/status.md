@@ -358,6 +358,30 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: Local telemetry confirmed live after an OpenCode restart. The
+  store appears at `~/.local/share/opencode/xerj/telemetry`: `ops.ndjson`
+  (255 KB after the first 20 minutes), 16 type rings, per-instance rollups, a
+  day of CPU/RSS samples, and one boot marker per live location. Boot, ready,
+  and indexed records share a boot id and arrive in that order; the previous
+  process's marker produced one `plugin` crash record, and a stale node pidfile
+  produced one `node` crash record. Tool, RPC, hook, index, binary, and node
+  spans all appear. The live day report shows 20+ operation types with idle and
+  busy p50/p95, ten boots, sane process CPU/RSS, and a non-zero ready dwell.
+
+  Four defects were found and fixed from the live data: the boot record could
+  land after `ready`; dwell never counted the open interval of the current
+  state, so a settled service read as zero; process figures mixed every node
+  pid the installation ever sampled and extrapolated two minutes into tens of
+  gigabytes per day; and the base status path accused startup of a missing
+  memory index. Unit and integration setup now disable telemetry so their
+  fixture prefixes cannot pollute the real store, and the already-written
+  fixture records were removed. 1074 unit tests pass.
+
+  Telemetry also surfaced a real, known defect in the product: the web corpus
+  is `degraded · index is missing; the last pass wrote 5 records`. The spool is
+  empty and no `xop-web-*` index exists, so the run record outlived its index
+  and nothing recreates it. That is status item 3 below, still open.
+
 - 2026-11-06: Defaults and timeouts pass. `node.cpus` now defaults to `odd`
   instead of leaving affinity alone, so every XERJ process shares a CPU subset
   with the editor by default; an explicit `null` or `"all"` still disables
