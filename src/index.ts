@@ -75,6 +75,7 @@ import {
 } from "./hooks/tool-results.ts";
 import { CommitIndex, type CommitSummary } from "./index/commits.ts";
 import { memoryIndexMissing, recoverMemoryIndex } from "./memory/health.ts";
+import { curateMemories } from "./memory/curate.ts";
 import { verifyMemories } from "./memory/verify.ts";
 import { sampleProcess } from "./process-stats.ts";
 import { startRetention } from "./memory/retain.ts";
@@ -1154,6 +1155,26 @@ export default Plugin.define({
         })
         .catch((error: unknown) => {
           logger.debug("memory verification failed", String(error));
+        });
+
+      // Restatements accumulate because each turn stores a summary. Exact
+      // duplicates of generated prose are dropped; anything else is flagged.
+      void curateMemories({
+        memory: runtime.memory,
+        logger,
+        signal: shutdown.signal,
+      })
+        .then((summary) => {
+          if (summary.merged > 0 || summary.flagged > 0) {
+            logger.info("memory curated", {
+              merged: summary.merged,
+              flagged: summary.flagged,
+              checked: summary.checked,
+            });
+          }
+        })
+        .catch((error: unknown) => {
+          logger.debug("memory curation failed", String(error));
         });
 
       // Subscribe before the node exists: a compaction can arrive while the

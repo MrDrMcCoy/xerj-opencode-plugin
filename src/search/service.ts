@@ -72,6 +72,12 @@ export interface SearchOptions {
    * without sharing the word. Only set when the index was built for it.
    */
   readonly trustSemantic?: boolean;
+  /**
+   * Returns the best candidate even when the word-coverage gate rejects every
+   * hit. Used for a one-line hint when a prompt names nothing the index holds
+   * in the prompt's own words; generated files stay out either way.
+   */
+  readonly hint?: boolean;
 }
 
 export interface ParsedHit extends SearchHit {
@@ -204,7 +210,9 @@ export class SearchService {
         : new Set<string>();
     const located =
       options.surface === "context"
-        ? preferSources(dropUncovered(dropGenerated(ranked, trimmed), trimmed, trusted), trimmed)
+        ? options.hint === true
+          ? dropGenerated(ranked, trimmed)
+          : preferSources(dropUncovered(dropGenerated(ranked, trimmed), trimmed, trusted), trimmed)
         : ranked;
     const resolved = dropDuplicateLocations(await this.resolveLines(located, trimmed));
     const shadowed = dropShadowedWholeFiles(resolved, this.hiddenIndex, this.brainSpecs);

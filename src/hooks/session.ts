@@ -97,6 +97,25 @@ export function formatContextBlock(text: string): string {
   ].join("\n");
 }
 
+/**
+ * One line is enough when the gate rejected every passage: it names the file
+ * that might help and leaves the decision to the model. Cheaper than injecting
+ * a passage the prompt never asked for.
+ */
+export function formatHintBlock(
+  hit: { path: string | null; line: number | null; index: string },
+  prompt: string,
+): string {
+  const location = `${hit.path ?? hit.index}${hit.line === null ? "" : `:${hit.line}`}`;
+  const terms = prompt.trim().replace(/\s+/g, " ").slice(0, 80);
+  return [
+    "<xerj-hint>",
+    `Possible match: ${location}.`,
+    `Call xerj_search "${terms}" if that file is what you need.`,
+    "</xerj-hint>",
+  ].join("\n");
+}
+
 export function formatCorpusBlock(summary: string): string {
   return `<xerj-corpus>\n${summary}\n</xerj-corpus>`;
 }
@@ -139,7 +158,20 @@ export async function registerSessionHooks(
       if (memory.length > 0) forgetOldest(memoriesShown, event.sessionID, shown);
 
       if (result.hits.length === 0 && memory.length === 0) {
-        options.onNoiseSkip?.();
+        const hint = await retrieveHint(search, text, options, already);
+        if (hint === null) {
+          options.onNoiseSkip?.();
+          return;
+        }
+
+        forgetOldest(prepared, event.sessionID, {
+          messageID: event.messageID,
+          block: formatHintBlock(hint, text),
+          passageBytes: 0,
+          memory: "",
+          hits: 0,
+          locations: [],
+        });
         return;
       }
       forgetOldest(prepared, event.sessionID, {
@@ -287,6 +319,41 @@ async function recallMemories(
 /** A passage's identity for session dedupe: same file and same line. */
 function locationKey(hit: { path: string | null; line: number | null; index: string }): string {
   return `${hit.path ?? hit.index}:${hit.line ?? 0}`;
+}
+
+/**
+ * The best candidate when the gate rejected everything, with a short deadline:
+ * a hint is a bonus, so it never delays the turn for long.
+ */
+const HINT_TIMEOUT_MS = 150;
+
+async function retrieveHint(
+  search: SearchService,
+  text: string,
+  options: SessionHookOptions,
+  exclude: Set<string> | undefined,
+): Promise<SearchHit | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(),
+    Math.min(HINT_TIMEOUT_MS, options.config.context.timeoutMs),
+  );
+
+  try {
+    const result = await search.search(text, {
+      surface: "context",
+      k: 1,
+      maxTokens: 40,
+      hint: true,
+      signal: controller.signal,
+      exclude: (hit) => exclude?.has(locationKey(hit)) ?? false,
+    });
+    return result.hits[0] ?? null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function retrieve(

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   formatContextBlock,
   formatCorpusBlock,
+  formatHintBlock,
   registerSessionHooks,
   shouldRetrieve,
 } from "../../src/hooks/session.ts";
@@ -569,7 +570,9 @@ describe("compaction and injection dedupe", () => {
     await settle();
 
     await hooks.ctx.handlers.prompt(promptEvent("s1", LONG, "m3"));
-    expect(excluded(calls[2])).toBe(false);
+    // The hint pass for the deduped turn also lands in `calls`, so the last
+    // entry is the one that matters.
+    expect(excluded(calls.at(-1))).toBe(false);
   });
 
   test("another session's compaction leaves this one deduped", async () => {
@@ -583,7 +586,7 @@ describe("compaction and injection dedupe", () => {
     await settle();
 
     await hooks.ctx.handlers.prompt(promptEvent("s1", LONG, "m2"));
-    expect(excluded(calls[1])).toBe(true);
+    expect(excluded(calls.at(-1))).toBe(true);
   });
 
   test("an event without a session id changes nothing", async () => {
@@ -597,6 +600,68 @@ describe("compaction and injection dedupe", () => {
     await settle();
 
     await hooks.ctx.handlers.prompt(promptEvent("s1", LONG, "m2"));
-    expect(excluded(calls[1])).toBe(true);
+    expect(excluded(calls.at(-1))).toBe(true);
+  });
+});
+
+describe("auto-search hint", () => {
+  function hintSearch(): { search: SearchService; calls: SearchCall[] } {
+    const calls: SearchCall[] = [];
+    const search = {
+      search: async (query: string, options: Record<string, unknown> = {}) => {
+        calls.push({ query, options });
+        // The gate drops the passage; the relaxed hint pass keeps it.
+        const hits =
+          options.hint === true
+            ? [{ index: "i", id: "h", passage: 0, path: "src/b.ts", line: 7, title: null, kind: null, score: 1, text: "loose" }]
+            : [];
+        const text = hits.length > 0 ? "[1] src/b.ts:7" : "";
+        return {
+          hits,
+          text,
+          bytes: Buffer.byteLength(text, "utf8"),
+          strategy: "lexical" as const,
+          narrowingBytes: 0,
+        };
+      },
+    } as unknown as SearchService;
+    return { search, calls };
+  }
+
+  test("a dropped prompt injects one line instead of nothing", async () => {
+    const { search, calls } = hintSearch();
+    const hooks = await register({ search });
+
+    await hooks.ctx.handlers.prompt(promptEvent("s1", LONG, "m1"));
+    const event = contextEvent("s1", "m1");
+    await hooks.ctx.handlers.context(event);
+
+    const body = systemTexts(event).join("\n");
+    expect(body).toContain("<xerj-hint>");
+    expect(body).toContain("src/b.ts:7");
+    expect(body).toContain("xerj_search");
+    expect(body).not.toContain("<xerj-context>");
+    expect(hooks.injections).toBe(1);
+    expect(hooks.noiseSkips).toBe(0);
+    expect(calls.some((call) => call.options.hint === true)).toBe(true);
+  });
+
+  test("no candidate means the prompt is counted as noise", async () => {
+    const search = {
+      search: async () => ({ hits: [], text: "", bytes: 0, strategy: "lexical", narrowingBytes: 0 }),
+    } as unknown as SearchService;
+    const hooks = await register({ search });
+
+    await hooks.ctx.handlers.prompt(promptEvent("s1", LONG, "m1"));
+
+    expect(hooks.noiseSkips).toBe(1);
+  });
+
+  test("the hint block stays one line and names the prompt", () => {
+    const block = formatHintBlock({ path: "src/a.ts", line: 12, index: "i" }, "where is the watcher");
+
+    expect(block).toContain("src/a.ts:12");
+    expect(block).toContain("where is the watcher");
+    expect(block.split("\n")).toHaveLength(4);
   });
 });
