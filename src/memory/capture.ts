@@ -109,52 +109,71 @@ export function startCompactionCapture(options: CompactionCaptureOptions): void 
   });
 }
 
+/** Per-session state for turn capture, bounded by the session list itself. */
+interface TurnState {
+  readonly answers: Map<string, string>;
+  /** Memory id already stored for a prompt, so a repeat can replace it. */
+  readonly stored: Map<string, string>;
+}
+
 /**
  * Stores the last text a turn produced, paired with the prompt that asked for
  * it. One memory per turn; ids hash the text, so a replayed event is a no-op.
  */
 export function startTurnCapture(options: TurnCaptureOptions): void {
-  const minChars = options.minChars ?? TURN_MIN_CHARS;
-  const maxChars = options.maxChars ?? TURN_MAX_CHARS;
-  const answers = new Map<string, string>();
-  // One memory per prompt: a later answer replaces the earlier one instead of
-  // stacking a near-duplicate, so memory stays small enough to stay useful.
-  const stored = new Map<string, string>();
-
+  const state: TurnState = { answers: new Map(), stored: new Map() };
   const types: CaptureEvent[] = ["session.text.ended", "session.execution.succeeded"];
+
   listen(options, types, "turn capture", async (raw) => {
     const data = isRecord(raw.data) ? raw.data : {};
     const sessionID = typeof data.sessionID === "string" ? data.sessionID : null;
     if (sessionID === null || !options.prompts.knows(sessionID)) return;
 
     if (raw.type === "session.text.ended") {
-      const text = typeof data.text === "string" ? data.text.trim() : "";
-      if (text.length > 0) answers.set(sessionID, text);
+      noteAnswer(state, sessionID, data.text);
       return;
     }
-    if (raw.type !== "session.execution.succeeded") return;
-
-    const answer = answers.get(sessionID);
-    answers.delete(sessionID);
-    const prompt = options.prompts.latest(sessionID);
-    if (answer === undefined || prompt === undefined) return;
-    if (answer.length < minChars || INTERNAL_MARKER.test(prompt)) return;
-
-    const topic = clip(prompt, TOPIC_MAX_CHARS);
-    const key = `${sessionID}\u0000${topic}`;
-    const previous = stored.get(key);
-    const id = await remember(options, {
-      text: `Q: ${clip(prompt, PROMPT_MAX_CHARS)}\nA: ${clip(answer, maxChars)}`,
-      topic,
-      sessionID,
-    });
-    if (id === undefined) return;
-    stored.set(key, id);
-
-    if (previous !== undefined && previous !== id) {
-      await options.memory.forget(previous).catch(() => false);
+    if (raw.type === "session.execution.succeeded") {
+      await storeTurn(state, sessionID, options);
     }
   });
+}
+
+/** A turn emits text several times; the last one is the answer. */
+function noteAnswer(state: TurnState, sessionID: string, text: unknown): void {
+  const trimmed = typeof text === "string" ? text.trim() : "";
+  if (trimmed.length > 0) state.answers.set(sessionID, trimmed);
+}
+
+/** Pairs the answer with its prompt and stores one memory for the turn. */
+async function storeTurn(
+  state: TurnState,
+  sessionID: string,
+  options: TurnCaptureOptions,
+): Promise<void> {
+  const answer = state.answers.get(sessionID);
+  state.answers.delete(sessionID);
+
+  const prompt = options.prompts.latest(sessionID);
+  if (answer === undefined || prompt === undefined) return;
+
+  const minChars = options.minChars ?? TURN_MIN_CHARS;
+  if (answer.length < minChars || INTERNAL_MARKER.test(prompt)) return;
+
+  const topic = clip(prompt, TOPIC_MAX_CHARS);
+  const key = `${sessionID}\u0000${topic}`;
+  const previous = state.stored.get(key);
+  const id = await remember(options, {
+    text: `Q: ${clip(prompt, PROMPT_MAX_CHARS)}\nA: ${clip(answer, options.maxChars ?? TURN_MAX_CHARS)}`,
+    topic,
+    sessionID,
+  });
+  if (id === undefined) return;
+
+  state.stored.set(key, id);
+  if (previous !== undefined && previous !== id) {
+    await options.memory.forget(previous).catch(() => false);
+  }
 }
 
 function listen(

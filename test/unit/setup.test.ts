@@ -248,10 +248,10 @@ describe("server rpc handlers", () => {
     try {
       const cleanup = (await plugin.setup(host.ctx as never)) as () => void;
 
-      const remember = host.call("remember", { text: "a fact" });
-      await expect(remember).rejects.toThrow("memory is not available");
-      const search = host.call("search", { query: "anything" });
-      await expect(search).rejects.toThrow("search is not available");
+      const remember = await host.call("remember", { text: "a fact" }).catch((e: unknown) => e);
+      expect(String(remember)).toContain("memory is not available");
+      const search = await host.call("search", { query: "anything" }).catch((e: unknown) => e);
+      expect(String(search)).toContain("search is not available");
       cleanup?.();
     } finally {
       await rm(project, { recursive: true, force: true });
