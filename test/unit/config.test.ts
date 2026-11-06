@@ -137,9 +137,9 @@ describe("node.priority", () => {
 describe("memory.retain", () => {
   test("defaults bound age and size together", () => {
     const retain = DEFAULT_CONFIG.memory.retain;
-    expect(retain.days).toBe(90);
+    expect(retain.days).toBe(180);
     expect(retain.maxCount).toBe(500);
-    expect(retain.maxBytes).toBe(4_000_000);
+    expect(retain.maxBytes).toBe(2 * 1024 ** 3);
   });
 
   test("each cap can be disabled with zero", () => {
@@ -154,7 +154,7 @@ describe("memory.retain", () => {
     expect(loaded.config.memory.retain).toEqual({
       days: 7,
       maxCount: 500,
-      maxBytes: 4_000_000,
+      maxBytes: 2 * 1024 ** 3,
     });
   });
 

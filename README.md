@@ -160,8 +160,8 @@ This is the complete set with its defaults, in
         "context": { "enabled": true, "maxTokens": 1500, "memoryTokens": 400,
                      "maxPassages": 6, "timeoutMs": 400 },
         "memory":  { "enabled": true, "captureTurns": true,
-                     "retain": { "days": 90, "maxCount": 500,
-                                 "maxBytes": 4000000 } },
+                     "retain": { "days": 180, "maxCount": 500,
+                                 "maxBytes": 2147483648 } },
         "stats":   { "enabled": true, "bytesPerToken": 4,
                      "maxBaselineBytes": 131072 },
         "telemetry": { "anomaly": false }
