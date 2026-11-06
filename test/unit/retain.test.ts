@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { planPrune, pruneMemory, type RetainEntry, type RetainLimits } from "../../src/memory/retain.ts";
+import {
+  planPrune,
+  pruneMemory,
+  startRetention,
+  type RetainEntry,
+  type RetainLimits,
+} from "../../src/memory/retain.ts";
 
 const NOW = Date.parse("2026-11-05T12:00:00Z");
 const DAY = 86_400_000;
@@ -143,5 +149,51 @@ describe("pruneMemory", () => {
 
     expect(removed).toBe(0);
     expect(forgotten).toEqual([]);
+  });
+});
+
+describe("startRetention", () => {
+  const logger = {
+    debug() {},
+    info() {},
+    warn() {},
+    error() {},
+    entries: async () => [],
+    flush: async () => {},
+  } as never;
+
+  test("sweeps immediately and stops when the signal aborts", async () => {
+    let listed = 0;
+    const store = {
+      list: async () => {
+        listed += 1;
+        return [];
+      },
+      forget: async () => true,
+    };
+
+    const controller = new AbortController();
+    startRetention(store as never, { days: 1, maxCount: 0, maxBytes: 1 }, controller.signal, logger);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    controller.abort();
+    const afterAbort = listed;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(afterAbort).toBe(1);
+    expect(listed).toBe(afterAbort);
+  });
+
+  test("a failing sweep is swallowed", async () => {
+    const store = {
+      list: async () => {
+        throw new Error("node is down");
+      },
+      forget: async () => true,
+    };
+
+    const controller = new AbortController();
+    startRetention(store as never, { days: 1, maxCount: 0, maxBytes: 1 }, controller.signal, logger);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    controller.abort();
   });
 });

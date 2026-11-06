@@ -4,7 +4,11 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
-import { heartbeatAlive, ProjectLifecycle } from "../../src/lifecycle.ts";
+import {
+  heartbeatAlive,
+  ProjectLifecycle,
+  startSessionTracking,
+} from "../../src/lifecycle.ts";
 import { nodeClientsDir } from "../../src/paths.ts";
 
 const roots: string[] = [];
@@ -302,4 +306,170 @@ test("stop removes the heartbeat file", async () => {
   await idle.stop();
 
   expect(await idle.peers()).toBe(0);
+});
+
+describe("session tracking", () => {
+  function eventsOf(list: unknown[]): {
+    subscribe: () => AsyncIterable<unknown>;
+  } {
+    return {
+      subscribe: async function* () {
+        for (const event of list) yield event;
+        await new Promise<void>(() => {});
+      },
+    };
+  }
+
+  test("closes a session on session.deleted", async () => {
+    const nodeDir = await scratch();
+    let fired = 0;
+    const idle = lifecycle(nodeDir, {}, async () => {
+      fired += 1;
+    });
+    idle.touch("ses_a");
+
+    const controller = new AbortController();
+    startSessionTracking(
+      eventsOf([{ type: "session.deleted", data: { sessionID: "ses_a" } }]),
+      idle,
+      controller.signal,
+      logger,
+    );
+    await Bun.sleep(20);
+    controller.abort();
+    await idle.stop();
+
+    expect(fired).toBe(1);
+  });
+
+  test("ignores events that are malformed or for another type", async () => {
+    const nodeDir = await scratch();
+    let fired = 0;
+    const idle = lifecycle(nodeDir, {}, async () => {
+      fired += 1;
+    });
+    idle.touch("ses_a");
+
+    const controller = new AbortController();
+    startSessionTracking(
+      eventsOf([
+        null,
+        "text",
+        { type: "session.created", data: { sessionID: "ses_a" } },
+        { type: "session.deleted", data: {} },
+        { type: "session.deleted" },
+      ]),
+      idle,
+      controller.signal,
+      logger,
+    );
+    await Bun.sleep(20);
+    controller.abort();
+    await idle.stop();
+
+    expect(fired).toBe(0);
+  });
+
+  test("a failing subscription stops quietly unless it was aborted", async () => {
+    const nodeDir = await scratch();
+    const idle = lifecycle(nodeDir);
+    const failing = {
+      subscribe: () => {
+        throw new Error("stream closed");
+      },
+    };
+
+    startSessionTracking(failing, idle, new AbortController().signal, logger);
+    await Bun.sleep(10);
+    await idle.stop();
+  });
+});
+
+describe("heartbeat parsing", () => {
+  test("a corrupt heartbeat counts as active, so no node is killed by mistake", async () => {
+    const nodeDir = await scratch();
+    const directory = nodeClientsDir(nodeDir);
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, "broken.json"), "{not json");
+    const idle = lifecycle(nodeDir);
+
+    // An unparseable file is most likely a torn write from a live peer, so the
+    // safe answer is to defer rather than stop a node someone is using.
+    expect(await idle.peers()).toBe(1);
+    await idle.stop();
+  });
+
+  test("a heartbeat with a non-integer pid does not crash the count", async () => {
+    const nodeDir = await scratch();
+    const directory = nodeClientsDir(nodeDir);
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, "odd.json"), JSON.stringify({ pid: 1.5, sessions: 1 }));
+    const idle = lifecycle(nodeDir);
+
+    expect(await idle.peers()).toBe(1);
+    await idle.stop();
+  });
+});
+
+describe("default timing and error handling", () => {
+  test("derives a check interval when none is given", async () => {
+    const nodeDir = await scratch();
+    const idle = new ProjectLifecycle({
+      nodeDir,
+      idleMs: 60_000,
+      enabled: true,
+      logger,
+      onIdle: async () => {},
+    });
+
+    idle.start();
+    await idle.stop();
+
+    expect(idle.snapshot().idleMs).toBe(60_000);
+  });
+
+  test("drops a session that aged past the idle window", async () => {
+    const nodeDir = await scratch();
+    const idle = lifecycle(nodeDir, { idleMs: 60 });
+
+    idle.touch("ses_old");
+    expect(idle.snapshot().sessions).toBe(1);
+
+    await Bun.sleep(90);
+    idle.touch();
+
+    expect(idle.snapshot().sessions).toBe(0);
+    await idle.stop();
+  });
+
+  test("a failing idle handler is logged and does not stop the timer", async () => {
+    const nodeDir = await scratch();
+    let attempts = 0;
+    const idle = lifecycle(nodeDir, { idleMs: 10, checkMs: 5 }, async () => {
+      attempts += 1;
+      throw new Error("node refused to stop");
+    });
+
+    idle.start();
+    await Bun.sleep(60);
+    await idle.stop();
+
+    expect(attempts).toBeGreaterThan(0);
+  });
+});
+
+describe("unwritable node directory", () => {
+  test("a heartbeat that cannot be written does not throw", async () => {
+    const nodeDir = await scratch();
+    await mkdir(nodeDir, { recursive: true });
+    // A file where the clients directory should be makes both mkdir and the
+    // write fail; the lifecycle must carry on regardless.
+    await writeFile(nodeClientsDir(nodeDir), "blocker");
+
+    const idle = lifecycle(nodeDir);
+    idle.touch("ses_a");
+
+    expect(await idle.peers()).toBe(0);
+    await idle.stop();
+  });
 });

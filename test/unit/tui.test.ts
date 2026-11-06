@@ -97,6 +97,8 @@ interface Host {
   setRemember(handler: () => Promise<unknown>): void;
   setSearch(handler: () => Promise<unknown>): void;
   setDialogAnswer(answer: string): void;
+  setPanelOpenResult(opens: boolean): void;
+  readonly slots: Array<{ append: string; render: (input?: Record<string, unknown>) => unknown }>;
 }
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -112,6 +114,8 @@ function makeHost(): Host {
   const toasts: Toast[] = [];
   const alerts: Array<{ title: string; message: string }> = [];
   let dialogAnswer = "";
+  let panelOpens = true;
+  const slots: Array<{ append: string; render: (input?: Record<string, unknown>) => unknown }> = [];
   let reindex = async (): Promise<unknown> => ({ queued: true, records: 900 });
   let remember = async (): Promise<unknown> => ({ id: "mem-1", created: true });
   let search = async (): Promise<unknown> => ({ text: "[1] src/a.ts:1\ncode", hits: 1, bytes: 20 });
@@ -164,11 +168,14 @@ function makeHost(): Host {
       },
     },
     ui: {
-      slot: () => () => {},
+      slot: (input: { append: string; render: (value?: Record<string, unknown>) => unknown }) => {
+        slots.push(input);
+        return () => {};
+      },
       panel: {
         open: () => {
-          panelOpen = true;
-          return true;
+          panelOpen = panelOpens;
+          return panelOpens;
         },
         close: () => {
           panelOpen = false;
@@ -225,6 +232,10 @@ function makeHost(): Host {
     setDialogAnswer: (answer) => {
       dialogAnswer = answer;
     },
+    setPanelOpenResult: (opens) => {
+      panelOpens = opens;
+    },
+    slots,
   };
 
   Object.assign(host, { context });
@@ -480,4 +491,71 @@ describe("tui commands", () => {
       expect(call?.options.location?.directory).toBe("/proj");
     }
   });
+});
+
+describe("tui failures and rendering", () => {
+  function byId(host: Host, id: string): Command {
+    const command = host.commands.find((candidate) => candidate.id === id);
+    if (!command) throw new Error(`${id} not registered`);
+    return command;
+  }
+
+  test("remember reports a memory failure", async () => {
+    const host = makeHost();
+    host.setRemember(async () => {
+      throw new Error("node is down");
+    });
+    const { dispose } = await setup(host);
+    await flush();
+
+    await byId(host, "xerj.remember").run("a fact");
+    dispose();
+
+    expect(host.toasts.at(-1)).toEqual({
+      message: "XERJ memory is not available",
+      variant: "error",
+    });
+  });
+
+  test("search reports a search failure", async () => {
+    const host = makeHost();
+    host.setSearch(async () => {
+      throw new Error("node is down");
+    });
+    const { dispose } = await setup(host);
+    await flush();
+
+    await byId(host, "xerj.search").run("anything");
+    dispose();
+
+    expect(host.toasts.at(-1)).toEqual({
+      message: "XERJ search is not available",
+      variant: "error",
+    });
+  });
+
+  test("falls back to an alert when no panel can host the details", async () => {
+    const host = makeHost();
+    host.setPanelOpenResult(false);
+    const { run, dispose } = await setup(host);
+    await flush();
+
+    await run("");
+    dispose();
+
+    expect(host.alerts.at(-1)?.title).toBe("XERJ");
+  });
+
+  test("reports a queued pass that returned no count", async () => {
+    const host = makeHost();
+    host.setReindex(async () => ({ queued: true }));
+    const { dispose } = await setup(host);
+    await flush();
+
+    await byId(host, "xerj.reindex").run();
+    dispose();
+
+    expect(host.toasts.at(-1)?.message).toBe("XERJ reindex queued");
+  });
+
 });

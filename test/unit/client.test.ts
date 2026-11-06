@@ -319,3 +319,132 @@ describe("transport retry", () => {
     expect(calls.filter((call) => call.url.includes("elsewhere"))).toHaveLength(1);
   });
 });
+
+describe("node identification and health", () => {
+  test("a non-ok banner means no node", async () => {
+    stubFetch();
+    behave = async () => response(503, {});
+    expect(await client().info()).toBeNull();
+  });
+
+  test("a banner that is not an object means no node", async () => {
+    stubFetch();
+    behave = async () => response(200, "text");
+    expect(await client().info()).toBeNull();
+  });
+
+  test("health reports the cluster status, or null", async () => {
+    stubFetch();
+    behave = async () => response(200, { status: "green" });
+    expect(await client().health()).toBe("green");
+
+    behave = async () => response(500, { status: "red" });
+    expect(await client().health()).toBeNull();
+
+    behave = async () => response(200, { nothing: true });
+    expect(await client().health()).toBeNull();
+  });
+});
+
+describe("index and document writes", () => {
+  test("deleteIndex treats 404 as already gone and rethrows others", async () => {
+    stubFetch();
+    behave = async () => response(404, {});
+    await expect(client().deleteIndex("gone")).resolves.toBeUndefined();
+
+    behave = async () => response(500, {});
+    await expect(client().deleteIndex("broken")).rejects.toBeInstanceOf(NodeRequestError);
+  });
+
+  test("put succeeds silently and fails with the body", async () => {
+    stubFetch();
+    behave = async () => response(200, { acknowledged: true });
+    await expect(client().put("/idx", { a: 1 }, "create")).resolves.toBeUndefined();
+
+    behave = async () => response(400, { error: "bad mapping" }, { textBody: "bad mapping" });
+    const error = await client().put("/idx", { a: 1 }, "create").catch((e) => e);
+    expect(error).toBeInstanceOf(NodeRequestError);
+    expect((error as NodeRequestError).message).toContain("create");
+    expect((error as NodeRequestError).body).toContain("bad mapping");
+  });
+
+  test("bulkDelete sends nothing for an empty id list", async () => {
+    stubFetch();
+    await client().bulkDelete("idx", []);
+    expect(calls).toHaveLength(0);
+  });
+
+  test("bulkDelete posts ndjson and reports a failure", async () => {
+    stubFetch();
+    behave = async () => response(200, { errors: false });
+    await client().bulkDelete("idx", ["a", "b"]);
+    expect(calls[0]!.url).toContain("/_bulk");
+    expect(String(calls[0]!.init?.body)).toContain('"delete"');
+
+    behave = async () => response(429, {}, { textBody: "busy" });
+    const error = await client().bulkDelete("idx", ["a"]).catch((e) => e);
+    expect(error).toBeInstanceOf(NodeRequestError);
+  });
+
+  test("bulk reports a failure with the response body", async () => {
+    stubFetch();
+    behave = async () => response(500, {}, { textBody: "rejected" });
+    const error = await client()
+      .bulk("idx", [{ id: "a", source: { body: "x" } }])
+      .catch((e) => e);
+    expect(error).toBeInstanceOf(NodeRequestError);
+    expect((error as NodeRequestError).body).toContain("rejected");
+  });
+});
+
+describe("memory listing", () => {
+  test("maps entries and skips malformed ones", async () => {
+    stubFetch();
+    behave = async () =>
+      response(200, {
+        entries: [
+          { id: "a", text: "one", metadata: { kind: "fact" } },
+          { id: "b", text: "two" },
+          { id: 3, text: "bad" },
+          { text: "no id" },
+        ],
+      });
+
+    expect(await client().memoryList("ns", 10)).toEqual([
+      { id: "a", text: "one", metadata: { kind: "fact" } },
+      { id: "b", text: "two", metadata: {} },
+    ]);
+  });
+
+  test("a listing that is not a record yields nothing", async () => {
+    stubFetch();
+    behave = async () => response(200, []);
+    expect(await client().memoryList("ns", 10)).toEqual([]);
+  });
+
+  test("summary reports the count and existence", async () => {
+    stubFetch();
+    behave = async () => response(200, { count: 7, exists: true });
+    expect(await client().memorySummary("ns")).toEqual({ count: 7, exists: true });
+
+    behave = async () => response(200, "nope");
+    expect(await client().memorySummary("ns")).toEqual({ count: 0, exists: false });
+  });
+
+  test("forget reports success only when the node says forgotten", async () => {
+    stubFetch();
+    behave = async () => response(200, { forgotten: true });
+    expect(await client().memoryForget("ns", "a")).toBe(true);
+
+    behave = async () => response(404, { forgotten: false });
+    expect(await client().memoryForget("ns", "a")).toBe(false);
+  });
+
+  test("store requires an id in the answer", async () => {
+    stubFetch();
+    behave = async () => response(200, { created: true });
+    await expect(
+      client().memoryStore("ns", { text: "x", metadata: {} }),
+    ).rejects.toBeInstanceOf(NodeRequestError);
+  });
+});
