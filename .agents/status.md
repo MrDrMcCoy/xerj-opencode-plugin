@@ -348,8 +348,8 @@ publish, and live TUI verification remain.
   installed, pattern passed as an argument, `run` never a rewrite), and the
   turn archive plus `xerj_expand` (`archive/turns.ts`, one NDJSON file per
   session under the node directory, bounded by `context.archive.maxBytes`).
-  Tool surface is now nineteen: the thirteen earlier ones plus imports, find,
-  ast, and expand. 934 unit and 12 integration tests pass, typecheck clean.
+  Tool surface is now nineteen, up from fifteen: imports, find, ast, and
+  expand joined it. 934 unit and 12 integration tests pass, typecheck clean.
   Remaining in Tier M: history search over the archive, the tree-sitter layer
   (blocked on the grammar source), complexity and duplicates, `xerj_code`, and
   `xerj_ask`.
