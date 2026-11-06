@@ -359,20 +359,20 @@ measured; they include tests and the commits that carry them. A status of
 | `xerj_zoom` | S | Done | 0.5 h | `5a42bae`; symbol-hit line mapping |
 | Commit indexing | S | Done | 2.5 h | `7336268`; `index/commits.ts`, 4 tests, `index.git*` |
 | Memory verification | S | Done | 1.5 h | `baac28d`; `memory/verify.ts`, 10 tests, panel count |
-| Auto-search hint | S | Not started | — | — |
-| Memory curation | S | Not started | — | — |
-| `autoindex map` in the panel | S | Not started | — | The panel lists datasets and corpora; the map command itself is not wired |
-| `prjdocs` keyword surfacing | S | Partial | 0.2 h | Keys and tool argument exist; no panel row or command help yet |
+| Auto-search hint | S | Done | 1.0 h | `search({ hint: true })` skips the word gate with a 150 ms deadline; one `<xerj-hint>` line naming the candidate; three hook tests |
+| Memory curation | S | Done | 1.0 h | `memory/curate.ts`: exact duplicate summaries dropped, other repeats flagged `duplicateOf`, never deleted; seven tests |
+| `autoindex map` in the panel | S | Done | 0.5 h | Record kinds from a `terms` aggregation, shown as `records: function 545 · section 401`; four panel tests |
+| `prjdocs` keyword surfacing | S | Done | 0.2 h | `config.prjdocsKeywords` in the status, a panel line, and the command description |
 | Graph overview in the panel | M | Done (earlier) | 0 h this pass | Brains already report docs and live edges; the corpora list covers the rest |
-| Import graph and cycles | M | Not started | — | — |
-| Regex and glob search | M | Not started | — | — |
-| Structural search (`ast-grep`, read only) | M | Not started | — | Needs a presence check for the binary |
+| Import graph and cycles | M | Done | 2.0 h | `analysis/imports.ts` plus `xerj_imports`; relative, Python, Go, and Rust specifiers resolve against project files, unresolved ones are counted; ten module tests and four tool tests |
+| Regex and glob search | M | Done | 1.5 h | `analysis/find.ts` plus `xerj_find`: glob-to-regex with `**` spanning folders, line-numbered matches, secret files skipped, 200-match cap; ten module tests and three tool tests |
+| Structural search (`ast-grep`, read only) | M | Done | 1.0 h | `analysis/ast.ts` plus `xerj_ast`: probes the binary, passes the pattern and glob as arguments, parses `--json=stream`, never rewrites; seven module tests and one tool test |
 | tree-sitter layer, one language | M | Not started | — | Blocked on the grammar source decision |
 | Complexity and duplicates | M | Not started | — | Needs the tree-sitter layer |
 | `xerj_code` | M | Not started | — | — |
 | `xerj_ask` and hub packs | M | Not started | — | Gated by `hub.enabled`, `hub.network` |
-| Turn archive | M | Not started | — | — |
-| `xerj_expand` | M | Not started | — | Needs the archive |
+| Turn archive | M | Done | 1.5 h | `archive/turns.ts`: one NDJSON file per session under `<node dir>/archive`, 4 KB per turn, oldest half dropped past `context.archive.maxBytes`; prompts and answers both archived; eight module tests |
+| `xerj_expand` | M | Done | 0.5 h | Prints `[n] U:`/`[n] A:` for a turn range, or says the archive is off; wired for the plugin and the MCP server |
 | History search | M | Not started | — | Needs the archive |
 | LSP pool | L | Not started | — | Gated by `analysis.lsp.enabled` |
 | Server installer | L | Not started | — | — |
@@ -382,10 +382,14 @@ measured; they include tests and the commits that carry them. A status of
 | Dreamer child sessions | XL | Not started | — | — |
 | Notes and smart notes | XL | Not started | — | — |
 
-Tier S so far: **7.2 h** of an estimated 8 to 10 h for the whole tier, with
-three and a half items left. The per-item estimates held within about half an
-hour each except commit indexing, where the `git log` record layout cost an
-extra hour and a half.
+**Tier S complete: 9.9 h** against an estimate of 8 to 10 h, eleven items and
+their tests. Per-item estimates held within about half an hour except commit
+indexing, where the `git log` record layout cost an extra hour and a half, and
+the auto-search hint, where the dedupe test had to distinguish the hint pass
+from the retrieval pass.
+
+Tier M so far: **6.5 h** across four items. Remaining: history search, the
+tree-sitter layer, complexity and duplicates, `xerj_code`, and `xerj_ask`.
 
 ## Settled decisions
 

@@ -339,6 +339,21 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: Tier M started and four items done (6.5 h estimated). Added
+  `xerj_imports` (import graph and cycles without a parser: relative
+  specifiers with extension swapping, Python modules, same-module Go paths,
+  Rust `crate::` paths, unresolved specifiers counted rather than guessed),
+  `xerj_find` (regex with line numbers and glob path search over the same tree
+  the indexer reads), `xerj_ast` (structural search through `ast-grep` when
+  installed, pattern passed as an argument, `run` never a rewrite), and the
+  turn archive plus `xerj_expand` (`archive/turns.ts`, one NDJSON file per
+  session under the node directory, bounded by `context.archive.maxBytes`).
+  Tool surface is now nineteen: the thirteen earlier ones plus imports, find,
+  ast, and expand. 934 unit and 12 integration tests pass, typecheck clean.
+  Remaining in Tier M: history search over the archive, the tree-sitter layer
+  (blocked on the grammar source), complexity and duplicates, `xerj_code`, and
+  `xerj_ask`.
+
 - 2026-11-06: Tier S complete (9.9 h estimated, eleven items). Added since the
   last entry: the data map in the panel (record kinds from a `terms`
   aggregation), `prjdocs.eagerKeywords` surfaced in the status, panel, and
