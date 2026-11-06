@@ -339,6 +339,19 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: Post-compaction rehydration added to the roadmap as a Tier M item,
+  not started, deferred by the user. Design: on `session.compaction.ended`
+  snapshot the per-session injected `path:line` set, which is cleared today, then
+  on the next `context` call prefer those paths and inject two or three passages
+  once, under `context.rehydrateTokens` (600) and a `<xerj-recall>` marker. It
+  closes a real gap: after compaction the model often continues the same turn,
+  so no new prompt arrives and nothing is retrieved until it does. Alternatives
+  are costed in the row (summary-seeded retrieval about 4 h, model-judged about a
+  day plus a gate). One defect the analysis surfaced is recorded there too: the
+  `context` hook cannot see the request kind, so injection may run while the
+  summariser itself is being called; `model.request` with `kind: "compaction"`
+  is the available signal to suppress it. Tier M is seven of fourteen items done.
+
 - 2026-11-06: Roadmap now carries both halves of pre-compaction work as separate
   Tier M items, neither started, at the user's request. `Pre-compaction window
   archive` fixes the design: flatten the text parts of `event.messages` into the
