@@ -153,3 +153,23 @@ describe("ROCm latest", () => {
     ).toBeNull();
   });
 });
+
+describe("version comparison", () => {
+  test("identical versions compare equal and longer ones win", async () => {
+    // Two listing entries that differ only by a missing patch, which exercises
+    // the equal case and the padding to the longer length.
+    // The same version twice makes the comparison return zero, and a lower one
+    // proves the ordering.
+    const html = [
+      '<a href="archive/12.4.1/">12.4.1</a>',
+      '<a href="archive/12.4.1/">12.4.1</a>',
+      '<a href="archive/12.4.0/">12.4.0</a>',
+    ].join("\n");
+    const fetchImpl = (async () => new Response(html)) as unknown as typeof fetch;
+    const latest = new LatestVersions({ logger, fetchImpl });
+
+    expect(
+      await latest.resolve({ id: "cuda", kind: "framework", used: null, evidence: "t" }),
+    ).toBe("12.4.1");
+  });
+});

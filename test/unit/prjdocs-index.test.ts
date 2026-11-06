@@ -711,3 +711,63 @@ describe("eager keywords", () => {
     expect(searched).toEqual([]);
   });
 });
+
+describe("keyword edge cases", () => {
+  test("a keyword with no search result is reported unsupported", async () => {
+    const project = await projectWith({ react: "^18.2.0" });
+    const state = await mkdtemp(join(root, "state-"));
+    const indexer = new PrjdocsIndexer({
+      client: client() as never,
+      prefix: "xop-prjdoc-missing-keyword",
+      projectRoot: project,
+      stateDir: state,
+      logger,
+      fetchImpl: (async () => new Response("<html></html>", { status: 404 })) as unknown as typeof fetch,
+      maxTargets: 2,
+      eager: {
+        maxPages: 2,
+        maxDepth: 1,
+        keywords: ["nonexistent-library"],
+        search: {
+          // The discovery rejects aggregator hosts, so an empty result set
+          // leaves the keyword with nothing to crawl.
+          query: async () => ({ data: { results: [] } }) as never,
+        },
+      },
+    });
+
+    const summary = await indexer.run();
+
+    expect(summary.unsupported).toContain("nonexistent-library");
+  });
+
+  test("a duplicate or one-letter keyword is skipped without a search", async () => {
+    const project = await projectWith({ react: "^18.2.0" });
+    const state = await mkdtemp(join(root, "state-"));
+    const searched: string[] = [];
+    const indexer = new PrjdocsIndexer({
+      client: client() as never,
+      prefix: "xop-prjdoc-short-keyword",
+      projectRoot: project,
+      stateDir: state,
+      logger,
+      fetchImpl: (async () => new Response("<html></html>", { status: 404 })) as unknown as typeof fetch,
+      maxTargets: 2,
+      eager: {
+        maxPages: 2,
+        maxDepth: 1,
+        keywords: ["x", "REACT", "  "],
+        search: {
+          query: async ({ query }) => {
+            searched.push(query);
+            return { data: { results: [] } } as never;
+          },
+        },
+      },
+    });
+
+    await indexer.run();
+
+    expect(searched).toEqual([]);
+  });
+});

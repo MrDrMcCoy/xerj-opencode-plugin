@@ -447,3 +447,81 @@ describe("panel detail additions", () => {
     expect(body.indexOf("elasticsearch")).toBeLessThan(body.indexOf("typescript"));
   });
 });
+
+describe("sidebar and panel branches", () => {
+  test("a run that never happened says no runs", () => {
+    const base = snapshot();
+    const lines = sidebarLines(
+      { ...base, index: { ...base.index, lastRunAt: null, lastFiles: null, lastRecords: null } },
+      NOW,
+    );
+
+    expect(lines.join("\n")).toContain("no runs");
+  });
+
+  test("records stand in when the file count is unknown", () => {
+    const base = snapshot();
+    const lines = sidebarLines(
+      { ...base, index: { ...base.index, lastFiles: null, lastRecords: 42 } },
+      NOW,
+    );
+
+    expect(lines.join("\n")).toContain("42 records");
+  });
+
+  test("the sidebar says embedding during a pass", () => {
+    const base = snapshot();
+    const lines = sidebarLines({ ...base, embeddings: true }, NOW);
+
+    expect(lines.join("\n")).toContain("embedding");
+  });
+
+  test("an idle stop two days out is shown in days", () => {
+    const base = snapshot();
+    const body = panelSections(
+      { ...base, node: { ...base.node, idleAt: NOW + 3 * 86_400_000 } },
+      NOW,
+    )
+      .flatMap((section) => section.lines)
+      .join("\n");
+
+    expect(body).toMatch(/idle stop in \d+d/);
+  });
+
+  test("one session is singular", () => {
+    const base = snapshot();
+    const body = panelSections({ ...base, node: { ...base.node, sessions: 1 } }, NOW)
+      .flatMap((section) => section.lines)
+      .join("\n");
+
+    expect(body).toContain("1 session");
+    expect(body).not.toContain("1 sessions");
+  });
+
+  test("a negative net is reported as costing more than it saves", () => {
+    const base = snapshot();
+    const body = panelSections(
+      { ...base, usage: { ...base.usage, netTokens: -500 } },
+      NOW,
+    )
+      .flatMap((section) => section.lines)
+      .join("\n");
+
+    expect(body).toContain("costing more than it saves");
+  });
+});
+
+describe("node line without an idle deadline", () => {
+  test("a node with no idle time reports only its sessions", () => {
+    const base = snapshot();
+    const body = panelSections(
+      { ...base, node: { ...base.node, idleAt: null, sessions: 2 } },
+      NOW,
+    )
+      .flatMap((section) => section.lines)
+      .join("\n");
+
+    expect(body).toContain("2 sessions");
+    expect(body).not.toContain("idle stop");
+  });
+});

@@ -139,25 +139,7 @@ export class PrjdocsIndexer {
 
     const terms = projectTerms(techs.map((ref) => `${ref.id} ${ref.evidence}`));
 
-    // XERJ's own docs and the Elasticsearch API are part of every run: a project
-    // asking how the engine behaves needs both, whatever its dependencies are.
-    // Off unless the caller asks: the command turns this on from configuration,
-    // and a library call should not reach the network uninvited.
-    const builtins: BuiltinSource[] =
-      this.options.builtin?.enabled === true
-        ? builtinSources(
-            this.options.builtin?.elasticsearchVersion ?? "8.13",
-            {
-              logger: this.options.logger,
-              fetchImpl: this.options.fetchImpl,
-              signal: this.options.signal,
-              xerjMaxPages: this.options.builtin?.xerjPages,
-              maxPages: this.options.builtin?.elasticsearchPages,
-              eager: this.options.builtin?.eager,
-            },
-          )
-        : [];
-
+    const builtins = this.collectBuiltins();
     for (const source of builtins) {
       targets.push({
         id: source.tech,
@@ -167,41 +149,8 @@ export class PrjdocsIndexer {
       });
     }
 
-    // Eager mode can be handed terms the project does not use yet: a library
-    // the user intends to adopt, or one detection cannot see. Each is searched
-    // like an unknown dependency, so the answer is cached after the first run.
-    const extra = eager === undefined ? [] : (eager.keywords ?? []);
-    const known = new Set(techs.map((ref) => ref.id));
-    for (const keyword of extra) {
-      const id = keyword.trim().toLowerCase();
-      if (id.length < 2 || known.has(id)) continue;
-      known.add(id);
-
-      const discovered = discovery === null ? null : await discovery.find(id);
-      if (discovered === null) {
-        unsupported.push(id);
-        continue;
-      }
-      targets.push({ id, url: discovered, version: "latest" });
-    }
-
-    for (const ref of techs.slice(0, this.options.maxTargets ?? 40)) {
-      const resolve = this.options.latestVersion;
-      const latest =
-        resolve === undefined ? null : await resolve(ref).catch(() => null);
-      let found = docsTargets(ref, latest);
-      if (found.length === 0 && discovery !== null) {
-        const url = await discovery.find(ref.id);
-        if (url !== null) {
-          found = [{ id: ref.id, url, version: ref.used ?? "latest" }];
-        }
-      }
-      if (found.length === 0) {
-        unsupported.push(ref.id);
-        continue;
-      }
-      targets.push(...found);
-    }
+    targets.push(...(await this.collectKeywordTargets(eager, discovery, techs, unsupported)));
+    targets.push(...(await this.collectTechTargets(techs, discovery, unsupported)));
 
     const manifest = await this.readManifest();
     const builtinState = await this.readBuiltinState();
@@ -418,6 +367,79 @@ export class PrjdocsIndexer {
       }
     }
     return [...collected.values()];
+  }
+
+  /**
+   * XERJ's own documentation and the Elasticsearch reference, which every run
+   * includes: a project asking how the engine behaves needs both. Off unless
+   * the caller asks, because a library call should not reach the network.
+   */
+  private collectBuiltins(): BuiltinSource[] {
+    if (this.options.builtin?.enabled !== true) return [];
+
+    return builtinSources(this.options.builtin.elasticsearchVersion ?? "8.13", {
+      logger: this.options.logger,
+      fetchImpl: this.options.fetchImpl,
+      signal: this.options.signal,
+      xerjMaxPages: this.options.builtin.xerjPages,
+      maxPages: this.options.builtin.elasticsearchPages,
+      eager: this.options.builtin.eager,
+    });
+  }
+
+  /**
+   * Terms the project does not use yet. Eager mode searches for each, so a
+   * library the user intends to adopt is documented before the first import.
+   */
+  private async collectKeywordTargets(
+    eager: EagerOptions | undefined,
+    discovery: DocsDiscovery | null,
+    techs: ReadonlyArray<TechRef>,
+    unsupported: string[],
+  ): Promise<DocsTarget[]> {
+    const keywords = eager?.keywords ?? [];
+    const known = new Set(techs.map((ref) => ref.id));
+    const targets: DocsTarget[] = [];
+
+    for (const keyword of keywords) {
+      const id = keyword.trim().toLowerCase();
+      if (id.length < 2 || known.has(id)) continue;
+      known.add(id);
+
+      const url = discovery === null ? null : await discovery.find(id);
+      if (url === null) {
+        unsupported.push(id);
+        continue;
+      }
+      targets.push({ id, url, version: "latest" });
+    }
+    return targets;
+  }
+
+  /** One target set per detected technology, searched when unlisted. */
+  private async collectTechTargets(
+    techs: ReadonlyArray<TechRef>,
+    discovery: DocsDiscovery | null,
+    unsupported: string[],
+  ): Promise<DocsTarget[]> {
+    const targets: DocsTarget[] = [];
+
+    for (const ref of techs.slice(0, this.options.maxTargets ?? 40)) {
+      const resolve = this.options.latestVersion;
+      const latest = resolve === undefined ? null : await resolve(ref).catch(() => null);
+      let found = docsTargets(ref, latest);
+
+      if (found.length === 0 && discovery !== null) {
+        const url = await discovery.find(ref.id);
+        if (url !== null) found = [{ id: ref.id, url, version: ref.used ?? "latest" }];
+      }
+      if (found.length === 0) {
+        unsupported.push(ref.id);
+        continue;
+      }
+      targets.push(...found);
+    }
+    return targets;
   }
 
   private indexName(): string {
