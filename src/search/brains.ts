@@ -160,32 +160,55 @@ export function pickNeighbors(
   limit: number,
 ): NeighborRef[] {
   if (!isRecord(ego) || !Array.isArray(ego.edges)) return [];
+  return rankNeighbors(collectNeighbors(ego.edges, new Set(seeds)), limit);
+}
 
-  const seedSet = new Set(seeds);
+/** One candidate per neighbor id, skipping the seeds themselves. */
+function collectNeighbors(
+  edges: ReadonlyArray<unknown>,
+  seeds: ReadonlySet<string>,
+): Array<NeighborRef & { weight: number }> {
   const candidates: Array<NeighborRef & { weight: number }> = [];
   const seen = new Set<string>();
 
-  for (const edge of ego.edges) {
-    if (!isRecord(edge)) continue;
-    if (edge.invalid_at !== null && edge.invalid_at !== undefined) continue;
-
-    const type = typeof edge.type === "string" ? edge.type : "";
-    if (!ALLOWED_TYPES.has(type)) continue;
-
-    const src = typeof edge.src === "string" ? edge.src : "";
-    const dst = typeof edge.dst === "string" ? edge.dst : "";
-    const other = seedSet.has(src) ? dst : seedSet.has(dst) ? src : "";
-    if (other.length === 0 || seedSet.has(other) || seen.has(other)) continue;
-
-    seen.add(other);
-    candidates.push({
-      id: other,
-      type,
-      weight: typeof edge.weight === "number" ? edge.weight : 0,
-    });
+  for (const edge of edges) {
+    const candidate = neighborOf(edge, seeds);
+    if (candidate === null || seen.has(candidate.id)) continue;
+    seen.add(candidate.id);
+    candidates.push(candidate);
   }
+  return candidates;
+}
 
-  return candidates
+/** The far end of an allowed, still-valid edge that starts at a seed. */
+function neighborOf(
+  edge: unknown,
+  seeds: ReadonlySet<string>,
+): (NeighborRef & { weight: number }) | null {
+  if (!isRecord(edge)) return null;
+  if (edge.invalid_at !== null && edge.invalid_at !== undefined) return null;
+
+  const type = typeof edge.type === "string" ? edge.type : "";
+  if (!ALLOWED_TYPES.has(type)) return null;
+
+  const src = typeof edge.src === "string" ? edge.src : "";
+  const dst = typeof edge.dst === "string" ? edge.dst : "";
+  const other = seeds.has(src) ? dst : seeds.has(dst) ? src : "";
+  if (other.length === 0 || seeds.has(other)) return null;
+
+  return {
+    id: other,
+    type,
+    weight: typeof edge.weight === "number" ? edge.weight : 0,
+  };
+}
+
+/** Citations first, then the strongest edge, then the caller's limit. */
+function rankNeighbors(
+  candidates: ReadonlyArray<NeighborRef & { weight: number }>,
+  limit: number,
+): NeighborRef[] {
+  return [...candidates]
     .sort(
       (left, right) =>
         (TYPE_PRIORITY[left.type] ?? 9) - (TYPE_PRIORITY[right.type] ?? 9) ||

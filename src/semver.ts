@@ -59,23 +59,29 @@ function comparePrerelease(
   if (left.length === 0) return 1;
   if (right.length === 0) return -1;
 
-  const length = Math.min(left.length, right.length);
-  for (let index = 0; index < length; index++) {
-    const a = left[index];
-    const b = right[index];
-    if (a === undefined || b === undefined) break;
-    if (a === b) continue;
-
-    const aNumeric = typeof a === "number";
-    const bNumeric = typeof b === "number";
-    if (aNumeric && bNumeric) return a < b ? -1 : 1;
-    if (aNumeric) return -1;
-    if (bNumeric) return 1;
-    return a < b ? -1 : 1;
+  const shared = Math.min(left.length, right.length);
+  for (let index = 0; index < shared; index += 1) {
+    const difference = compareIdentifier(left[index], right[index]);
+    if (difference !== 0) return difference;
   }
 
   if (left.length === right.length) return 0;
   return left.length < right.length ? -1 : 1;
+}
+
+/** Numeric identifiers rank below alphanumeric ones, as semver requires. */
+function compareIdentifier(
+  left: string | number | undefined,
+  right: string | number | undefined,
+): number {
+  if (left === undefined || right === undefined || left === right) return 0;
+
+  const leftNumeric = typeof left === "number";
+  const rightNumeric = typeof right === "number";
+  if (leftNumeric && rightNumeric) return left < right ? -1 : 1;
+  if (leftNumeric) return -1;
+  if (rightNumeric) return 1;
+  return left < right ? -1 : 1;
 }
 
 /** Compares two version strings. Returns null when either side is invalid. */
