@@ -184,6 +184,7 @@ describe("sysdocs failures", () => {
     await writeFile(join(man, "man1/broken.1.gz"), Buffer.from([0x1f, 0x8b, 0x00, 0x01]));
 
     const summary = await new SysdocIndexer({
+      roots: { man: [], info: [] },
       client: fake as never,
       prefix: "xop-sys-test",
       stateDir: state,
@@ -206,6 +207,7 @@ describe("sysdocs failures", () => {
     };
 
     const summary = await new SysdocIndexer({
+      roots: { man: [], info: [] },
       client: failing as never,
       prefix: "xop-sys-test",
       stateDir: state,
@@ -223,6 +225,7 @@ describe("sysdocs failures", () => {
     const fake = fakeClient();
 
     await new SysdocIndexer({
+      roots: { man: [], info: [] },
       client: fake as never,
       prefix: "xop-sys-test",
       stateDir: state,
@@ -242,6 +245,7 @@ describe("sysdocs failures", () => {
     };
 
     const summary = await new SysdocIndexer({
+      roots: { man: [], info: [] },
       client: failing as never,
       prefix: "xop-sys-test",
       stateDir: state,
@@ -262,6 +266,7 @@ describe("sysdocs failures", () => {
     const fake = fakeClient();
 
     const summary = await new SysdocIndexer({
+      roots: { man: [], info: [] },
       client: fake as never,
       prefix: "xop-sys-test",
       stateDir: state,
@@ -289,6 +294,7 @@ describe("sysdocs index creation", () => {
     };
 
     const indexer = new SysdocIndexer({
+      roots: { man: [], info: [] },
       client: client as never,
       prefix: "xop-sys-test",
       stateDir: state,
@@ -314,6 +320,7 @@ describe("sysdocs index creation", () => {
     };
 
     const summary = await new SysdocIndexer({
+      roots: { man: [], info: [] },
       client: client as never,
       prefix: "xop-sys-test",
       stateDir: state,
@@ -331,6 +338,7 @@ describe("sysdocs index creation", () => {
     const fake = fakeClient();
 
     await new SysdocIndexer({
+      roots: { man: [], info: [] },
       client: fake as never,
       prefix: "xop-sys-test",
       stateDir: state,
@@ -341,6 +349,7 @@ describe("sysdocs index creation", () => {
 
     await rm(join(man, "man1/git.1.gz"));
     const summary = await new SysdocIndexer({
+      roots: { man: [], info: [] },
       client: fake as never,
       prefix: "xop-sys-test",
       stateDir: state,
