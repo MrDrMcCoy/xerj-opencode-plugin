@@ -340,6 +340,22 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-05: Corpus health, an empty-scan warning, and a third search leg.
+  `xerj_status` now carries `corpora`: name, state, document count, last
+  run, and error per corpus, rendered in the panel, so a corpus that writes
+  nothing is visible instead of reading as `watching` with 0 docs. A hidden
+  scan that yields no documents from a configured folder warns once, which
+  is the signal that was missing for an hour after the neural rebuild. The
+  sidebar shows the count of prompts the relevance gate skipped. A third
+  search leg matches the index's `name` and `title` fields (the function a
+  record is about, and its file), fused with the other two through RRF:
+  34 of 40 benchmark prompts find the expected file, up from 33, with
+  slightly fewer bytes and no change on directive prompts. The end-to-end
+  setup test now drives every ingest path (hidden folder, external read
+  through `execute.after`, status and search tools, reindex, remember),
+  lifting `src/index.ts` to 70% lines and the tree to 87.2%. 518 unit and
+  10 integration tests pass.
+
 - 2026-11-05: Reproducible evaluation and the work it justified. `bun run
   eval` (scripts/eval.ts) measures 40 labeled questions against a live
   index; its own source is ignored so it cannot win the queries it
