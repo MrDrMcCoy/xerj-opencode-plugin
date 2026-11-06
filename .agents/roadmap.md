@@ -40,10 +40,12 @@ cheap half ships first.
    `integration`, `mcp`, `model`, `permission`, `plugin`, `provider`,
    `reference`, `rpc`, `session`, `shell`, `skill`, `storage`, `tool`,
    `vcs`, `websearch`, `worktree`.
-2. **Compaction replaces, it does not join.** Two plugins rewriting one
-   session double-summarise and thrash the prompt cache. Absorbing
-   compaction requires uninstalling Magic Context, and the plan treats it
-   as a migration with a rollback point.
+2. **Compaction belongs to the host.** The harness already compacts, and a
+   plugin that also rewrites history double-summarises and thrashes the
+   prompt cache. This plugin therefore keeps its own append-only archive of
+   raw turns and reads the host's summary from `session.compaction.ended`,
+   which it already subscribes to. Expand and history search work over the
+   archive; nothing here rewrites a message.
 3. **Grammars are downloaded, not bundled.** Measured: the all-language
    WASM pack is 51.8 MB unpacked, `web-tree-sitter` 4.7 MB, and one
    native TypeScript grammar 38.8 MB. The plugin already owns a verified
@@ -128,10 +130,16 @@ Five rules make the gates trustworthy:
 5. A closed gate leaves no residue: no process, no cached parse, no file read
    beyond the project scan the index already performs.
 
-Tier XL adds gates of its own, closed the same way: `context.compact` for
-history rewriting, `memory.curate` for the dreamer's memory work, and
-`context.notes` for notes and smart notes. They are named in the config block
-they belong to and follow the same five rules.
+Tier XL adds gates of its own, closed the same way: `memory.curate` for the
+dreamer's memory work and `context.notes` for notes and smart notes. They
+follow the same five rules.
+
+The turn archive is data rather than a runtime, so it is not a capability
+gate. It is bounded instead: `context.archive.enabled` defaults to true
+because expand and history search are impossible without it, and
+`context.archive.maxBytes` (64 MB) prunes the oldest turns at startup the
+way `memory.retain` prunes memories. It duplicates conversation text on disk
+inside `<project>/.xerj`, mode 0700, and the panel reports its size.
 
 A test per gated capability asserts both directions: absent when closed,
 present and answering when open.
@@ -157,6 +165,8 @@ Ship these first. None adds a runtime, a grammar, or a write path.
 
 | Item | Source | What it does | Done when |
 |---|---|---|---|
+| **Reset the injection dedupe on compaction** | Defect in current behaviour | A passage dropped by the host's summary must become injectable again | A long session keeps citing after a compaction instead of going quiet |
+| `/xerj-wrapup` | Magic Context, reduced | Trigger the host's own compact endpoint; no rewriting | The command reports the host's result |
 | `xerj_refs` | AFT callgraph, reduced | Reference count for a symbol from the indexed `code` field, cited as `path:line` | A query returns call sites for `buildTools` with no new process |
 | `xerj_outline` | AFT outline | Symbol list for one file from existing records | One call replaces a whole-file read |
 | `xerj_zoom` | AFT zoom | One symbol's body by name, with its exact range | Returns the declaration and its lines only |
@@ -178,6 +188,9 @@ Ship these first. None adds a runtime, a grammar, or a write path.
 | `xerj_code` | XERJ engine | Retrieval over reference corpora (`corpus add/index/list`) | A corpus lifecycle view in the panel | None |
 | `xerj_ask` and hub packs | XERJ engine | Answers from signed pre-indexed packs, with licence and pin named | Cached catalogue | None; network consent is asked on first use |
 | Graph overview in the panel | XERJ engine | Edge totals, hubs, detectors per brain | None; the endpoint is already used | None |
+| Turn archive | Magic Context, reduced | Append raw turns to `<project>/.xerj`, pruned by `context.archive.maxBytes` | Retention sweep at startup | `context.archive.enabled`, on by default |
+| `xerj_expand` | Magic Context, reduced | Return the original `U:`/`A:` text for an archive range | The archive | `context.archive.enabled` |
+| History search | Magic Context, reduced | `xerj_search` over archived turns as an extra corpus | A second index prefix | `context.archive.enabled` |
 
 ## Tier L: three to six weeks, high to medium suitability
 
@@ -193,8 +206,7 @@ Ship these first. None adds a runtime, a grammar, or a write path.
 | Item | Source | What it does | Gate | Precondition |
 |---|---|---|---|---|
 | Edit family: `xerj_edit`, `xerj_import`, `xerj_move`, `xerj_safety`, `xerj_conflicts` | AFT | Symbol-bounded edits, import management, moves, checkpoints, conflict resolution | `analysis.edits.enabled`, plus one of the two above | Checkpoints and undo must exist and be tested before any write ships |
-| Compaction: historian, compartments, `ctx_reduce`/`ctx_expand`, wrapup | Magic Context | Rewrite history into compartments with cache-stable injection | `context.compact` | Magic Context uninstalled; a rollback path; cache stability proven over a week |
-| Dreamer and historian child sessions | Magic Context | Idle-time curation, doc maintenance, primer refresh | `context.compact` and `memory.curate` | Compaction shipped and stable |
+| Dreamer child sessions | Magic Context | Idle-time curation, doc maintenance, primer refresh | `memory.curate` | Memory curation shipped and stable |
 | Notes and smart notes | Magic Context | Deferred intentions with surface conditions | `context.notes` | A scheduler the plugin does not have yet |
 
 ## Deliberate non-goals
@@ -208,6 +220,7 @@ Ship these first. None adds a runtime, a grammar, or a write path.
 | Bundling grammars in the npm package | 50 to 100 MB and a per-platform native build matrix |
 | Enabling `analysis.*` by default | The gate exists so an install that wants retrieval pays nothing for a parser or a server |
 | A gate that silently widens | A gate covers one capability and one key; no key controls two capabilities, and no build flag changes what is registered |
+| Compaction engine: compartments, `ctx_reduce`, `/ctx-recomp`, cache-TTL mutation scheduling | The host already compacts. Rewriting messages duplicates that work, thrashes the prompt cache, and carries the plan's highest data risk for no retrieval gain. Revisit only if the host exposes a compaction API a plugin may drive |
 | Rewriting `read` or `grep` inputs | Silent semantic changes break debugging |
 
 ## Risks and their handling
@@ -217,10 +230,11 @@ Ship these first. None adds a runtime, a grammar, or a write path.
 | Language server processes leak | One pool per project, pidfile, idle stop, and a test that asserts no process survives teardown. This plugin has leaked processes before; the check is mandatory |
 | Grammar cache corrupts | Verify against a checksum before use, as the binary path does; a bad grammar is a logged skip, not a crash |
 | Edit tools lose work | No write ships before checkpoints and undo; every write is atomic and reports the backup path |
-| Double compaction | Absorbing compaction starts with uninstalling Magic Context, and the plugin refuses to compact when another compactor is detected |
-| Prompt cache thrash | Compaction waits until injection is stable across a week of real sessions |
+| Host compaction hides an injected passage | The dedupe set resets on `session.compaction.ended`, so the next turn may re-inject what the summary dropped |
+| The turn archive grows without bound | `context.archive.maxBytes` (64 MB) prunes oldest turns at startup, and the panel reports the size |
+| An archive surprises a user | It is local, mode 0700, inside the project's own `.xerj`, and `context.archive.enabled: false` removes it |
 | Retrieval slows down | Every new query path is measured against the 400 ms budget; a path that misses it becomes a tool, not an injection |
-| Scope creep | One plugin owning search, edits, memory, and compaction is large; each tier lands as a release with its own coverage gate |
+| Scope creep | One plugin owning search, edits, archive, and memory is large; each tier lands as a release with its own coverage gate |
 | A gate opens without a decision | Gates default to closed, an upgrade never turns one on, and the panel prints the key that is closed |
 | A gate is open but its toolchain is missing | One probe at enable time; a missing server or grammar logs once, names the key, and leaves the capability off rather than retrying per call |
 | A gated tool leaks memory or processes | The LSP pool has an idle stop and a server cap; a test asserts zero surviving processes after teardown |
@@ -229,15 +243,17 @@ Ship these first. None adds a runtime, a grammar, or a write path.
 
 1. **Tier S**, as one release. Gate: 85% coverage or better, live check that
    each new tool answers on this repository. Nothing in this tier reads a
-   capability gate, so it ships with every gate closed.
+   capability gate, so it ships with every gate closed. It starts with the
+   dedupe reset, because that is a defect in shipped behaviour.
 2. **Tier M**, in two releases: analysis without a parser first, then
    tree-sitter for one language. Gate: the capability ships closed, the
    download path is verified with the gate open, and the incremental pass
    time is unchanged with it closed.
 3. **Tier L**, one language at a time. Gate: a week of live use with no
    process count growth, and a test that a closed gate starts no server.
-4. **Tier XL**, edits before compaction. Gate: checkpoints proven by an
-   interrupted write, then compaction with a rollback commit.
+4. **Tier XL**, edits and curation. Gate: checkpoints proven by an
+   interrupted write before any other write ships, and curation proven by a
+   dry run that names what it would change.
 5. Every tier ships with its gates closed by default, and the release notes
    name each key. Opening a gate is the user's decision per project, not a
    default that arrives with an upgrade.
@@ -246,17 +262,14 @@ Ship these first. None adds a runtime, a grammar, or a write path.
 
 ## Open decisions for the user
 
-Each decision now has a safe default, so none of them blocks work:
+Three remain, each with a safe default, so none blocks work:
 
-1. **Compaction**: absorb it and uninstall Magic Context, or leave compaction
-   to Magic Context. Default: `context.compact` closed, so the plugin retrieves
-   and remembers while Magic Context still compacts.
-2. **Share**: allow `xerj_share` at all, given it opens a listener. Default:
+1. **Share**: allow `xerj_share` at all, given it opens a listener. Default:
    the tool is absent until invoked with consent.
-3. **Hub packs**: allow network access for `xerj ask`. Default: offline;
-   the first request asks and remembers the answer.
-4. **Edits**: whether this plugin writes to files. Default:
+2. **Hub packs**: allow network access for `xerj ask`. Default: offline; the
+   first request asks and remembers the answer.
+3. **Edits**: whether this plugin writes to files. Default:
    `analysis.edits.enabled` closed, so the plugin stays read-only.
 
-Nothing in Tier S or M depends on any of these, and every tier ships with its
-gates closed, so a release can land before the answers exist.
+Compaction is no longer an open question. The host keeps it, and this plugin
+keeps an archive so its own recall survives it.

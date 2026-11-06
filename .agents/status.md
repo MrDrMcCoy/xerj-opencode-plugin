@@ -339,6 +339,22 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: Roadmap change: the host keeps compaction (0.7.0 plan). Constraint
+  2 now states that compaction belongs to the harness, so the plugin keeps an
+  append-only turn archive and reads the host's summary from
+  `session.compaction.ended`; nothing rewrites a message. Tier S gained the
+  defect it exposed (the per-session injected-location set never clears, so
+  after a host compaction the plugin skips passages the summary dropped) and
+  `/xerj-wrapup` as a thin trigger of the host's compact endpoint. Tier M gained
+  the archive, `xerj_expand`, and history search, bounded by
+  `context.archive.maxBytes` (64 MB) with `context.archive.enabled` on, since
+  they are data rather than a runtime and therefore not capability gates. The
+  compaction engine (compartments, `ctx_reduce`, `/ctx-recomp`, cache-TTL
+  mutation scheduling) became a non-goal with a revisit condition: only if the
+  host exposes a compaction API a plugin may drive. Risks dropped double
+  compaction and gained archive growth, archive surprise, and the hidden-passage
+  case. Open decisions fell from four to three: compaction is settled.
+
 - 2026-11-06: Roadmap gates (0.7.0 plan change). Every capability that adds a
   parser or a resident process now sits behind a closed configuration gate,
   named per capability and never a build flag: `analysis.treeSitter.enabled`,
