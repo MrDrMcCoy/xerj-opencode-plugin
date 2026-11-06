@@ -188,3 +188,23 @@ describe("prjdocs.eagerKeywords", () => {
     expect(warnings.join(" ")).toContain("prjdocs.eagerKeywords");
   });
 });
+
+describe("git history indexing", () => {
+  test("on by default with a 500 commit window", () => {
+    expect(DEFAULT_CONFIG.index.git).toBe(true);
+    expect(DEFAULT_CONFIG.index.gitLimit).toBe(500);
+  });
+
+  test("can be turned off and bounded", () => {
+    const { config } = loadConfig({ index: { git: false, gitLimit: 50 } });
+
+    expect(config.index.git).toBe(false);
+    expect(config.index.gitLimit).toBe(50);
+  });
+
+  test("a limit below ten is clamped", () => {
+    const { config } = loadConfig({ index: { gitLimit: 1 } });
+
+    expect(config.index.gitLimit).toBe(10);
+  });
+});

@@ -56,6 +56,10 @@ export interface IndexOptions {
    * because the engine refuses `--watch` in graph mode.
    */
   readonly graph: boolean;
+  /** Git history as a searchable corpus. */
+  readonly git: boolean;
+  /** Commits read per pass; older ones leave the corpus. */
+  readonly gitLimit: number;
   /** Embed passages with the node's neural model; false serves lexical only. */
   readonly neural: boolean;
   readonly maxBytes: number;
@@ -196,6 +200,8 @@ export const DEFAULT_CONFIG: Config = {
     hiddenMaxBytes: 256 * 1024,
     semantic: true,
     graph: true,
+    git: true,
+    gitLimit: 500,
     neural: true,
     maxBytes: 2 * 1024 ** 3,
     maxMinutes: 10,
@@ -330,6 +336,20 @@ export function loadConfig(
         index.graph,
         DEFAULT_CONFIG.index.graph,
         "index.graph",
+        warnings,
+      ),
+      git: readBoolean(
+        index.git,
+        DEFAULT_CONFIG.index.git,
+        "index.git",
+        warnings,
+      ),
+      gitLimit: readInteger(
+        index.gitLimit,
+        DEFAULT_CONFIG.index.gitLimit,
+        10,
+        5000,
+        "index.gitLimit",
         warnings,
       ),
       semantic: readBoolean(

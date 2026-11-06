@@ -29,22 +29,23 @@ import {
   documentRoots,
   environmentFrom,
   externalPrefix,
+  gitPrefix,
   indexPrefix,
   isOverbroadRoot,
   memoryNamespace,
   nodeDataDir,
   nodeLogPath,
   prjdocsPrefix,
-  sysdocsPrefix,
   projectBrainName,
   projectNodeDir,
   projectPath,
   projectStateDir,
   resolveStorageRoot,
   scopedStorageKey,
-  webPrefix,
+  sysdocsPrefix,
   type BrainSpec,
   type DocumentRoot,
+  webPrefix,
 } from "./paths.ts";
 import {
   PLUGIN_VERSION,
@@ -72,6 +73,7 @@ import {
   handleToolResult,
   type ToolResultEvent,
 } from "./hooks/tool-results.ts";
+import { CommitIndex, type CommitSummary } from "./index/commits.ts";
 import { memoryIndexMissing, recoverMemoryIndex } from "./memory/health.ts";
 import { sampleProcess } from "./process-stats.ts";
 import { startRetention } from "./memory/retain.ts";
@@ -327,6 +329,7 @@ export default Plugin.define({
         const datasets = datasetRows(
           indices,
           prefix,
+          gitPrefix(projectRoot),
           webPrefix(projectRoot),
           externalPrefix(projectRoot),
           sysdocsPrefix(hostname()),
@@ -480,6 +483,29 @@ export default Plugin.define({
         return summary;
     };
 
+    /** Git history as a corpus; cheap, so it runs with every index pass. */
+    const runCommits = async (): Promise<CommitSummary | null> => {
+      if (!config.index.git) return null;
+      const handle = runtime.node ?? (await nodes.ensure().catch(() => null));
+      if (handle === null) return null;
+
+      const index = new CommitIndex({
+        client: new XerjClient(handle.baseUrl),
+        indexName: `${gitPrefix(projectRoot)}-docs`,
+        projectRoot,
+        statePath: join(nodeDir, "git", "commits.json"),
+        logger,
+        limit: config.index.gitLimit,
+        signal: shutdown.signal,
+      });
+      const summary = await index.run().catch((error: unknown) => {
+        logger.debug("could not index git history", String(error));
+        return null;
+      });
+      if (summary !== null) runtime.search?.invalidate();
+      return summary;
+    };
+
     const runReindex = async () => {
       await Promise.all([
         runtime.corpus?.reindex(),
@@ -487,6 +513,7 @@ export default Plugin.define({
         runtime.hidden?.reindex(),
       ]);
       void runtime.brain?.runAll();
+      void runCommits();
       // The pass ran before this returns, so the caller can report real
       // completion instead of a queue-only toast.
       const status = corpusStatus(runtime.corpus);
@@ -767,6 +794,9 @@ export default Plugin.define({
         onChange: publishChange,
       });
       await runtime.corpus.start();
+      // History is small and independent of the project corpus, so it starts
+      // after the corpus does and never delays it.
+      void runCommits();
     };
 
     const startWebIndexer = async (handle: NodeHandle): Promise<void> => {
@@ -1036,6 +1066,7 @@ export default Plugin.define({
         client,
         [
           prefix,
+          gitPrefix(projectRoot),
           webPrefix(projectRoot),
           externalPrefix(projectRoot),
           sysdocsPrefix(hostname()),
@@ -1311,6 +1342,7 @@ function corpusHealth(runtime: Runtime): CorpusHealth[] {
 function datasetRows(
   indices: ReadonlyArray<IndexSummary>,
   project: string,
+  git: string,
   web: string,
   external: string,
   sysdocs: string,
@@ -1323,8 +1355,10 @@ function datasetRows(
       matches: (index: string) =>
         index.startsWith(`${project}-`) &&
         !index.startsWith(`${project}-hidden-`) &&
-        !index.startsWith(`${project}-prjdocs-`),
+        !index.startsWith(`${project}-prjdocs-`) &&
+        !index.startsWith(`${git}-`),
     },
+    { name: "git", matches: (index: string) => index.startsWith(`${git}-`) },
     {
       name: "hidden",
       matches: (index: string) => index.startsWith(`${project}-hidden-`),

@@ -294,6 +294,14 @@ export function brainSpecs(
 }
 
 /** Project documentation corpus: official docs for what this project uses. */
+/**
+ * Git history is per project and small, so it shares the project's own prefix
+ * with a `-git` suffix rather than a hashed name of its own.
+ */
+export function gitPrefix(projectRoot: string): string {
+  return `${indexPrefix(projectRoot)}-git`;
+}
+
 export function prjdocsPrefix(projectRoot: string): string {
   return `${indexPrefix(projectRoot)}-prjdocs`;
 }
