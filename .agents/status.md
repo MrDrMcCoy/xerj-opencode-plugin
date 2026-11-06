@@ -355,6 +355,13 @@ publish, and live TUI verification remain.
   protocol, transport, and storage; 2 integration tests spawn the real entry
   point against a real binary and assert the eleven-tool list plus a status
   call that starts the node. 648 unit and 12 integration tests pass.
+  The bundle is `dist/mcp.mjs`, built for Node with a `node` shebang and mode
+  0755, because npx could not start the Bun-targeted build (`// @bun` plus a
+  `Bun.file` call, and top-level await in a `.js` file of a `"type": "module"`
+  package). The default manifest reader now uses `node:fs/promises`. Verified
+  from a packed tarball: `npx --no-install xerj-mcp --help`, `bunx xerj-mcp
+  --help`, and a handshake through npx returning all eleven tools. Publishing
+  0.7.0 is what makes the `@latest` form work from the registry.
 
 - 2026-11-05: `.github/workflows/publish.yml` (0.7.0). A `v*` tag now calls
   `ci.yml` as a reusable workflow (it gained `workflow_call`), so the tag runs
