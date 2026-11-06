@@ -77,6 +77,7 @@ import {
 import { CommitIndex, type CommitSummary } from "./index/commits.ts";
 import { ArchiveIndex } from "./archive/index.ts";
 import { TurnArchive } from "./archive/turns.ts";
+import { registerCompactionArchive } from "./archive/window.ts";
 import { memoryIndexMissing, recoverMemoryIndex } from "./memory/health.ts";
 import { curateMemories } from "./memory/curate.ts";
 import { verifyMemories } from "./memory/verify.ts";
@@ -827,6 +828,16 @@ export default Plugin.define({
       recordQuery: (sessionID, paths, bytes, hits) =>
         ledger.recordQuery(sessionID, paths, bytes, hits),
     });
+
+    // The compaction hook sees the window before the summary exists, so it is
+    // the only place that can archive tool output a summary will compress away.
+    if (archive !== null) {
+      await registerCompactionArchive(ctx, {
+        archive,
+        logger,
+        owns: (sessionID) => prompts.knows(sessionID),
+      });
+    }
 
     let client: XerjClient | null = null;
     let indexerStart: Promise<void> | null = null;

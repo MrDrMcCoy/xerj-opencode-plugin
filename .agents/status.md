@@ -339,6 +339,25 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: The pre-compaction window archive is implemented. The
+  `compaction` hook receives `event.messages` before the host builds its
+  summary, so `archive/window.ts` flattens the text and tool-result bodies the
+  summary is about to replace and appends them to the turn archive first. It
+  keeps the newest 40 messages or about 200 KB, whichever binds first, and
+  clips a single oversized message rather than dropping it. Media, reasoning,
+  and compaction parts are skipped because they are large, private, or not
+  project text. A `system` record marks where the captured block starts, so
+  `xerj_expand` shows `S:` for it; `TurnRole` gained `tool` and `system`, and
+  the expansion labels them `T` and `S`. Message ids are remembered per
+  session, so a retried compaction appends nothing; a message without an id
+  gets a hash of its role and text. Only sessions this instance prompted are
+  captured, the tracked-session map is bounded at 200, and a failed write is
+  logged so compaction still completes. `TurnArchive.appendBatch` writes the
+  whole window and prunes once instead of paying a stat per message. Eleven
+  module tests cover flattening, part filtering, dedupe, the no-id fallback,
+  both limits, the marker, ownership, and the failure path. 1023 unit tests
+  pass; typecheck clean. No release was tagged or pushed.
+
 - 2026-11-06: Post-compaction rehydration is implemented, so the defect that
   motivated it is closed: the host's summary drops the passages a session was
   working from, and the plugin no longer goes quiet at exactly that point. On

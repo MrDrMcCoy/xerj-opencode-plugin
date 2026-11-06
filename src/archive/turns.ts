@@ -10,7 +10,12 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { Logger } from "../log.ts";
 
-export type TurnRole = "user" | "assistant";
+export type TurnRole = "user" | "assistant" | "tool" | "system";
+
+export interface ArchiveRecord {
+  readonly role: TurnRole;
+  readonly text: string;
+}
 
 export interface ArchivedTurn {
   /** One-based position within the session, after pruning. */
@@ -68,6 +73,44 @@ export class TurnArchive {
     await this.prune(path);
   }
 
+  /**
+   * Appends several records in one write. Used by the pre-compaction capture,
+   * which must not pay a stat-and-prune pass per message.
+   */
+  async appendBatch(
+    sessionID: string,
+    records: ReadonlyArray<ArchiveRecord>,
+  ): Promise<void> {
+    if (sessionID.length === 0 || records.length === 0) return;
+
+    await this.ensureDirectory();
+    const at = new Date().toISOString();
+    const lines: string[] = [];
+    for (const record of records) {
+      const text = record.text.trim();
+      if (text.length === 0) continue;
+      lines.push(
+        JSON.stringify({
+          role: record.role,
+          at,
+          text: text.slice(0, MAX_TEXT),
+        }),
+      );
+    }
+    if (lines.length === 0) return;
+
+    const path = this.pathFor(sessionID);
+    await appendFile(path, `${lines.join("\n")}\n`, "utf8").catch(
+      (error: unknown) => {
+        this.logger.debug(
+          "could not archive a compaction window",
+          String(error),
+        );
+      },
+    );
+    await this.prune(path);
+  }
+
   /** Turns `start` through `end`, one-based and inclusive. */
   async expand(sessionID: string, start: number, end: number): Promise<ExpandResult> {
     const path = this.pathFor(sessionID);
@@ -114,6 +157,15 @@ export class TurnArchive {
   }
 }
 
+function turnRole(value: unknown): TurnRole | null {
+  return value === "user" ||
+    value === "assistant" ||
+    value === "tool" ||
+    value === "system"
+    ? value
+    : null;
+}
+
 /** Parses archived lines, numbering them from one. A bad line is skipped. */
 export function parseTurns(text: string): ArchivedTurn[] {
   const turns: ArchivedTurn[] = [];
@@ -128,7 +180,7 @@ export function parseTurns(text: string): ArchivedTurn[] {
     if (typeof parsed !== "object" || parsed === null) continue;
 
     const record = parsed as { role?: unknown; at?: unknown; text?: unknown };
-    const role = record.role === "assistant" || record.role === "user" ? record.role : null;
+    const role = turnRole(record.role);
     const body = typeof record.text === "string" ? record.text : null;
     if (role === null || body === null) continue;
 
@@ -142,6 +194,14 @@ export function parseTurns(text: string): ArchivedTurn[] {
   return turns;
 }
 
+/** One-letter labels so a long expansion stays scannable. */
+const ROLE_LABELS: Record<TurnRole, string> = {
+  user: "U",
+  assistant: "A",
+  tool: "T",
+  system: "S",
+};
+
 /** The expansion a tool prints: `[n] U:` for a prompt, `[n] A:` for an answer. */
 export function formatExpansion(result: ExpandResult): string {
   if (result.turns.length === 0) {
@@ -151,6 +211,6 @@ export function formatExpansion(result: ExpandResult): string {
   }
 
   return result.turns
-    .map((turn) => `[${turn.ordinal}] ${turn.role === "user" ? "U" : "A"}: ${turn.text}`)
+    .map((turn) => `[${turn.ordinal}] ${ROLE_LABELS[turn.role]}: ${turn.text}`)
     .join("\n");
 }

@@ -594,9 +594,18 @@ Writes:
 Automatic capture from compaction uses `session.compaction.ended`, which
 carries the generated summary in `data.text`. `startCompactionCapture`
 subscribes in the background (aborted on shutdown), skips summaries under 120
-characters, clips at 4000, and stores one `summary` memory per text. The
-`compaction` hook itself still cannot be used: it runs before the summary
-exists. The id is the hash of the text, so a repeated event is idempotent.
+characters, clips at 4000, and stores one `summary` memory per text. The id is
+the hash of the text, so a repeated event is idempotent.
+
+The `compaction` hook runs before the summary exists, so it is not used for
+memory but is the one place that can keep the window a summary replaces.
+`archive/window.ts` flattens text and tool-result bodies from the newest
+messages (at most 40, about 200 KB), writes them to the turn archive behind a
+`system` marker, and skips media, reasoning, and compaction parts. Message ids
+are remembered per session, so a retried compaction appends nothing; a message
+without an id is identified by a hash of its role and text. Only sessions this
+instance prompted are captured, and a failed write is logged without blocking
+the compaction.
 
 IDs are `sha256(namespace + text)[0..16]`, so re-remembering the same fact is
 idempotent. Metadata: `kind`, `topic`, `source`, `sessionID`, `created`.

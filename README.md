@@ -321,6 +321,12 @@ The same entry works with a checkout path instead of the package name; see
 | `xerj_reindex` | — | Run an incremental pass over the project, fetched pages, and hidden folders now. |
 | `xerj_sysdocs` | — | Index this machine's man and info pages; unchanged pages are skipped and vanished ones pruned. |
 | `xerj_prjdocs` | `eager?` | Index official docs for the project's languages, frameworks, and cloud APIs at the versions it uses. |
+| `xerj_expand` | `sessionID`, `start?`, `end?` | Return the raw text of earlier turns, including the window a compaction replaced. |
+
+The turn archive is one file per session under the project's node directory,
+capped by `context.archiveMaxBytes`. Before the host compacts, the plugin
+appends the messages the summary will replace, so tool output stays available
+to `xerj_expand`.
 
 ## TUI
 

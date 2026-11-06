@@ -424,7 +424,7 @@ measured; they include tests and the commits that carry them. A status of
 | `xerj_ask` and hub packs | M | Not started | — | Gated by `hub.enabled`, `hub.network` |
 | Turn archive | M | Done | 1.5 h | `archive/turns.ts`: one NDJSON file per session under `<node dir>/archive`, 4 KB per turn, oldest half dropped past `context.archive.maxBytes`; prompts and answers both archived; eight module tests |
 | `xerj_expand` | M | Done | 0.5 h | Prints `[n] U:`/`[n] A:` for a turn range, or says the archive is off; wired for the plugin and the MCP server |
-| Pre-compaction window archive | M | Not started | — | Deferred by the user. The `compaction` hook receives `event.messages` before the summary exists; flattening the text parts into the existing archive keeps tool output that a summary compresses away. Design is fixed: last N messages or about 200 KB, whichever comes first, deduped by message id against compaction retries, media parts skipped, and a marker so `xerj_expand` shows where the captured block starts |
+| Pre-compaction window archive | M | Done | 1.5 h | `archive/window.ts` flattens text and tool-result bodies from the newest messages (40 or about 200 KB, whichever binds first) into the turn archive behind a `system` marker; media, reasoning, and compaction parts are skipped, message ids are deduped against retries, and only this instance's sessions are captured. Roles gained `tool` and `system`, and `xerj_expand` labels them `T` and `S`. Eleven module tests |
 | Fact mining from the compaction window | M | Not started | — | Deferred by the user. Two routes: a heuristic pass over the same window (patterns for decisions, constraints, config keys, commands that worked) at about 2 h, or one model call bounded by a token budget at about 3 to 4 h. Needs a precision measurement before it defaults on, a `derived` memory kind, and reuse of the stale flag; gated by `memory.extract`, off by default |
 | Post-compaction rehydration | M | Done | 2.0 h | `src/rehydrate.ts` builds the block from the three newest citations, re-reading a 24-line window inside the project root and capping the result at `context.rehydrateTokens` (600); `session.compaction.ended` snapshots the working set, the `model.request` hook suppresses the summariser's own call, and a fresh retrieval with hits supersedes the recall. Ten module tests and six hook tests |
 | History search | M | Done | 1.0 h | `archive/index.ts` bulk-loads one document per turn into `<prefix>-archive-docs`, idempotent by session and ordinal, with a manifest so a pruned turn leaves the index; the archive is now a search prefix and its own dataset row; five module tests |
@@ -446,11 +446,11 @@ the `git log` record layout cost an extra hour and a half, and the auto-search
 hint, where the dedupe test had to distinguish the hint pass from the retrieval
 pass.
 
-Tier M so far: **9.5 h** across seven items this pass, eight of fourteen with
+Tier M so far: **11.0 h** across eight items this pass, nine of fourteen with
 the graph overview that predates it. Remaining, all deferred or gated: the
 tree-sitter layer and the complexity work it enables (grammar source settled,
-work deferred), the pre-compaction window archive and fact mining (both
-deferred by the user), `xerj_code` (needs a network gate, since `corpus add`
+work deferred), fact mining (deferred by the user, gated by
+`memory.extract`), `xerj_code` (needs a network gate, since `corpus add`
 clones), and `xerj_ask` (gated by `hub.enabled` and `hub.network`).
 
 ## Settled decisions
