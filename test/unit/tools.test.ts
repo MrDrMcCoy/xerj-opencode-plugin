@@ -44,6 +44,7 @@ function toolFor(
   const recorded: Array<{ paths: string[]; bytes: number; hits: number }> = [];
   const tools = buildTools({
     config: DEFAULT_CONFIG,
+    projectRoot: process.cwd(),
     logger: { debug() {}, info() {}, warn() {}, error() {}, entries: async () => [], flush: async () => {} },
     getClient: () => null,
     getSearch: () => search,
@@ -133,6 +134,7 @@ describe("the rest of the tool surface", () => {
   } = {}) {
     const tools = buildTools({
       config: DEFAULT_CONFIG,
+      projectRoot: process.cwd(),
     logger: { debug() {}, info() {}, warn() {}, error() {}, entries: async () => [], flush: async () => {} },
     getClient: () => null,
       getSearch: () => overrides.search ?? null,
@@ -166,6 +168,28 @@ describe("the rest of the tool surface", () => {
 
     expect(result.content).toContain("src/a.ts:3");
     expect(result.metadata.xerj).toMatchObject({ hits: 1 });
+  });
+
+  test("imports reports cycles", async () => {
+    const run = allTools();
+    const result = await run("imports", {});
+
+    expect(result.content).toMatch(/import cycle|No import cycles/);
+    expect(result.metadata.xerj.kind).toBe("imports");
+  });
+
+  test("imports lists one file's specifiers", async () => {
+    const run = allTools();
+    const result = await run("imports", { action: "file", path: "package.json" });
+
+    expect(result.content.length).toBeGreaterThan(0);
+  });
+
+  test("imports needs a path for action=file", async () => {
+    const run = allTools();
+    const result = await run("imports", { action: "file" });
+
+    expect(result.content).toContain("needs a path");
   });
 
   test("refs lists the declarations that use a symbol", async () => {
@@ -383,6 +407,7 @@ describe("dataset tool", () => {
   }> {
     return buildTools({
       config: DEFAULT_CONFIG,
+      projectRoot: process.cwd(),
       ledger: {} as never,
       logger: {
         debug() {},
@@ -493,6 +518,7 @@ describe("dataset tool export and import", () => {
 
     const tools = buildTools({
       config: DEFAULT_CONFIG,
+      projectRoot: process.cwd(),
       ledger: {} as never,
       logger: {
         debug() {},
@@ -539,6 +565,7 @@ describe("dataset tool export and import", () => {
 
     const tools = buildTools({
       config: DEFAULT_CONFIG,
+      projectRoot: process.cwd(),
       ledger: {} as never,
       logger: {
         debug() {},

@@ -85,6 +85,7 @@ describe("McpHost", () => {
       "dataset",
       "def",
       "forget",
+      "imports",
       "index",
       "outline",
       "prjdocs",

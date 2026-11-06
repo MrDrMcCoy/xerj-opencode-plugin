@@ -639,6 +639,7 @@ export default Plugin.define({
 
     const tools = buildTools({
       config,
+      projectRoot,
       ledger,
       logger,
       getClient: () =>

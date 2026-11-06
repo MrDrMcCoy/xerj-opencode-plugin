@@ -107,6 +107,7 @@ describe("MCP server", () => {
       "dataset",
       "def",
       "forget",
+      "imports",
       "index",
       "outline",
       "prjdocs",

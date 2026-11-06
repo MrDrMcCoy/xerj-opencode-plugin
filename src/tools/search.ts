@@ -9,6 +9,8 @@ import type { RemoteSpool } from "../remote/spool.ts";
 import { formatAnomalies, type AnomalyService } from "../telemetry/anomaly.ts";
 import type { Ledger } from "../stats/ledger.ts";
 import type { XerjClient } from "../node/client.ts";
+import { findCycles, scanImports, specifiersIn } from "../analysis/imports.ts";
+import { readProjectFile } from "../analysis/walk.ts";
 import { DatasetService } from "../datasets/service.ts";
 import type { Logger } from "../log.ts";
 import type { SearchService } from "../search/service.ts";
@@ -16,6 +18,8 @@ import type { StatusSnapshot } from "../rpc.ts";
 
 export interface ToolOptions {
   readonly config: Config;
+  /** Canonical project root, for the analysis tools that read the tree. */
+  readonly projectRoot: string;
   /** The node's HTTP client; the dataset tool manages arbitrary indexes. */
   readonly getClient: () => XerjClient | null;
   readonly logger: Logger;
@@ -76,6 +80,20 @@ const ZOOM_INPUT = {
     k: { type: "number", description: "How many matches to return (1-10, default 2)." },
   },
   required: ["path", "symbol"],
+  additionalProperties: false,
+} as const;
+
+const IMPORTS_INPUT = {
+  type: "object",
+  properties: {
+    action: {
+      type: "string",
+      enum: ["cycles", "file"],
+      description: "cycles lists circular imports; file lists one file's imports.",
+    },
+    path: { type: "string", description: "Project-relative file, for action=file." },
+    limit: { type: "number", description: "How many cycles to report (1-50, default 20)." },
+  },
   additionalProperties: false,
 } as const;
 
@@ -359,6 +377,62 @@ export function buildTools(options: ToolOptions): ReadonlyArray<{
               content: result.text,
               metadata: { xerj: { hits: result.hits.length, bytes: result.bytes } },
             };
+      },
+    },
+    {
+      name: "imports",
+      description:
+        "Read the project's import graph without a language server: circular imports, or the imports of one file with their resolution. Use it before restructuring modules.",
+      input: IMPORTS_INPUT,
+      options: { namespace: "xerj" },
+      execute: async (input, context) => {
+        const args = input as { action?: string; path?: string; limit?: number };
+        const tool = context as { signal: AbortSignal };
+        const action = args.action ?? "cycles";
+
+        if (action === "file") {
+          if (args.path === undefined || args.path.trim().length === 0) {
+            return { content: "action=file needs a path", metadata: { xerj: { kind: "imports" } } };
+          }
+          const text = await readProjectFile(options.projectRoot, args.path.trim());
+          if (text === null) {
+            return {
+              content: `No readable file at ${args.path}.`,
+              metadata: { xerj: { kind: "imports" } },
+            };
+          }
+          const specifiers = specifiersIn(args.path.trim(), text);
+          return {
+            content:
+              specifiers.length === 0
+                ? `${args.path} names no imports.`
+                : specifiers.map((specifier) => `- ${specifier}`).join("\n"),
+            metadata: { xerj: { kind: "imports", specifiers: specifiers.length } },
+          };
+        }
+
+        const scan = await scanImports(options.projectRoot, { signal: tool.signal });
+        const cycles = findCycles(scan.edges, clampK(args.limit ?? 20));
+        if (cycles.length === 0) {
+          return {
+            content: `No import cycles across ${scan.files} files (${scan.edges.length} edges, ${scan.unresolved} unresolved specifiers).`,
+            metadata: {
+              xerj: { kind: "imports", cycles: 0, edges: scan.edges.length, files: scan.files },
+            },
+          };
+        }
+
+        const lines = [
+          `${cycles.length} import ${cycles.length === 1 ? "cycle" : "cycles"} ` +
+            `across ${scan.files} files (${scan.edges.length} edges):`,
+          ...cycles.map((cycle) => `- ${cycle.join(" → ")}`),
+        ];
+        return {
+          content: lines.join("\n"),
+          metadata: {
+            xerj: { kind: "imports", cycles: cycles.length, edges: scan.edges.length },
+          },
+        };
       },
     },
     {

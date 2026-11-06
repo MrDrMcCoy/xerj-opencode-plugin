@@ -162,6 +162,7 @@ export class McpHost {
   async tools(): Promise<McpTool[]> {
     const options: ToolOptions = {
       config: this.config,
+      projectRoot: this.projectRoot,
       ledger: this.requireLedger(),
       logger: this.logger,
       getClient: () => this.client,
