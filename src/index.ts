@@ -52,7 +52,11 @@ import {
   startCompactionCapture,
   startTurnCapture,
 } from "./memory/capture.ts";
-import { detectDocsFolders, unindexedDocsHint } from "./index/hint.ts";
+import {
+  detectDocsFolders,
+  unindexedDocsHint,
+  withoutBrainFolders,
+} from "./index/hint.ts";
 import { recoverMemoryIndex } from "./memory/health.ts";
 import { startRetention } from "./memory/retain.ts";
 import { migrateMemoryIndex, migrateProjectStorage } from "./memory/migrate.ts";
@@ -120,7 +124,12 @@ export default Plugin.define({
     const hiddenFolders = config.index.hidden.length > 0
       ? config.index.hidden
       : detectDocsFolders((folder) => existsSync(join(projectRoot, folder)));
-    const hiddenRoots = documentRoots(projectRoot, hiddenFolders);
+    // A brain already indexes its folder with sections and edges, so the same
+    // files are not also added as whole documents.
+    const hiddenRoots = withoutBrainFolders(
+      documentRoots(projectRoot, hiddenFolders),
+      brains,
+    );
     if (!overbroad) {
       const docsHint = unindexedDocsHint(
         (folder) => existsSync(join(projectRoot, folder)),
