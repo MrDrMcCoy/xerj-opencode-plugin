@@ -348,10 +348,9 @@ publish, and live TUI verification remain.
   preferences, fixes, notes) never expire, and an undated entry cannot be
   aged out but still counts toward the size caps. One sweep runs at startup
   and hourly after, logging what it removed; a failed sweep never throws.
-  Ten plan tests and two runner tests cover it. With the stock count cap,
-  500 summaries at ~1.5 KB each is under a megabyte, so `maxCount` binds
-  long before `maxBytes`; raise the count or set it to 0 for the size cap to
-  matter.
+  Ten plan tests and two runner tests cover it. The default count cap is 0
+  (disabled) by user decision: age and size alone decide retention, so the
+  2 GiB ceiling is reachable instead of being masked by a count limit.
 
 - 2026-11-05: Third batch (0.6.4). Every XERJ process now runs at a
   configurable priority: `node.priority` is `low` by default, POSIX gets
