@@ -28,6 +28,8 @@ export interface SessionHookOptions {
   readonly onCost?: (sessionID: string, bytes: number) => void;
   /** Reports a prompt worth retrieving for, e.g. to title a captured turn. */
   readonly onPrompt?: (sessionID: string, text: string) => void;
+  /** Receives every prompt, including ones the gate skips, for the archive. */
+  readonly onPromptArchive?: (sessionID: string, text: string) => void;
   /** Reports a prompt whose passages the relevance gate dropped entirely. */
   readonly onNoiseSkip?: () => void;
   /** Resets the idle deadline; called for every prompt and model call. */
@@ -139,6 +141,7 @@ export async function registerSessionHooks(
   await ctx.session.hook("prompt", async (event) => {
     options.onActivity?.(event.sessionID);
     const text = event.prompt.text.trim();
+    if (text.length > 0) options.onPromptArchive?.(event.sessionID, text);
     if (!shouldRetrieve(text)) return;
     options.onPrompt?.(event.sessionID, text);
 

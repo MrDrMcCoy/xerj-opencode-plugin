@@ -43,6 +43,8 @@ export interface TurnCaptureOptions {
   /** Answers shorter than this are acknowledgements, not knowledge. */
   readonly minChars?: number;
   readonly maxChars?: number;
+  /** Receives each answer verbatim for the turn archive. */
+  readonly onAnswer?: (sessionID: string, text: string) => void;
 }
 
 /**
@@ -153,6 +155,7 @@ async function storeTurn(
 ): Promise<void> {
   const answer = state.answers.get(sessionID);
   state.answers.delete(sessionID);
+  if (answer !== undefined) options.onAnswer?.(sessionID, answer);
 
   const prompt = options.prompts.latest(sessionID);
   if (answer === undefined || prompt === undefined) return;

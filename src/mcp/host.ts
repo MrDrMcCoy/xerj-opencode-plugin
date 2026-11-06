@@ -21,6 +21,7 @@ import { NodeRuntime } from "../node/runtime.ts";
 import { EmbedMode } from "../node/supervisor.ts";
 import { CorpusService } from "../index/watcher.ts";
 import { SearchService } from "../search/service.ts";
+import { TurnArchive } from "../archive/turns.ts";
 import { MemoryStore } from "../memory/store.ts";
 import { RemoteSpool } from "../remote/spool.ts";
 import { AnomalyService } from "../telemetry/anomaly.ts";
@@ -163,6 +164,19 @@ export class McpHost {
     const options: ToolOptions = {
       config: this.config,
       projectRoot: this.projectRoot,
+      // The archive the plugin writes for this project, read-only here: the
+      // MCP server has no session events of its own to append.
+      getArchive: () =>
+        this.config.context.archiveEnabled
+          ? new TurnArchive({
+              directory: join(
+                projectNodeDir(this.storageRoot, indexPrefix(this.projectRoot)),
+                "archive",
+              ),
+              logger: this.logger,
+              maxBytes: this.config.context.archiveMaxBytes,
+            })
+          : null,
       ledger: this.requireLedger(),
       logger: this.logger,
       getClient: () => this.client,

@@ -76,6 +76,9 @@ export interface ContextOptions {
   readonly enabled: boolean;
   readonly maxTokens: number;
   readonly memoryTokens: number;
+  /** Keeps raw turns so a compacted session can still be expanded. */
+  readonly archiveEnabled: boolean;
+  readonly archiveMaxBytes: number;
   readonly maxPassages: number;
   readonly timeoutMs: number;
 }
@@ -211,6 +214,8 @@ export const DEFAULT_CONFIG: Config = {
     enabled: true,
     maxTokens: 1500,
     memoryTokens: 400,
+    archiveEnabled: true,
+    archiveMaxBytes: 64 * 1024 * 1024,
     maxPassages: 8,
     timeoutMs: 400,
   },
@@ -257,6 +262,7 @@ export function loadConfig(
   const index = asObject(root.index);
   const remote = asObject(root.remote);
   const context = asObject(root.context);
+  const archive = asObject(context.archive);
   const prjdocs = asObject(root.prjdocs);
   const sysdocs = asObject(root.sysdocs);
   const memory = asObject(root.memory);
@@ -403,6 +409,20 @@ export function loadConfig(
         0,
         100_000,
         "context.memoryTokens",
+        warnings,
+      ),
+      archiveEnabled: readBoolean(
+        archive.enabled,
+        DEFAULT_CONFIG.context.archiveEnabled,
+        "context.archive.enabled",
+        warnings,
+      ),
+      archiveMaxBytes: readInteger(
+        archive.maxBytes,
+        DEFAULT_CONFIG.context.archiveMaxBytes,
+        1_048_576,
+        Number.MAX_SAFE_INTEGER,
+        "context.archive.maxBytes",
         warnings,
       ),
       maxPassages: readInteger(

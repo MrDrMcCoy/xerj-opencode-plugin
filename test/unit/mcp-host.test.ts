@@ -85,6 +85,7 @@ describe("McpHost", () => {
       "ast",
       "dataset",
       "def",
+      "expand",
       "find",
       "forget",
       "imports",

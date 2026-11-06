@@ -9,6 +9,7 @@ import type { RemoteSpool } from "../remote/spool.ts";
 import { formatAnomalies, type AnomalyService } from "../telemetry/anomaly.ts";
 import type { Ledger } from "../stats/ledger.ts";
 import type { XerjClient } from "../node/client.ts";
+import { formatExpansion, type TurnArchive } from "../archive/turns.ts";
 import { hasAstGrep, searchAst } from "../analysis/ast.ts";
 import { findPaths, searchContent } from "../analysis/find.ts";
 import { findCycles, scanImports, specifiersIn } from "../analysis/imports.ts";
@@ -30,6 +31,8 @@ export interface ToolOptions {
   readonly getMemory: () => MemoryStore | null;
   readonly getSpool: () => RemoteSpool | null;
   readonly getAnomaly: () => AnomalyService | null;
+  /** The raw turn archive; null when archiving is disabled. */
+  readonly getArchive: () => TurnArchive | null;
   readonly snapshot: () => Promise<StatusSnapshot>;
 }
 
@@ -98,6 +101,17 @@ const FIND_INPUT = {
     limit: { type: "number", description: "Maximum results (1-200, default 100)." },
   },
   required: ["pattern"],
+  additionalProperties: false,
+} as const;
+
+const EXPAND_INPUT = {
+  type: "object",
+  properties: {
+    sessionID: { type: "string", description: "Session whose turns to expand." },
+    start: { type: "number", description: "First turn, one-based." },
+    end: { type: "number", description: "Last turn, one-based and inclusive." },
+  },
+  required: ["sessionID"],
   additionalProperties: false,
 } as const;
 
@@ -413,6 +427,34 @@ export function buildTools(options: ToolOptions): ReadonlyArray<{
               content: result.text,
               metadata: { xerj: { hits: result.hits.length, bytes: result.bytes } },
             };
+      },
+    },
+    {
+      name: "expand",
+      description:
+        "Return the raw text of earlier turns in this session, by turn numbers. Use it when a compaction summary replaced detail you need again.",
+      input: EXPAND_INPUT,
+      options: { namespace: "xerj" },
+      execute: async (input) => {
+        const args = input as { sessionID: string; start?: number; end?: number };
+        const archive = options.getArchive();
+        if (archive === null) {
+          return {
+            content: "The turn archive is disabled (context.archive.enabled).",
+            metadata: { xerj: { kind: "expand", available: false } },
+          };
+        }
+
+        const start = args.start ?? 1;
+        const end = args.end ?? Math.max(start, start + 9);
+        const result = await archive.expand(args.sessionID, start, end);
+
+        return {
+          content: formatExpansion(result),
+          metadata: {
+            xerj: { kind: "expand", turns: result.turns.length, total: result.total },
+          },
+        };
       },
     },
     {

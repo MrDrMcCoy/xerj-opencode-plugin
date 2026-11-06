@@ -45,6 +45,7 @@ function toolFor(
   const tools = buildTools({
     config: DEFAULT_CONFIG,
     projectRoot: process.cwd(),
+    getArchive: () => null,
     logger: { debug() {}, info() {}, warn() {}, error() {}, entries: async () => [], flush: async () => {} },
     getClient: () => null,
     getSearch: () => search,
@@ -135,6 +136,7 @@ describe("the rest of the tool surface", () => {
     const tools = buildTools({
       config: DEFAULT_CONFIG,
       projectRoot: process.cwd(),
+      getArchive: () => null,
     logger: { debug() {}, info() {}, warn() {}, error() {}, entries: async () => [], flush: async () => {} },
     getClient: () => null,
       getSearch: () => overrides.search ?? null,
@@ -168,6 +170,14 @@ describe("the rest of the tool surface", () => {
 
     expect(result.content).toContain("src/a.ts:3");
     expect(result.metadata.xerj).toMatchObject({ hits: 1 });
+  });
+
+  test("expand says the archive is off when it is disabled", async () => {
+    const run = allTools();
+    const result = await run("expand", { sessionID: "s1" });
+
+    expect(result.content).toContain("archive is disabled");
+    expect(result.metadata.xerj.available).toBe(false);
   });
 
   test("ast explains how to get ast-grep when it is missing", async () => {
@@ -445,6 +455,7 @@ describe("dataset tool", () => {
     return buildTools({
       config: DEFAULT_CONFIG,
       projectRoot: process.cwd(),
+      getArchive: () => null,
       ledger: {} as never,
       logger: {
         debug() {},
@@ -556,6 +567,7 @@ describe("dataset tool export and import", () => {
     const tools = buildTools({
       config: DEFAULT_CONFIG,
       projectRoot: process.cwd(),
+      getArchive: () => null,
       ledger: {} as never,
       logger: {
         debug() {},
@@ -603,6 +615,7 @@ describe("dataset tool export and import", () => {
     const tools = buildTools({
       config: DEFAULT_CONFIG,
       projectRoot: process.cwd(),
+      getArchive: () => null,
       ledger: {} as never,
       logger: {
         debug() {},

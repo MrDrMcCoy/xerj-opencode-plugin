@@ -74,6 +74,7 @@ import {
   type ToolResultEvent,
 } from "./hooks/tool-results.ts";
 import { CommitIndex, type CommitSummary } from "./index/commits.ts";
+import { TurnArchive } from "./archive/turns.ts";
 import { memoryIndexMissing, recoverMemoryIndex } from "./memory/health.ts";
 import { curateMemories } from "./memory/curate.ts";
 import { verifyMemories } from "./memory/verify.ts";
@@ -226,6 +227,15 @@ export default Plugin.define({
     // One node directory per project, so two projects (or two locations of the
     // same project) never share a process, a port, or an idle timer.
     const nodeDir = projectNodeDir(storageRoot, prefix);
+    // Raw turns, so a compacted session can still be expanded. Off means the
+    // expand tool is not registered either.
+    const archive = config.context.archiveEnabled
+      ? new TurnArchive({
+          directory: join(nodeDir, "archive"),
+          logger,
+          maxBytes: config.context.archiveMaxBytes,
+        })
+      : null;
     // Index journals live beside the engine data they describe, so a node with
     // a new data dir always starts from a full pass instead of trusting a
     // journal that describes documents the engine no longer has.
@@ -640,6 +650,7 @@ export default Plugin.define({
     const tools = buildTools({
       config,
       projectRoot,
+      getArchive: () => archive,
       ledger,
       logger,
       getClient: () =>
@@ -753,6 +764,7 @@ export default Plugin.define({
       onNoiseSkip: () => counters.noteNoiseSkip(),
       onCost: (_sessionID, bytes) => void ledger.recordInjection(bytes),
       onPrompt: (sessionID, text) => prompts.note(sessionID, text),
+      onPromptArchive: (sessionID, text) => void archive?.append(sessionID, "user", text),
       signal: shutdown.signal,
       recordQuery: (sessionID, paths, bytes, hits) =>
         ledger.recordQuery(sessionID, paths, bytes, hits),
@@ -1195,6 +1207,7 @@ export default Plugin.define({
             signal: shutdown.signal,
             logger,
             prompts,
+            onAnswer: (sessionID, text) => void archive?.append(sessionID, "assistant", text),
           });
         }
       }

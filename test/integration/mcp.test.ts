@@ -107,6 +107,7 @@ describe("MCP server", () => {
       "ast",
       "dataset",
       "def",
+      "expand",
       "find",
       "forget",
       "imports",
