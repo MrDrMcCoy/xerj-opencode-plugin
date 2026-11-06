@@ -112,6 +112,7 @@ import {
   type TelemetryReport,
 } from "./telemetry/store.ts";
 import { JobKind, type OpType } from "./telemetry/types.ts";
+import { measuredTools } from "./tools/measure.ts";
 import { buildTools } from "./tools/search.ts";
 
 interface Runtime {
@@ -1148,17 +1149,7 @@ export default Plugin.define({
 
     // Every tool is timed at registration, so a tool added later needs no
     // instrumentation of its own and a slow one shows up in the report.
-    const measured = [...tools, ...docsTools].map((tool) => ({
-      ...tool,
-      execute: (input: unknown) =>
-        telemetry.span(
-          `tool.${tool.name}` as OpType,
-          () => (tool.execute as (value: unknown) => Promise<unknown>)(input),
-          (result) => (typeof result === "object" && result !== null
-            ? { bytes: Buffer.byteLength(JSON.stringify(result), "utf8") }
-            : undefined),
-        ),
-    }));
+    const measured = measuredTools([...tools, ...docsTools], telemetry);
 
     await ctx.tool.transform((editor) => {
       editor.namespace({
