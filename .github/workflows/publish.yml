@@ -39,13 +39,19 @@ jobs:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
 
+      # npm 10 ships with Node 22 and has no `stage` command, which a
+      # staging-scoped token needs.
+      - run: npm install -g npm@latest
+
       - name: The tag and the manifest must agree
         run: |
-          TAG="${GITHUB_REF_NAME#v}"
           VERSION="$(node -p 'require("./package.json").version')"
-          if [ "$TAG" != "$VERSION" ]; then
-            echo "tag $GITHUB_REF_NAME does not match package.json version $VERSION" >&2
-            exit 1
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            TAG="${GITHUB_REF_NAME#v}"
+            if [ "$TAG" != "$VERSION" ]; then
+              echo "tag $GITHUB_REF_NAME does not match version $VERSION" >&2
+              exit 1
+            fi
           fi
           echo "publishing $VERSION"
 
