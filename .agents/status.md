@@ -340,6 +340,22 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-05: Coverage pass on this week's modules (0.7.0). New branches: the
+  Elasticsearch chapter discovery plus its fallback list, a failing chapter that
+  does not stop the others, the `urlPrefix` boundary, asset links never
+  followed, and the title fallback for markdown without a heading; dataset
+  export and import through the tool, including a created index and skipped
+  lines; the hidden indexer's `start()` watcher, a new file reaching it through
+  the debounce, and an empty root list; the system docs indexer not recreating
+  an index, a mapping failure as a warning, manifest rows dropped after a prune,
+  an uncompressed info page beside a non-gzip one, truncation, and a corrupt
+  manifest rewritten. The MCP integration test now expects twelve tools, which
+  it had missed since the dataset tool landed. 756 unit and 12 integration tests
+  pass; coverage 88.8% lines, 95.1% functions. Remaining gaps need a fake clock
+  or multiple processes: supervisor port-scan exhaustion and waitForNode,
+  watcher restart backoff to the maximum, and the plugin's own wiring inside a
+  live setup.
+
 - 2026-11-05: The Elasticsearch reference was a sliver, not the API. Ten
   documents was the page budget, and the crawl from `index.html` spent it on
   chapter summaries while following every same-origin link, which pulled in
