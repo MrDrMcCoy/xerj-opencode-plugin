@@ -339,6 +339,21 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: `xerj_share` and `xerj_ask` are configurable, off by default
+  (0.7.0 plan). Three keys joined the gate block: `share.enabled` (false)
+  registers the share tool, `hub.enabled` (false) registers `xerj_ask` and the
+  hub commands, and `hub.network` (false) allows the catalogue and pack
+  downloads, leaving already-cached packs as the only thing that answers. The
+  gate section now covers a listener and network access, not only runtimes, and
+  its closed matrix gained both rows (share: not registered; ask: not
+  registered, or cached-only when the network stays closed). Tier M and Tier L
+  rows name their keys, the closed-default rationale names an open port and a
+  remote catalogue, and constraint 6 names the keys that permit outbound
+  traffic. The open-decisions section became a Settled decisions table: who
+  compacts, whether the plugin writes, whether a tool may open a listener, and
+  whether a tool may reach the network. The config block was parse-checked as
+  JSON.
+
 - 2026-11-06: Edits are a non-goal (0.7.0 plan). The roadmap's edit family is
   gone from the tiers, the config block, the gate table, the closed-behaviour
   matrix, the risks, and the open decisions. A sixth constraint states the

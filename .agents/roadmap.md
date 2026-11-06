@@ -58,14 +58,16 @@ cheap half ships first.
    tools and the model write. No tool in this plan opens a project file for
    writing, so a bug here can cost a bad citation but not a file.
 6. **No silent outbound traffic.** Anything that leaves the machine,
-   including the engine's own field report, is opt-in and off by default.
+   including the engine's own field report, is opt-in and off by default:
+   `share.enabled` for a listener, `hub.enabled` and `hub.network` for the
+   catalogue.
 
 ## Capability gates
 
-Two candidates add a parser and a resident process. Both are off by default
-and both are opt-in per project, so an install that wants only retrieval
-behaves exactly as it does today. A gate is a configuration setting, not a
-build flag: the same published package carries the capability.
+The candidates that add a parser, a resident process, a listener, or network
+access are off by default and opt-in per project, so an install that wants
+only retrieval behaves exactly as it does today. A gate is a configuration
+setting, not a build flag: the same published package carries the capability.
 
 ```jsonc
 {
@@ -85,7 +87,9 @@ build flag: the same published package carries the capability.
           "maxServers": 2,
           "timeoutMs": 2000
         }
-      }
+      },
+      "share": { "enabled": false },
+      "hub": { "enabled": false, "network": false }
     }
   }]
 }
@@ -101,11 +105,15 @@ build flag: the same published package carries the capability.
 | `analysis.lsp.idleMs` | 5 min | Stop a server that answered nothing for this long |
 | `analysis.lsp.maxServers` | 2 | Cap concurrent servers, so one project cannot fill memory |
 | `analysis.lsp.timeoutMs` | 2 s | Per-request deadline; a miss returns no result rather than delaying a turn |
+| `share.enabled` | `false` | Register `xerj_share`, which opens a read-only listener for one index |
+| `hub.enabled` | `false` | Register `xerj_ask` and the hub commands |
+| `hub.network` | `false` | Allow `xerj ask` to reach the catalogue and download packs; when false only already-cached packs answer |
 
-Defaults are closed because each capability adds weight a retrieval plugin
-should not impose: 52 to 100 MB of grammars, or a process holding hundreds of
-megabytes. The plugin's contract is that nothing blocks `setup`, and a closed
-gate keeps that true.
+Defaults are closed because each capability adds something a retrieval plugin
+should not impose on its own: 52 to 100 MB of grammars, a process holding
+hundreds of megabytes, an open port, or traffic to a remote catalogue. The
+plugin's contract is that nothing blocks `setup`, and a closed gate keeps
+that true.
 
 ### Behaviour when a gate is closed
 
@@ -116,6 +124,8 @@ gate keeps that true.
 | `xerj_complexity`, structural search | tree-sitter | Tool not registered |
 | `xerj_callers`, `xerj_impact` | LSP | Tool not registered |
 | `xerj_inspect` | LSP, tree-sitter | Registered with the index-only part (TODOs); diagnostics and unused exports are omitted and named as gated |
+| `xerj_share` | A listener | Tool not registered |
+| `xerj_ask` | The hub catalogue | Tool not registered; with `hub.enabled` open and `hub.network` closed, only cached packs answer |
 | Retrieval, injection, memory, docs corpora | Nothing gated | Identical with every gate closed |
 
 Five rules make the gates trustworthy:
@@ -187,7 +197,7 @@ Ship these first. None adds a runtime, a grammar, or a write path.
 | tree-sitter layer, one language | AFT | Lazy grammar download, per-file cache, symbol ranges | TypeScript first | `analysis.treeSitter.enabled` |
 | Complexity and duplicates | AFT inspect | Node counts per function, structural hashing | The tree-sitter layer | `analysis.treeSitter.enabled` |
 | `xerj_code` | XERJ engine | Retrieval over reference corpora (`corpus add/index/list`) | A corpus lifecycle view in the panel | None |
-| `xerj_ask` and hub packs | XERJ engine | Answers from signed pre-indexed packs, with licence and pin named | Cached catalogue | None; network consent is asked on first use |
+| `xerj_ask` and hub packs | XERJ engine | Answers from signed pre-indexed packs, with licence and pin named | Cached catalogue | `hub.enabled`; `hub.network` for anything not cached |
 | Graph overview in the panel | XERJ engine | Edge totals, hubs, detectors per brain | None; the endpoint is already used | None |
 | Turn archive | Magic Context, reduced | Append raw turns to `<project>/.xerj`, pruned by `context.archive.maxBytes` | Retention sweep at startup | `context.archive.enabled`, on by default |
 | `xerj_expand` | Magic Context, reduced | Return the original `U:`/`A:` text for an archive range | The archive | `context.archive.enabled` |
@@ -200,7 +210,7 @@ Ship these first. None adds a runtime, a grammar, or a write path.
 | LSP pool | AFT | Per-language server from the project's own toolchain; definitions, references, call hierarchy, diagnostics | Process leaks, resident memory, missing servers | `analysis.lsp.enabled` |
 | `xerj_callers`, `xerj_impact` | AFT callgraph | Real callers via `prepareCallHierarchy` | Depends on the pool; per-language coverage varies | `analysis.lsp.enabled` |
 | `xerj_inspect` | AFT inspect | Diagnostics, unused exports, dead code, TODOs | Accuracy varies by language; must report confidence | `analysis.lsp.enabled`; `analysis.treeSitter.enabled` for the full result |
-| `xerj_share` | XERJ engine | Read-only link with passcode and expiry | Opens a listener; off by default, explicit consent | None; consent is per invocation |
+| `xerj_share` | XERJ engine | Read-only link with passcode and expiry | Opens a listener; the tool prints the address and expiry before it answers anyone | `share.enabled` |
 
 ## Tier XL: more than six weeks
 
@@ -259,13 +269,14 @@ Ship these first. None adds a runtime, a grammar, or a write path.
 6. Every tier keeps the two rules this plugin already follows: nothing
    blocks `setup`, and every failure is visible in the panel.
 
-## Open decisions for the user
+## Settled decisions
 
-Two remain, each with a safe default, so neither blocks work:
+No decision blocks work. Each one has a default that changes nothing until a
+user asks for it:
 
-1. **Share**: allow `xerj_share` at all, given it opens a listener. Default:
-   the tool is absent until invoked with consent.
-2. **Hub packs**: allow network access for `xerj ask`. Default: offline; the
-   first request asks and remembers the answer.
-Compaction and file writes are settled. The host keeps compaction, and this
-plugin stays read-only: it locates and explains, the host and the model write.
+| Question | Settled as |
+|---|---|
+| Who compacts? | The host. The plugin keeps a turn archive so its own recall survives compaction |
+| Does the plugin write files? | No. It stays read-only: it locates and explains, the host and the model write |
+| May a tool open a listener? | Only with `share.enabled: true`. Off by default, and the address and expiry are printed before anyone can reach it |
+| May a tool reach the network? | Only with `hub.enabled` and `hub.network`. Off by default, and cached packs still answer while the network stays closed |
