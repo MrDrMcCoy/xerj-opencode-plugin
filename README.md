@@ -228,18 +228,62 @@ The same entry works with a checkout path instead of the package name; see
 
 ## How retrieval works
 
-1. A lexical leg queries `body`, which is the field that produces a passage.
-2. A semantic leg runs when the index mapping is `semantic_text`.
-3. The two legs are fused with reciprocal rank fusion in the plugin. The
-   engine refuses passages on a server-side hybrid query, so fusion happens
-   client-side.
-4. Results are cut to the token budget and formatted with `path:line`
-   citations.
-5. Brain hits get one hop of neighbors, using only `pathcite` and `sequence`
-   edges, capped and budgeted separately.
-6. Brain paths are rewritten to project-relative paths before line resolution.
-   A hidden whole-file hit is dropped when a brain section covers that path, so
-   one file is cited from the precise section index.
+A search runs three legs and fuses them:
+
+1. **Lexical**: `match` on `body`, the field that produces a passage.
+2. **Semantic**: runs when the index mapping is `semantic_text`, so a question
+   phrased differently from the code can still land.
+3. **Symbol and title**: `multi_match` weighting `name` (the function or type a
+   record is about) and `title` (its file or section) above `body`, so a file
+   that defines the concept outranks prose that mentions it.
+
+The legs are fused with reciprocal rank fusion in the plugin, because the
+engine refuses passages on a server-side hybrid query. The fused pool is twice
+the requested size, so demotion and filtering can promote something that
+ranked lower.
+
+Then the context surface decides what is worth a token:
+
+- **Relevance gate.** A passage survives only when its text or path carries
+  half the prompt's content terms, matched by stem so "generated" finds
+  "generate". The top three semantic hits get a pass when they share a term,
+  which is what lets the semantic leg answer a paraphrase.
+- **Prompt gate.** A prompt under 12 characters, a slash command, or one made
+  only of filler ("continue", "go ahead") retrieves nothing. Prompts the gate
+  drops are counted as `noiseSkips`, not as misses, so the hit rate reflects
+  real attempts.
+- **Demotion, not removal.** Lockfiles, minified assets, build output, license
+  boilerplate, and chronicle files (changelogs, status logs, journals) sink
+  unless the prompt names them. Chronicles name every feature and answer
+  nothing, so they would otherwise match any question.
+- **One section per file.** A long README cannot spend the whole budget; the
+  first matching section stays and the rest give way.
+- **Per-session dedupe.** A `path:line` already injected in this session is not
+  injected again, so a follow-up question does not pay twice for one section.
+- **Budget.** `context.maxPassages` passages within `context.maxTokens`, split
+  evenly so one whole-section match cannot hide the others.
+
+Send a question to `xerj_search` and the same legs run with the tool surface:
+no relevance gate, no budget discard, and generated files kept but demoted,
+because there the caller asked explicitly.
+
+Brain hits get one hop of neighbors over `pathcite` and `sequence` edges, with
+their own budget. Brain paths are rewritten to project-relative paths before
+line resolution, and a hidden whole-file hit is dropped when a brain section
+covers the same file, so one file is cited from its precise section.
+
+### Measuring a change
+
+`bun run eval` runs 40 labeled questions against a live index and reports how
+often the expected file survives, the bytes it costs, and every miss:
+
+```
+bun run eval
+bun run eval --k 8 --surface tool --json
+```
+
+Defaults match what the plugin ships. A one-prompt change is inside the noise
+of a 40-prompt set; treat a single point as unproven.
 
 Savings are measured, not asserted: the baseline is each cited file's size
 capped at `stats.maxBaselineBytes`, counted once per session. Reading a file
