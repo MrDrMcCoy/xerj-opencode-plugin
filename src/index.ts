@@ -29,6 +29,7 @@ import {
   documentRoots,
   environmentFrom,
   externalPrefix,
+  archivePrefix,
   gitPrefix,
   indexPrefix,
   isOverbroadRoot,
@@ -74,6 +75,7 @@ import {
   type ToolResultEvent,
 } from "./hooks/tool-results.ts";
 import { CommitIndex, type CommitSummary } from "./index/commits.ts";
+import { ArchiveIndex } from "./archive/index.ts";
 import { TurnArchive } from "./archive/turns.ts";
 import { memoryIndexMissing, recoverMemoryIndex } from "./memory/health.ts";
 import { curateMemories } from "./memory/curate.ts";
@@ -528,6 +530,27 @@ export default Plugin.define({
       return summary;
     };
 
+    /** Turns, when the archive is on. Cheap: a few hundred small documents. */
+    const runArchive = async (): Promise<void> => {
+      if (archive === null) return;
+      const handle = runtime.node ?? (await nodes.ensure().catch(() => null));
+      if (handle === null) return;
+
+      await new ArchiveIndex({
+        client: new XerjClient(handle.baseUrl),
+        indexName: `${archivePrefix(projectRoot)}-docs`,
+        directory: join(nodeDir, "archive"),
+        statePath: join(nodeDir, "archive", "index.json"),
+        logger,
+        signal: shutdown.signal,
+      })
+        .run()
+        .then(() => runtime.search?.invalidate())
+        .catch((error: unknown) => {
+          logger.debug("could not index the turn archive", String(error));
+        });
+    };
+
     const runReindex = async () => {
       await Promise.all([
         runtime.corpus?.reindex(),
@@ -536,6 +559,7 @@ export default Plugin.define({
       ]);
       void runtime.brain?.runAll();
       void runCommits();
+      void runArchive();
       // The pass ran before this returns, so the caller can report real
       // completion instead of a queue-only toast.
       const status = corpusStatus(runtime.corpus);
@@ -839,9 +863,10 @@ export default Plugin.define({
         onChange: publishChange,
       });
       await runtime.corpus.start();
-      // History is small and independent of the project corpus, so it starts
-      // after the corpus does and never delays it.
+      // History and the turn archive are small and independent of the project
+      // corpus, so they start after it and never delay it.
       void runCommits();
+      void runArchive();
     };
 
     const startWebIndexer = async (handle: NodeHandle): Promise<void> => {
@@ -1112,6 +1137,7 @@ export default Plugin.define({
         [
           prefix,
           gitPrefix(projectRoot),
+          archivePrefix(projectRoot),
           webPrefix(projectRoot),
           externalPrefix(projectRoot),
           sysdocsPrefix(hostname()),
@@ -1470,9 +1496,14 @@ function datasetRows(
         index.startsWith(`${project}-`) &&
         !index.startsWith(`${project}-hidden-`) &&
         !index.startsWith(`${project}-prjdocs-`) &&
+        !index.startsWith(`${project}-archive-`) &&
         !index.startsWith(`${git}-`),
     },
     { name: "git", matches: (index: string) => index.startsWith(`${git}-`) },
+    {
+      name: "archive",
+      matches: (index: string) => index.startsWith(`${project}-archive-`),
+    },
     {
       name: "hidden",
       matches: (index: string) => index.startsWith(`${project}-hidden-`),

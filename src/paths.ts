@@ -298,6 +298,11 @@ export function brainSpecs(
  * Git history is per project and small, so it shares the project's own prefix
  * with a `-git` suffix rather than a hashed name of its own.
  */
+/** Turns archived by the plugin, indexed as their own corpus. */
+export function archivePrefix(projectRoot: string): string {
+  return `${indexPrefix(projectRoot)}-archive`;
+}
+
 export function gitPrefix(projectRoot: string): string {
   return `${indexPrefix(projectRoot)}-git`;
 }
