@@ -340,6 +340,19 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: v0.7.0 tagged, pushed, and staged on npm. The first tag run
+  failed on two sysdocs tests that passed locally: neither isolated `roots`, so
+  the indexer also scanned `/usr/share/man`, which timed out one test and made
+  another prune pages it never wrote. Fixed by an empty root list; the file now
+  runs in 36 ms. The tag was moved (never published) after that fix and again
+  after two workflow fixes. The `NPM_TOKEN` in the `npm` environment is
+  staging-scoped: `npm publish` returns E403/E_STAGE_REQUIRED, `npm stage
+  publish` (npm 11, so the job installs it) puts the version in the staging
+  area, and a second stage answers 409 "Cannot stage previously published
+  version", which the workflow now treats as success. 0.7.0 is staged and
+  awaits approval at npmjs.com; `npm view` still reports 0.6.8 as latest. The
+  GitHub release points at tag `v0.7.0` (c66ebba).
+
 - 2026-11-05: Eager mode covers the whole Elasticsearch guide (0.7.0). In eager
   mode the reference crawl seeds from the guide's `index.html` instead of
   `rest-apis.html`, follows links one level deeper, and filters links, so
