@@ -1,4 +1,4 @@
-// GPU compute stacks: CUDA, ROCm/HIP, SYCL, and Vulkan. These are not
+// Accelerator toolchains: CUDA, ROCm/HIP, SYCL, oneAPI, and Vulkan. These are not
 // languages and not npm packages, so neither extension counts nor dependency
 // names catch them reliably. A project uses one when it compiles a kernel with
 // that toolchain, includes its headers, or names it in a build file.
@@ -66,9 +66,28 @@ const STACKS: ReadonlyArray<GpuStack> = [
     ],
     packages: [/^(adaptivecpp|sycl|dpcpp-cpp-rt|intel-sycl-rt)$/],
     extensions: [],
+    // The SYCL specification carries no version in its URL, and a oneAPI
+    // toolkit version belongs to the oneapi stack, not this one.
+    versions: [],
+  },
+  {
+    id: "oneapi",
+    markers: [
+      /#\s*include\s*[<"](?:oneapi\/[^>"]+|mkl\.h|mkl\.hpp|dnnl\.h|dnnl\.hpp|tbb\/[^>"]+)[>"]/i,
+      /\boneapi::(?:mkl|dnnl|tbb|dpl)::/,
+      /#\s*include\s*[<"]level_zero\/ze_api\.h[>"]/i,
+      /\bzeInit(?:Drivers)?\s*\(/,
+      /\b(?:dpcpp|icpx)\b(?![^\n]*\s-fsycl\b)/,
+      /\bONEAPI_ROOT\b/,
+    ],
+    packages: [
+      /^(intel-extension-for-pytorch|scikit-learn-intelex|oneccl_bindings_for_pytorch|mkl|mkl-devel|intel-openmp|dpcpp-cpp-rt|intel-sycl-rt)$/,
+    ],
+    extensions: [],
     versions: [
-      /intel\/oneapi-basekit:(\d{4}\.\d+)/i,
-      /oneAPI\s+(\d{4}\.\d+)/i,
+      /intel\/oneapi-[\w.-]+:(\d{4}\.\d+)/i,
+      /ONEAPI_VERSION\s*[=:]\s*"?(\d{4}\.\d+)/i,
+      /(?:oneAPI|oneapi)\s+(\d{4}\.\d+)/i,
     ],
   },
   {

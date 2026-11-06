@@ -92,6 +92,33 @@ describe("detectGpuStacks", () => {
     expect(stacks.find((stack) => stack.id === "vulkan")?.used).toBe("1.3.290");
   });
 
+  test("oneMKL and Level Zero headers prove oneAPI", async () => {
+    const stacks = await detectGpuStacks(
+      files(["src/mkl.cpp"]),
+      reader({
+        [`${root}/src/mkl.cpp`]:
+          "#include <oneapi/mkl.hpp>\n#include <level_zero/ze_api.h>\nzeInit();\n",
+      }),
+      root,
+    );
+
+    const oneapi = stacks.find((stack) => stack.id === "oneapi");
+    expect(oneapi).toBeDefined();
+    expect(stacks.some((stack) => stack.id === "sycl")).toBe(false);
+  });
+
+  test("a oneAPI toolkit image carries the version", async () => {
+    const stacks = await detectGpuStacks(
+      files(["Dockerfile"]),
+      reader({
+        [`${root}/Dockerfile`]: "FROM intel/oneapi-basekit:2024.2.1-devel-ubuntu22.04\n",
+      }),
+      root,
+    );
+
+    expect(stacks.map((stack) => `${stack.id}@${stack.used}`)).toEqual(["oneapi@2024.2"]);
+  });
+
   test("a project with no GPU code reports nothing", async () => {
     const stacks = await detectGpuStacks(
       files(["src/index.ts", "package.json"]),

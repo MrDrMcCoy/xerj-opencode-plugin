@@ -374,6 +374,7 @@ Detection is deliberate, not clever:
   | CUDA | `.cu` or `.cuh` files, `cuda_runtime.h`, `cublas`/`cudnn`/`nccl` headers, `__global__`, `cudaMalloc`, `nvcc`, `CUDAExtension`, or `cupy`/`pycuda`/`cuda-python` |
   | ROCm | `.hip` files, `hip/hip_runtime.h`, `rocblas`/`hipblas`/`miopen` headers, `hipMalloc`, `hipcc`, or a `rocm/dev-*` base image |
   | SYCL | `sycl/sycl.hpp`, `CL/sycl.hpp`, `sycl::queue`, `-fsycl`, `SYCL_DEVICE_FILTER`, or `adaptivecpp` |
+  | oneAPI | `oneapi/mkl.hpp`, `mkl.h`, `dnnl.hpp`, `oneapi/tbb/*`, `level_zero/ze_api.h`, `zeInit`, `dpcpp`/`icpx`, `ONEAPI_ROOT`, `intel/oneapi-*` images, or `intel-extension-for-pytorch`/`scikit-learn-intelex`/`mkl` |
   | Vulkan | `.glsl`/`.vert`/`.frag`/`.comp`/`.slang` shaders, `vulkan/vulkan.h`, `vkCreate*`, `find_package(Vulkan)`, `glslang`/`shaderc`, or the `ash`/`vulkano` crates |
 
   A GPU stack is reported only when a header, build file, kernel extension, or
@@ -382,7 +383,10 @@ Detection is deliberate, not clever:
 
 Each technology maps to one entry URL. Versioned sources (Node, Python, CUDA,
 ROCm) produce one URL for the version the project declares and one for the
-latest release. Node and Python resolve theirs from `nodejs.org/dist/index.json`
+latest release; oneAPI's specification is unversioned and stays inside the
+foundation's specification section rather than its news pages. Intel's own
+documentation site refuses non-browser clients, so oneAPI reads the UXL
+Foundation specification, which is where that specification is maintained. Node and Python resolve theirs from `nodejs.org/dist/index.json`
 and `endoflife.date`, CUDA from its archive listing, and ROCm from the
 `docs-<version>` path; a version the project does not pin falls back to the
 current guide. Everything else is an unversioned site with a page budget of 8

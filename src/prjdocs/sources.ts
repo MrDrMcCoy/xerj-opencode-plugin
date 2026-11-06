@@ -19,6 +19,8 @@ export interface DocsSource {
    * crawler default, and dropping it would leave the stack undocumented.
    */
   readonly maxBytes?: number;
+  /** Link prefix for an unversioned site that shares its host with noise. */
+  readonly prefix?: string;
 }
 
 export interface DocsTarget {
@@ -272,6 +274,15 @@ const SOURCES: Readonly<Record<string, DocsSource>> = {
     fallback: "https://rocm.docs.amd.com/en/latest/",
     maxPages: 15,
   },
+  oneapi: {
+    id: "oneapi",
+    // The specification lives on the UXL Foundation site; the rest of that
+    // host is foundation news, so the crawl stays in this section.
+    entry: "https://uxlfoundation.org/specifications/oneapi/",
+    versioned: false,
+    prefix: "https://uxlfoundation.org/specifications/oneapi/",
+    maxPages: 10,
+  },
   sycl: {
     id: "sycl",
     // The landing page links the specification, which is one 4 MB document.
@@ -311,7 +322,15 @@ export function docsTargets(
   if (source === null) return [];
 
   if (!source.versioned) {
-    return [{ id: source.id, url: source.entry, version: "latest", maxBytes: source.maxBytes }];
+    return [
+      {
+        id: source.id,
+        url: source.entry,
+        version: "latest",
+        maxBytes: source.maxBytes,
+        urlPrefix: source.prefix,
+      },
+    ];
   }
 
   const targets: DocsTarget[] = [];

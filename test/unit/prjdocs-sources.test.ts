@@ -48,6 +48,16 @@ describe("GPU documentation sources", () => {
     expect(vulkan[0]?.url).toBe("https://docs.vulkan.org/guide/latest/index.html");
     expect(maxPagesFor("vulkan")).toBe(15);
   });
+
+  test("oneAPI stays inside the specification section", () => {
+    const oneapi = docsTargets(
+      { id: "oneapi", kind: "framework", used: "2024.2", evidence: "Dockerfile" },
+      null,
+    );
+
+    expect(oneapi[0]?.url).toBe("https://uxlfoundation.org/specifications/oneapi/");
+    expect(oneapi[0]?.urlPrefix).toBe("https://uxlfoundation.org/specifications/oneapi/");
+  });
 });
 
 describe("version boundaries", () => {
