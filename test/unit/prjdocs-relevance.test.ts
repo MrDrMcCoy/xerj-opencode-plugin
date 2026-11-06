@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { DocsDiscovery, pickOfficial } from "../../src/prjdocs/discover.ts";
+import {
+  DocsDiscovery,
+  pickOfficial,
+  readDiscovered,
+  writeDiscovered,
+} from "../../src/prjdocs/discover.ts";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   PageJudge,
   parseAnswer,
@@ -258,5 +266,80 @@ describe("hyphenated technology names", () => {
     );
 
     expect(verdict.relevant).toBe(true);
+  });
+});
+
+describe("discovered url persistence", () => {
+  test("a discovered url survives a restart", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "xerj-discover-"));
+    const quiet = {
+      debug: () => {},
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+      entries: async () => [],
+      flush: async () => {},
+    };
+
+    const search = {
+      query: async () =>
+        ({
+          data: { results: [{ url: "https://docs.acme.test/", title: "acme docs" }] },
+        }) as never,
+    };
+
+    const first = new DocsDiscovery({ search, stateDir: dir, logger: quiet }, {});
+    await first.find("acme");
+    await writeDiscovered(dir, first.snapshot());
+
+    // A new process reads the cache and never queries again.
+    let queries = 0;
+    const offline = {
+      query: async () => {
+        queries += 1;
+        throw new Error("no network");
+      },
+    };
+    const second = new DocsDiscovery(
+      { search: offline, stateDir: dir, logger: quiet },
+      await readDiscovered(dir),
+    );
+
+    expect(await second.find("acme")).toBe("https://docs.acme.test/");
+    expect(queries).toBe(0);
+
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test("a corrupt cache file reads as empty", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "xerj-discover-"));
+    await writeFile(join(dir, "prjdocs-discovered.json"), "{ not json");
+    expect(await readDiscovered(dir)).toEqual({});
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test("a search that throws is not an error", async () => {
+    const quiet = {
+      debug: () => {},
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+      entries: async () => [],
+      flush: async () => {},
+    };
+    const discovery = new DocsDiscovery(
+      {
+        search: {
+          query: async () => {
+            throw new Error("provider down");
+          },
+        },
+        stateDir: "/tmp",
+        logger: quiet,
+      },
+      {},
+    );
+
+    await expect(discovery.find("acme")).resolves.toBeNull();
   });
 });

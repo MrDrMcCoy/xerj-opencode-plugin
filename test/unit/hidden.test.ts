@@ -219,3 +219,138 @@ describe("an empty hidden scan", () => {
     expect(warned).toEqual([]);
   });
 });
+
+describe("hidden indexer failures", () => {
+  test("a mapping error other than 400/409 fails the run and records it", async () => {
+    const project = await mkdtemp(join(root, "project-"));
+    const agents = join(project, ".agents");
+    await mkdir(agents, { recursive: true });
+    await writeFile(join(agents, "plan.md"), "# Plan");
+
+    const warnings: string[] = [];
+    const index = new HiddenIndex({
+      client: {
+        put: async () => {
+          throw new NodeRequestError("node exploded", 500);
+        },
+        bulk: async () => {},
+        bulkDelete: async () => {},
+        search: async () => ({ hits: [] }),
+      } as unknown as XerjClient,
+      projectRoot: project,
+      prefix: "xop-hidden-test",
+      roots: documentRoots(project, [".agents"]),
+      maxBytes: 4096,
+      logger: {
+        ...logger,
+        warn: (message: string) => void warnings.push(message),
+      },
+    });
+
+    await index.reindex();
+
+    expect(index.snapshot().error).toContain("node exploded");
+    expect(warnings).toContain("hidden document indexing failed");
+  });
+
+  test("an oversized document is skipped", async () => {
+    const project = await mkdtemp(join(root, "project-"));
+    const agents = join(project, ".agents");
+    await mkdir(agents, { recursive: true });
+    await writeFile(join(agents, "small.md"), "small body");
+    await writeFile(join(agents, "large.md"), "y".repeat(5_000));
+
+    const bulks: Captured[] = [];
+    const index = new HiddenIndex({
+      client: {
+        put: async () => {},
+        bulk: async (name: string, actions: Captured["actions"]) =>
+          void bulks.push({ index: name, actions }),
+        bulkDelete: async () => {},
+        search: async () => ({ hits: [] }),
+      } as unknown as XerjClient,
+      projectRoot: project,
+      prefix: "xop-hidden-test",
+      roots: documentRoots(project, [".agents"]),
+      maxBytes: 1_000,
+      logger,
+    });
+
+    await index.reindex();
+
+    const paths = bulks.flatMap((bulk) =>
+      bulk.actions.map((action) => String(action.source.path)),
+    );
+    expect(paths).toContain(".agents/small.md");
+    expect(paths).not.toContain(".agents/large.md");
+  });
+
+  test("an empty folder warns once and clears when documents appear", async () => {
+    const project = await mkdtemp(join(root, "project-"));
+    const agents = join(project, ".agents");
+    await mkdir(agents, { recursive: true });
+
+    const warnings: string[] = [];
+    const index = new HiddenIndex({
+      client: {
+        put: async () => {},
+        bulk: async () => {},
+        bulkDelete: async () => {},
+        search: async () => ({ hits: [] }),
+      } as unknown as XerjClient,
+      projectRoot: project,
+      prefix: "xop-hidden-test",
+      roots: documentRoots(project, [".agents"]),
+      maxBytes: 4096,
+      logger: {
+        ...logger,
+        warn: (message: string) => void warnings.push(message),
+      },
+    });
+
+    await index.reindex();
+    await index.reindex();
+    expect(warnings.filter((w) => w.includes("found no documents"))).toHaveLength(1);
+
+    await writeFile(join(agents, "plan.md"), "# Plan");
+    await index.reindex();
+    await index.reindex();
+    expect(warnings.filter((w) => w.includes("found no documents"))).toHaveLength(1);
+  });
+
+  test("a run during a run is queued, not dropped", async () => {
+    const project = await mkdtemp(join(root, "project-"));
+    const agents = join(project, ".agents");
+    await mkdir(agents, { recursive: true });
+    await writeFile(join(agents, "plan.md"), "# Plan");
+
+    let bulks = 0;
+    const index = new HiddenIndex({
+      client: {
+        put: async () => {},
+        bulk: async () => {
+          bulks += 1;
+          // The second run has to be queued while this one is in flight.
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        },
+        bulkDelete: async () => {},
+        search: async () => ({ hits: [] }),
+      } as unknown as XerjClient,
+      projectRoot: project,
+      prefix: "xop-hidden-test",
+      roots: documentRoots(project, [".agents"]),
+      maxBytes: 4096,
+      logger,
+    });
+
+    const first = index.reindex();
+    const second = index.reindex();
+    await Promise.all([first, second]);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+
+    expect(bulks).toBeGreaterThanOrEqual(2);
+    // A third run after the queue drains is not queued twice.
+    await index.reindex();
+    expect(bulks).toBeGreaterThanOrEqual(3);
+  });
+});

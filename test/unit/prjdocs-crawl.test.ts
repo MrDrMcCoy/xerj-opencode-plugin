@@ -3,6 +3,7 @@ import {
   absolute,
   crawlDocs,
   extractPage,
+  extractPlain,
   linksIn,
 } from "../../src/prjdocs/crawl.ts";
 import { docsTargets, versionLabel } from "../../src/prjdocs/sources.ts";
@@ -286,5 +287,60 @@ describe("eager crawling", () => {
     });
 
     expect(pages.map((page) => page.url.split("/").pop())).toEqual(["start", "good"]);
+  });
+});
+
+describe("extractPlain", () => {
+  test("a short text page is not a document", () => {
+    expect(extractPlain("https://example.test/x.txt", "too short")).toBeNull();
+  });
+
+  test("the first line becomes the title", () => {
+    const page = extractPlain(`https://example.test/x.txt`, `First line\n\n${longBody}`);
+    expect(page?.title).toBe("First line");
+  });
+
+  test("markdown headings and fences are cleaned but text is kept", () => {
+    const body = `# Guide\n\n\`\`\`ts\nconst a = 1;\n\`\`\`\n\n${longBody}`;
+    const page = extractPlain("https://example.test/x.md", body, true);
+
+    expect(page?.body).not.toContain("# Guide");
+    expect(page?.body).not.toContain("```");
+    expect(page?.body).toContain("const a = 1;");
+    expect(page?.title).toBe("Guide");
+  });
+});
+
+describe("crawler limits", () => {
+  test("a page larger than maxBytes is skipped", async () => {
+    const huge = "x".repeat(5_000);
+    const fetchImpl = (async () =>
+      new Response(html("Huge", huge), {
+        headers: { "content-type": "text/html" },
+      })) as unknown as typeof fetch;
+
+    const pages = await crawlDocs({
+      entry: "https://example.test/huge",
+      maxPages: 3,
+      maxBytes: 1_000,
+      fetchImpl,
+      logger,
+    });
+
+    expect(pages).toEqual([]);
+  });
+
+  test("a fetch that returns a bad status is skipped", async () => {
+    const fetchImpl = (async () =>
+      new Response("missing", { status: 404 })) as unknown as typeof fetch;
+
+    const pages = await crawlDocs({
+      entry: "https://example.test/missing",
+      maxPages: 3,
+      fetchImpl,
+      logger,
+    });
+
+    expect(pages).toEqual([]);
   });
 });

@@ -4,6 +4,7 @@ import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  EmbedMode,
   NodeError,
   detectNode,
   ensureNode,
@@ -18,6 +19,7 @@ import {
   type NodeHandle,
 } from "../../src/node/supervisor.ts";
 import type { Logger } from "../../src/log.ts";
+import { NodeRuntime } from "../../src/node/runtime.ts";
 
 const logger: Logger = {
   debug: () => {},
@@ -441,5 +443,167 @@ describe("stopNode escalation", () => {
 
     expect(Date.now() - started).toBeLessThan(2_000);
     await rm(dir, { recursive: true, force: true });
+  });
+});
+
+describe("spawn lock and port choice", () => {
+  test("a held lock that never releases fails with a clear message", async () => {
+    const nodeDir = await mkdtemp(join(root, "locked-"));
+    const globalRoot = await mkdtemp(join(root, "global-"));
+    const lock = join(globalRoot, "nodes", ".port-lock");
+    await mkdir(lock, { recursive: true });
+
+    const binary = await writeFakeNode();
+
+    await expect(
+      ensureNode({
+        binaryPath: binary,
+        binaryVersion: "1.0.0-rc.101",
+        nodeDir,
+        dataDir: join(nodeDir, "data"),
+        projectRoot: nodeDir,
+        preferredPort: 9600,
+        persistedPort: null,
+        portLockPath: lock,
+        startupTimeoutMs: 300,
+        logger,
+      }),
+    ).rejects.toThrow(/did not let go/);
+
+    await rm(nodeDir, { recursive: true, force: true });
+    await rm(globalRoot, { recursive: true, force: true });
+  });
+
+  test("a stale lock is taken over", async () => {
+    const nodeDir = await mkdtemp(join(root, "stale-"));
+    const globalRoot = await mkdtemp(join(root, "global-"));
+    const lock = join(globalRoot, "nodes", ".port-lock");
+    await mkdir(lock, { recursive: true });
+    // Older than the staleness window, so the lock counts as abandoned.
+    const old = new Date(Date.now() - 120_000);
+    const { utimes } = await import("node:fs/promises");
+    await utimes(lock, old, old);
+
+    const binary = await writeFakeNode();
+    const handle = await ensureNode({
+      binaryPath: binary,
+      binaryVersion: "1.0.0-rc.101",
+      nodeDir,
+      dataDir: join(nodeDir, "data"),
+      projectRoot: nodeDir,
+      preferredPort: 9610,
+      persistedPort: null,
+      portLockPath: lock,
+      startupTimeoutMs: 20_000,
+      logger,
+    });
+
+    expect(handle.spawned).toBe(true);
+    await stopNode(nodeDir, 200);
+    await rm(nodeDir, { recursive: true, force: true });
+    await rm(globalRoot, { recursive: true, force: true });
+  }, 60_000);
+
+  test("a preferred port outside the scan range is honoured when free", async () => {
+    const nodeDir = await mkdtemp(join(root, "explicit-"));
+    const globalRoot = await mkdtemp(join(root, "global-"));
+    const binary = await writeFakeNode();
+
+    const handle = await ensureNode({
+      binaryPath: binary,
+      binaryVersion: "1.0.0-rc.101",
+      nodeDir,
+      dataDir: join(nodeDir, "data"),
+      projectRoot: nodeDir,
+      preferredPort: 12_345,
+      persistedPort: null,
+      portLockPath: join(globalRoot, "nodes", ".port-lock"),
+      startupTimeoutMs: 20_000,
+      logger,
+    });
+
+    expect(handle.port).toBe(12_345);
+    await stopNode(nodeDir, 200);
+    await rm(nodeDir, { recursive: true, force: true });
+    await rm(globalRoot, { recursive: true, force: true });
+  }, 60_000);
+});
+
+describe("NodeRuntime", () => {
+  test("detect reports a stopped node without starting one", async () => {
+    const nodeDir = await mkdtemp(join(root, "runtime-"));
+    const runtime = new NodeRuntime({
+      nodeDir,
+      projectRoot: nodeDir,
+      preferredPort: 9700,
+      dataDir: null,
+      portLockPath: join(nodeDir, "lock"),
+      explicitUrl: null,
+      embedMode: EmbedMode.Lexical,
+      logger,
+      binary: () => null,
+    });
+
+    const detection = await runtime.detect();
+    expect(detection.running).toBe(false);
+    expect(runtime.snapshot.state).toBe("stopped");
+    await rm(nodeDir, { recursive: true, force: true });
+  });
+
+  test("ensure without a binary fails with a clear error", async () => {
+    const nodeDir = await mkdtemp(join(root, "runtime-"));
+    const runtime = new NodeRuntime({
+      nodeDir,
+      projectRoot: nodeDir,
+      preferredPort: 9701,
+      dataDir: null,
+      portLockPath: join(nodeDir, "lock"),
+      explicitUrl: null,
+      embedMode: EmbedMode.Lexical,
+      logger,
+      binary: () => null,
+    });
+
+    await expect(runtime.ensure()).rejects.toThrow(/binary is not installed/);
+    await rm(nodeDir, { recursive: true, force: true });
+  });
+
+  test("invalidate forgets the handle so the next ensure probes again", async () => {
+    const nodeDir = await mkdtemp(join(root, "runtime-"));
+    const runtime = new NodeRuntime({
+      nodeDir,
+      projectRoot: nodeDir,
+      preferredPort: 9702,
+      dataDir: null,
+      portLockPath: join(nodeDir, "lock"),
+      explicitUrl: null,
+      embedMode: EmbedMode.Lexical,
+      logger,
+      binary: () => null,
+    });
+
+    runtime.invalidate();
+    expect(runtime.snapshot.state).toBe("stopped");
+    // Stopping a node this runtime never owned is a no-op.
+    await expect(runtime.stop("test")).resolves.toBe(false);
+    await rm(nodeDir, { recursive: true, force: true });
+  });
+
+  test("an explicit url is never killed on stop", async () => {
+    const nodeDir = await mkdtemp(join(root, "runtime-"));
+    const runtime = new NodeRuntime({
+      nodeDir,
+      projectRoot: nodeDir,
+      preferredPort: 9703,
+      dataDir: null,
+      portLockPath: join(nodeDir, "lock"),
+      explicitUrl: "http://127.0.0.1:9999",
+      embedMode: EmbedMode.Lexical,
+      logger,
+      binary: () => null,
+    });
+
+    await expect(runtime.stop("test")).resolves.toBe(false);
+    await rm(nodeDir, { recursive: true, force: true });
   });
 });

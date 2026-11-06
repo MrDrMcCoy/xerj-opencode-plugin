@@ -341,3 +341,62 @@ echo '{"doc_kind":"run","generation":1,"records_total":4}'
     expect(instance.snapshot().lastRun?.records).toBe(4);
   }, 15_000);
 });
+
+describe("CorpusService exits", () => {
+  test(
+    "a decision request is reported with the limit that triggered it",
+    async () => {
+      const projectRoot = mkdtempSync(join(tmpdir(), "xerj-project-"));
+      const script = `#!/bin/sh
+echo '{"decision":"exceeds limits","estimate_bytes":90000000000}'
+exit 4
+`;
+      const warnings: string[] = [];
+      const instance = new CorpusService({
+        binaryPath: fakeBinary(script),
+        nodeUrl: "http://127.0.0.1:9200",
+        projectRoot,
+        prefix: "xop-project-12345678",
+        stateRoot: join(projectRoot, ".xerj"),
+        config: {
+          ...DEFAULT_CONFIG,
+          index: { ...DEFAULT_CONFIG.index, watch: true, periodicMs: 60_000 },
+        },
+        storage: storage(),
+        logger: { ...logger, warn: (message: string) => warnings.push(message) },
+      });
+      running.push(instance);
+
+      await instance.start();
+      for (let waited = 0; waited < 5_000; waited += 100) {
+        if (instance.snapshot().lastError !== null) break;
+        await Bun.sleep(100);
+      }
+
+      // A one-shot pass that needs a decision indexed nothing, so it is an
+      // error the panel shows, not a quiet idle.
+      expect(instance.snapshot().state).toBe("error");
+      expect(instance.snapshot().lastError).toContain("needs a decision");
+      expect(warnings.some((warning) => warning.includes("needs a decision"))).toBe(
+        true,
+      );
+    },
+    15_000,
+  );
+
+  test("stop is idempotent and reports idle", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "xerj-project-"));
+    const instance = service(
+      fakeBinary("#!/bin/sh\necho '{\"doc_kind\":\"run\",\"generation\":1,\"records_total\":1}'\nsleep 5\n"),
+      join(projectRoot, ".xerj"),
+      projectRoot,
+    );
+    running.push(instance);
+
+    await instance.start();
+    await instance.stop();
+    await instance.stop();
+
+    expect(instance.snapshot().state).toBe("idle");
+  }, 15_000);
+});

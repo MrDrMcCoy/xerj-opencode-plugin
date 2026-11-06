@@ -81,3 +81,76 @@ describe("memory index health", () => {
     expect(created).toEqual([]);
   });
 });
+
+describe("memory index health failures", () => {
+  let root: string;
+  let nodeDir: string;
+  const namespace = "proj-demo-abc12345";
+  const name = `.xerj-memory-${namespace}`;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "opencode-memory-health-"));
+    nodeDir = join(root, "node");
+    await mkdir(nodeDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  test("a failed delete is logged and still reports a repair", async () => {
+    const warnings: string[] = [];
+    const client = {
+      indices: async () => [{ index: name, health: "red", docs: 0, bytes: 0 }],
+      deleteIndex: async () => {
+        throw new Error("node refused");
+      },
+    } as unknown as XerjClient;
+
+    const recovered = await recoverMemoryIndex({
+      client,
+      nodeDir,
+      namespace,
+      logger: {
+        debug: () => {},
+        info: () => {},
+        warn: (message: string) => void warnings.push(message),
+        error: () => {},
+        entries: async () => [],
+        flush: async () => {},
+      },
+    });
+
+    expect(recovered).toBe(true);
+    expect(warnings).toContain("could not drop the unreadable memory index");
+  });
+
+  test("a missing index directory is not an error", async () => {
+    const client = {
+      indices: async () => [{ index: name, health: "red", docs: 0, bytes: 0 }],
+      deleteIndex: async () => {},
+    } as unknown as XerjClient;
+
+    await expect(recoverMemoryIndex({ client, nodeDir, namespace })).resolves.toBe(true);
+  });
+
+  test("an index list that fails leaves the index alone", async () => {
+    const client = {
+      indices: async () => {
+        throw new Error("node down");
+      },
+      deleteIndex: async () => {},
+    } as unknown as XerjClient;
+
+    await expect(recoverMemoryIndex({ client, nodeDir, namespace })).resolves.toBe(false);
+  });
+
+  test("a yellow index counts as unreadable", async () => {
+    const client = {
+      indices: async () => [{ index: name, health: "yellow", docs: 0, bytes: 0 }],
+      deleteIndex: async () => {},
+    } as unknown as XerjClient;
+
+    await expect(recoverMemoryIndex({ client, nodeDir, namespace })).resolves.toBe(true);
+  });
+});

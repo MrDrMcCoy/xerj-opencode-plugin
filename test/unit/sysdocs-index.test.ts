@@ -173,3 +173,104 @@ describe("SysdocIndexer", () => {
     for (const body of bodies) expect(body.length).toBeLessThan(400);
   });
 });
+
+describe("sysdocs failures", () => {
+  test("a page that cannot be extracted counts as failed and is not recorded", async () => {
+    const { man, info, state } = await fixture();
+    const fake = fakeClient();
+    // A gzip file holding bytes that are not valid roff still extracts as text;
+    // a corrupt gzip is what fails the extractor.
+    await writeFile(join(man, "man1/broken.1.gz"), Buffer.from([0x1f, 0x8b, 0x00, 0x01]));
+
+    const summary = await new SysdocIndexer({
+      client: fake as never,
+      prefix: "xop-sys-test",
+      stateDir: state,
+      logger,
+      manDirs: [man],
+      infoDirs: [info],
+    }).run();
+
+    expect(summary.failed).toBeGreaterThan(0);
+  });
+
+  test("a failed ingest is counted and leaves the manifest row out", async () => {
+    const { man, info, state } = await fixture();
+    const fake = fakeClient();
+    const failing = {
+      ...fake,
+      bulk: async () => {
+        throw new Error("node refused the write");
+      },
+    };
+
+    const summary = await new SysdocIndexer({
+      client: failing as never,
+      prefix: "xop-sys-test",
+      stateDir: state,
+      logger,
+      manDirs: [man],
+      infoDirs: [info],
+    }).run();
+
+    expect(summary.indexed).toBe(0);
+    expect(summary.failed).toBeGreaterThan(0);
+  });
+
+  test("a failed prune is logged, not thrown", async () => {
+    const { man, info, state } = await fixture();
+    const fake = fakeClient();
+
+    await new SysdocIndexer({
+      client: fake as never,
+      prefix: "xop-sys-test",
+      stateDir: state,
+      logger,
+      manDirs: [man],
+      infoDirs: [info],
+    }).run();
+
+    await rm(join(man, "man1/git.1.gz"));
+
+    const warnings: string[] = [];
+    const failing = {
+      ...fake,
+      bulkDelete: async () => {
+        throw new Error("delete refused");
+      },
+    };
+
+    const summary = await new SysdocIndexer({
+      client: failing as never,
+      prefix: "xop-sys-test",
+      stateDir: state,
+      logger: {
+        ...logger,
+        warn: (message: string) => void warnings.push(message),
+      },
+      manDirs: [man],
+      infoDirs: [info],
+    }).run();
+
+    expect(summary.pruned).toBe(1);
+    expect(warnings).toContain("could not prune system docs");
+  });
+
+  test("maxDocs limits how many pages one run considers", async () => {
+    const { man, info, state } = await fixture();
+    const fake = fakeClient();
+
+    const summary = await new SysdocIndexer({
+      client: fake as never,
+      prefix: "xop-sys-test",
+      stateDir: state,
+      logger,
+      manDirs: [man],
+      infoDirs: [info],
+      maxDocs: 1,
+    }).run();
+
+    expect(summary.indexed).toBe(1);
+    expect(summary.discovered).toBeGreaterThan(1);
+  });
+});

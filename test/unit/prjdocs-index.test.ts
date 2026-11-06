@@ -321,3 +321,88 @@ describe("eager mode", () => {
     expect(summary.targets).toBe(0);
   });
 });
+
+describe("project docs failures", () => {
+  test("a failed bulk write counts as a failure and keeps the old manifest", async () => {
+    const project = await projectWith({ react: "^18.2.0" });
+    const state = await mkdtemp(join(root, "state-"));
+    const fake = client();
+    const failing = {
+      ...fake,
+      bulk: async () => {
+        throw new Error("node refused the write");
+      },
+    };
+
+    const warnings: string[] = [];
+    const summary = await new PrjdocsIndexer({
+      client: failing as never,
+      prefix: "xop-prjdoc-test",
+      projectRoot: project,
+      stateDir: state,
+      logger: { ...logger, warn: (message: string) => void warnings.push(message) },
+      fetchImpl: site(["/reference/react"]),
+      maxTargets: 1,
+    }).run();
+
+    expect(summary.indexed).toBe(0);
+    expect(summary.failed).toBeGreaterThan(0);
+    expect(warnings).toContain("could not index project docs");
+  });
+
+  test("an unwritable state directory does not fail the run", async () => {
+    const project = await projectWith({ react: "^18.2.0" });
+    const state = join(root, "not-a-directory");
+    await writeFile(state, "a file, not a directory");
+
+    const summary = await new PrjdocsIndexer({
+      client: client() as never,
+      prefix: "xop-prjdoc-test",
+      projectRoot: project,
+      stateDir: state,
+      logger,
+      fetchImpl: site(["/reference/react"]),
+      maxTargets: 1,
+    }).run();
+
+    expect(summary.indexed).toBe(1);
+  });
+
+  test("a page that changes is indexed again", async () => {
+    const project = await projectWith({ react: "^18.2.0" });
+    const state = await mkdtemp(join(root, "state-"));
+    const fake = client();
+    let body = longBody;
+
+    const fetchImpl = (async () =>
+      new Response(
+        `<html><head><title>React reference</title></head><body><p>${body}</p></body></html>`,
+        { headers: { "content-type": "text/html" } },
+      )) as unknown as typeof fetch;
+
+    const first = await new PrjdocsIndexer({
+      client: fake as never,
+      prefix: "xop-prjdoc-test",
+      projectRoot: project,
+      stateDir: state,
+      logger,
+      fetchImpl,
+      maxTargets: 1,
+    }).run();
+    expect(first.indexed).toBe(1);
+
+    body = `${longBody} New paragraph.`;
+    const second = await new PrjdocsIndexer({
+      client: fake as never,
+      prefix: "xop-prjdoc-test",
+      projectRoot: project,
+      stateDir: state,
+      logger,
+      fetchImpl,
+      maxTargets: 1,
+    }).run();
+
+    expect(second.indexed).toBe(1);
+    expect(second.skipped).toBe(0);
+  });
+});
