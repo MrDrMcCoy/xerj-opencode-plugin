@@ -342,6 +342,7 @@ export class McpHost {
               elasticsearchVersion: banner?.wireVersion ?? "8.13",
               xerjPages: this.config.prjdocs.builtinXerjPages,
               elasticsearchPages: this.config.prjdocs.builtinElasticsearchPages,
+              refreshDays: this.config.prjdocs.builtinRefreshDays,
             },
             prefix: prjdocsPrefix(this.projectRoot),
             projectRoot: this.projectRoot,

@@ -447,6 +447,7 @@ describe("always-on documentation", () => {
         elasticsearchVersion: "8.13.0",
         xerjPages: 10,
         elasticsearchPages: 2,
+        refreshDays: 7,
       },
       maxTargets: 1,
     }).run();
@@ -475,11 +476,119 @@ describe("always-on documentation", () => {
         elasticsearchVersion: "8.13.0",
         xerjPages: 10,
         elasticsearchPages: 2,
+        refreshDays: 7,
       },
       maxTargets: 1,
     }).run();
 
     expect(summary.targets).toBe(0);
     expect(fake.bulks).toEqual([]);
+  });
+});
+
+describe("builtin refresh window", () => {
+  const tree = { tree: [{ type: "blob", path: "docs/README.md" }] };
+
+  function countingFetch(counter: { calls: number }): typeof fetch {
+    return (async (input: string | URL) => {
+      const url = String(input);
+      counter.calls += 1;
+      if (url.includes("api.github.com")) return new Response(JSON.stringify(tree));
+      if (url.includes("raw.githubusercontent.com")) {
+        return new Response(`# XERJ page\n\n${longBody}`);
+      }
+      return new Response(
+        `<html><head><title>Elasticsearch guide</title></head><body><p>${longBody}</p></body></html>`,
+        { headers: { "content-type": "text/html" } },
+      );
+    }) as unknown as typeof fetch;
+  }
+
+  function indexer(
+    project: string,
+    state: string,
+    fake: ReturnType<typeof client>,
+    fetchImpl: typeof fetch,
+    refreshDays: number,
+  ): PrjdocsIndexer {
+    return new PrjdocsIndexer({
+      client: fake as never,
+      prefix: "xop-prjdoc-builtin",
+      projectRoot: project,
+      stateDir: state,
+      logger,
+      fetchImpl,
+      builtin: {
+        enabled: true,
+        elasticsearchVersion: "8.13.0",
+        xerjPages: 5,
+        elasticsearchPages: 2,
+        refreshDays,
+      },
+      maxTargets: 1,
+    });
+  }
+
+  test("a second run inside the window does not fetch or prune", async () => {
+    const project = await mkdtemp(join(root, "empty-project-"));
+    const state = await mkdtemp(join(root, "state-"));
+    const fake = client();
+    const counter = { calls: 0 };
+    const fetchImpl = countingFetch(counter);
+
+    const first = await indexer(project, state, fake, fetchImpl, 7).run();
+    expect(first.indexed).toBeGreaterThan(0);
+    const afterFirst = counter.calls;
+
+    const second = await indexer(project, state, fake, fetchImpl, 7).run();
+
+    expect(counter.calls).toBe(afterFirst);
+    expect(second.pruned).toBe(0);
+    expect(second.indexed).toBe(0);
+  });
+
+  test("a zero window always refreshes", async () => {
+    const project = await mkdtemp(join(root, "empty-project-"));
+    const state = await mkdtemp(join(root, "state-"));
+    const fake = client();
+    const counter = { calls: 0 };
+    const fetchImpl = countingFetch(counter);
+
+    await indexer(project, state, fake, fetchImpl, 0).run();
+    const afterFirst = counter.calls;
+    await indexer(project, state, fake, fetchImpl, 0).run();
+
+    expect(counter.calls).toBeGreaterThan(afterFirst);
+  });
+
+  test("a changed version refreshes even inside the window", async () => {
+    const project = await mkdtemp(join(root, "empty-project-"));
+    const state = await mkdtemp(join(root, "state-"));
+    const fake = client();
+    const counter = { calls: 0 };
+    const fetchImpl = countingFetch(counter);
+
+    await indexer(project, state, fake, fetchImpl, 7).run();
+    const afterFirst = counter.calls;
+
+    // A new wire version means a new docs branch, so the old pages must go.
+    await new PrjdocsIndexer({
+      client: fake as never,
+      prefix: "xop-prjdoc-builtin",
+      projectRoot: project,
+      stateDir: state,
+      logger,
+      fetchImpl,
+      builtin: {
+        enabled: true,
+        elasticsearchVersion: "8.19.0",
+        xerjPages: 5,
+        elasticsearchPages: 2,
+        refreshDays: 7,
+      },
+      maxTargets: 1,
+    }).run();
+
+    expect(counter.calls).toBeGreaterThan(afterFirst);
   });
 });

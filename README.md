@@ -213,7 +213,8 @@ The same entry works with a checkout path instead of the package name; see
 | `prjdocs.eagerModelCalls` | Model judgements per run; the heuristic covers the rest. Default 150. |
 | `prjdocs.builtin` | Always index XERJ's own docs and the Elasticsearch reference for this node's version. Default `true`. |
 | `prjdocs.builtinXerjPages` | Markdown files taken from the XERJ repository. Default 200. |
-| `prjdocs.builtinElasticsearchPages` | Pages taken from the Elasticsearch reference. Default 20. |
+| `prjdocs.builtinElasticsearchPages` | Crawl budget for the Elasticsearch reference; 2500 yields about 630 API pages. Default 2500. |
+| `prjdocs.builtinRefreshDays` | Days before the always-on sources are crawled again. Default 7; `0` always refreshes. |
 | `sysdocs.maxDocs` | Pages indexed per run. Default 5000. |
 | `sysdocs.maxBytesPerDoc` | Bytes kept per page, head first. Default 64 KiB. |
 | `sysdocs.manDirs` | Extra man roots, searched before the machine roots. Empty means `MANPATH` only. |
@@ -379,10 +380,18 @@ Two sources are indexed on every run, whatever the project uses:
   than a rendered site. This is what answers "how does the engine do X".
 - **The Elasticsearch reference** for the version this node emulates. The node
   reports its wire version (`8.13.0`), the branch follows it (`8.13`), and a
-  version change prunes the old pages on the next run.
+  version change prunes the old pages on the next run. The crawl starts from
+  `rest-apis.html`, takes the chapter indexes it links, and crawls each one
+  separately, because one breadth-first pass over the whole site spends its
+  budget on chapter summaries and reaches no endpoints. Links outside the
+  branch are not followed, so the company blog and other products stay out.
 
 Set `prjdocs.builtin: false` to skip both, and size them with
-`prjdocs.builtinXerjPages` (200) and `prjdocs.builtinElasticsearchPages` (20).
+`prjdocs.builtinXerjPages` (200) and `prjdocs.builtinElasticsearchPages`
+(2500, which yields roughly 630 API pages). `prjdocs.builtinRefreshDays`
+(7) is how long those pages stay current: the reference crawl takes about a
+minute, so it runs on that window rather than on every command, and the
+existing pages are kept in the meantime.
 
 The crawler stays on the site it started from, follows links two levels deep,
 skips assets and non-HTML responses, and stops at its page budget. A document

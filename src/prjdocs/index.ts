@@ -25,6 +25,7 @@ import { detectTech, type TechRef } from "./detect.ts";
 import { docsTargets, maxPagesFor, type DocsTarget } from "./sources.ts";
 
 const MANIFEST_FILE = "prjdocs-manifest.json";
+const BUILTIN_FILE = "prjdocs-builtin.json";
 const BATCH_SIZE = 50;
 
 export interface PrjdocsOptions {
@@ -59,6 +60,12 @@ export interface BuiltinOptions {
   readonly xerjPages: number;
   /** Pages taken from the Elasticsearch reference. */
   readonly elasticsearchPages: number;
+  /**
+   * Days a builtin source stays current. A crawl of the whole reference takes
+   * minutes, so it runs on this window instead of on every command; 0 always
+   * refreshes.
+   */
+  readonly refreshDays: number;
 }
 
 export interface EagerOptions {
@@ -171,6 +178,8 @@ export class PrjdocsIndexer {
     }
 
     const manifest = await this.readManifest();
+    const builtinState = await this.readBuiltinState();
+    const refreshed: Record<string, { at: number; version: string }> = { ...builtinState };
     const desired = new Map<string, ManifestEntry>();
     let indexed = 0;
     let pages = 0;
@@ -179,7 +188,28 @@ export class PrjdocsIndexer {
 
     if (targets.length > 0) await this.ensureMapping();
 
+    // A builtin source that ran inside its window is kept as it is: its pages
+    // stay in the desired set so the prune pass leaves them alone.
+    const refreshWindowMs = (this.options.builtin?.refreshDays ?? 7) * 86_400_000;
+    const skippedBuiltins = new Set<string>();
+
+    if (builtinState !== undefined) {
+      for (const source of builtins) {
+        const previous = builtinState[source.tech];
+        if (previous === undefined || refreshWindowMs <= 0) continue;
+        const fresh = Date.now() - previous.at < refreshWindowMs;
+        if (!fresh || previous.version !== source.version) continue;
+
+        skippedBuiltins.add(source.tech);
+        for (const [url, entry] of Object.entries(manifest)) {
+          if (entry.tech === source.tech) desired.set(url, entry);
+        }
+      }
+    }
+
     for (const target of targets) {
+      if (skippedBuiltins.has(target.id) && target.collect !== undefined) continue;
+
       // One judge per target: its cache and call budget belong to that site.
       const judge =
         eager === undefined
@@ -287,6 +317,16 @@ export class PrjdocsIndexer {
       await writeDiscovered(this.options.stateDir, discovery.snapshot());
     }
 
+    // Record when each builtin source was last refreshed, so the next run can
+    // skip a crawl that would only re-download the same pages.
+    for (const source of builtins) {
+      if (skippedBuiltins.has(source.tech)) continue;
+      if (targets.some((target) => target.id === source.tech)) {
+        refreshed[source.tech] = { at: Date.now(), version: source.version };
+      }
+    }
+    await this.writeBuiltinState(refreshed);
+
     return {
       techs: techs.map((ref) => `${ref.id}${ref.used === null ? "" : `@${ref.used}`}`),
       targets: targets.length,
@@ -330,6 +370,32 @@ export class PrjdocsIndexer {
       this.options.logger.debug("project docs index already present", String(error));
     }
     this.mapped = true;
+  }
+
+  private async readBuiltinState(): Promise<
+    Record<string, { at: number; version: string }>
+  > {
+    const text = await readFile(this.builtinPath(), "utf8").catch(() => null);
+    if (text === null) return {};
+    try {
+      const parsed: unknown = JSON.parse(text);
+      return typeof parsed === "object" && parsed !== null
+        ? (parsed as Record<string, { at: number; version: string }>)
+        : {};
+    } catch {
+      return {};
+    }
+  }
+
+  private async writeBuiltinState(
+    state: Record<string, { at: number; version: string }>,
+  ): Promise<void> {
+    await mkdir(this.options.stateDir, { recursive: true }).catch(() => {});
+    await writeFile(this.builtinPath(), JSON.stringify(state), "utf8").catch(() => {});
+  }
+
+  private builtinPath(): string {
+    return join(this.options.stateDir, BUILTIN_FILE);
   }
 
   private async readManifest(): Promise<Record<string, ManifestEntry>> {

@@ -13,6 +13,25 @@ const RAW_BASE = `https://raw.githubusercontent.com/${REPO}/${REPO_BRANCH}`;
 const BLOB_BASE = `https://github.com/${REPO}/blob/${REPO_BRANCH}`;
 
 const ES_DEFAULT_VERSION = "8.13";
+
+/**
+ * Chapter entry points for the API reference. `index.html` alone surfaces the
+ * guide's overview and release notes; these are the chapters a project asking
+ * about the API actually reads.
+ */
+const ES_SEEDS = [
+  "rest-apis.html",
+  "query-dsl.html",
+  "mapping.html",
+  "analysis.html",
+  "search-analyze.html",
+  "documents-indices.html",
+  "index-modules.html",
+  "api-conventions.html",
+  "text.html",
+  "keyword.html",
+  "setup.html",
+];
 const REQUEST_TIMEOUT_MS = 15_000;
 const CONCURRENCY = 6;
 
@@ -150,8 +169,10 @@ async function fetchRepoPage(
 }
 
 /**
- * The Elasticsearch reference is a rendered site, so it is crawled like any
- * other source; `index.html` links every chapter.
+ * The Elasticsearch reference is a rendered site whose `rest-apis.html` links
+ * every API chapter. One breadth-first crawl from it spreads the budget across
+ * fifty chapter summaries and reaches few actual endpoints, so each chapter is
+ * crawled on its own with a share of the budget.
  */
 async function fetchElasticsearchDocs(
   branch: string,
@@ -161,15 +182,82 @@ async function fetchElasticsearchDocs(
   // that only need the URL helpers.
   const { crawlDocs } = await import("./crawl.ts");
 
-  return crawlDocs({
-    entry: `https://www.elastic.co/guide/en/elasticsearch/reference/${branch}/index.html`,
-    maxPages: options.maxPages ?? 20,
-    anyText: true,
-    logger: options.logger,
-    fetchImpl: options.fetchImpl,
-    signal: options.signal,
-    judge: async (page) => /elasticsearch/i.test(`${page.title} ${page.body.slice(0, 2_000)}`),
+  const total = options.maxPages ?? 2500;
+  const base = `https://www.elastic.co/guide/en/elasticsearch/reference/${branch}`;
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const collected = new Map<string, CrawledPage>();
+
+  const chapters = await chapterUrls(base, fetchImpl, options);
+  const perChapter = Math.max(5, Math.floor(total / Math.max(1, chapters.length)));
+
+  // Four chapters at a time: enough to keep the network busy without turning a
+  // documentation crawl into a load test.
+  for (let start = 0; start < chapters.length; start += 4) {
+    if (collected.size >= total || options.signal?.aborted === true) break;
+
+    const batch = chapters.slice(start, start + 4);
+    const results = await Promise.all(
+      batch.map((entry) =>
+        crawlDocs({
+          entry,
+          maxPages: perChapter,
+          maxDepth: 3,
+          anyText: true,
+          urlPrefix: `${base}/`,
+          logger: options.logger,
+          fetchImpl: options.fetchImpl,
+          signal: options.signal,
+          judge: async (page) =>
+            /elasticsearch/i.test(`${page.title} ${page.body.slice(0, 2_000)}`),
+        }).catch(() => [] as CrawledPage[]),
+      ),
+    );
+
+    for (const pages of results) {
+      for (const page of pages) {
+        if (collected.size >= total) break;
+        if (!collected.has(page.url)) collected.set(page.url, page);
+      }
+    }
+  }
+
+  options.logger.debug("fetched the elasticsearch reference", {
+    pages: collected.size,
+    chapters: chapters.length,
   });
+  return [...collected.values()];
+}
+
+/** The chapter indexes `rest-apis.html` links, falling back to the known list. */
+async function chapterUrls(
+  base: string,
+  fetchImpl: typeof fetch,
+  options: BuiltinOptions,
+): Promise<string[]> {
+  const { absolute, linksIn } = await import("./crawl.ts");
+
+  const response = await fetchImpl(`${base}/rest-apis.html`, {
+    headers: { "user-agent": "xerj-opencode-plugin (documentation indexer)" },
+    signal: mergeSignal(options.signal, REQUEST_TIMEOUT_MS),
+  }).catch(() => null);
+
+  const found: string[] = [];
+  if (response !== null && response.ok) {
+    const html = await response.text().catch(() => "");
+    for (const href of linksIn(html)) {
+      const url = absolute(href, `${base}/rest-apis.html`);
+      if (url === null || !url.startsWith(`${base}/`)) continue;
+      if (!url.endsWith(".html")) continue;
+      if (found.includes(url)) continue;
+      found.push(url);
+    }
+  }
+
+  if (found.length === 0) {
+    return ES_SEEDS.map((seed) => `${base}/${seed}`);
+  }
+  // `rest-apis.html` itself first: it summarizes every API group.
+  return [`${base}/rest-apis.html`, ...found.filter((url) => !url.endsWith("rest-apis.html"))];
 }
 
 /** The first markdown heading, else the file name. */

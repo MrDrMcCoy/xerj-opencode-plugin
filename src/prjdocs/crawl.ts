@@ -15,6 +15,12 @@ export interface CrawlOptions {
   readonly delayMs?: number;
   /** Link depth to follow; eager crawling raises this well past 2. */
   readonly maxDepth?: number;
+  /**
+   * Absolute URL prefix every followed link must start with. A documentation
+   * site shares its origin with blogs, pricing, and other products, so the
+   * origin alone is too loose a boundary.
+   */
+  readonly urlPrefix?: string;
   /** Accept `text/*` and markdown, not only HTML. Eager mode needs this. */
   readonly anyText?: boolean;
   /**
@@ -99,6 +105,7 @@ export async function crawlDocs(options: CrawlOptions): Promise<CrawledPage[]> {
       const url = absolute(link, next.url);
       if (url === null || seen.has(url)) continue;
       if (originOf(url) !== origin) continue;
+      if (options.urlPrefix !== undefined && !url.startsWith(options.urlPrefix)) continue;
       if (!looksLikeDocs(url)) continue;
       queue.push({ url, depth: next.depth + 1 });
     }

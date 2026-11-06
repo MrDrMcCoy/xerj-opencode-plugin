@@ -412,6 +412,7 @@ export default Plugin.define({
             elasticsearchVersion: banner?.wireVersion ?? "8.13",
             xerjPages: config.prjdocs.builtinXerjPages,
             elasticsearchPages: config.prjdocs.builtinElasticsearchPages,
+            refreshDays: config.prjdocs.builtinRefreshDays,
           },
           prefix: prjdocsPrefix(projectRoot),
           projectRoot,

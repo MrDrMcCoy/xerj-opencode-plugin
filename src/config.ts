@@ -101,6 +101,11 @@ export interface PrjdocsOptions {
   readonly builtinXerjPages: number;
   /** Pages taken from the Elasticsearch reference. */
   readonly builtinElasticsearchPages: number;
+  /**
+   * Days before the always-on sources are crawled again. The reference crawl
+   * takes minutes, so it runs on this window rather than on every command.
+   */
+  readonly builtinRefreshDays: number;
 }
 
 export interface SysdocsOptions {
@@ -210,7 +215,8 @@ export const DEFAULT_CONFIG: Config = {
     eagerModelCalls: 150,
     builtin: true,
     builtinXerjPages: 200,
-    builtinElasticsearchPages: 20,
+    builtinElasticsearchPages: 2500,
+    builtinRefreshDays: 7,
   },
   sysdocs: {
     maxDocs: 5000,
@@ -458,8 +464,16 @@ export function loadConfig(
         prjdocs.builtinElasticsearchPages,
         DEFAULT_CONFIG.prjdocs.builtinElasticsearchPages,
         0,
-        500,
+        5000,
         "prjdocs.builtinElasticsearchPages",
+        warnings,
+      ),
+      builtinRefreshDays: readInteger(
+        prjdocs.builtinRefreshDays,
+        DEFAULT_CONFIG.prjdocs.builtinRefreshDays,
+        0,
+        365,
+        "prjdocs.builtinRefreshDays",
         warnings,
       ),
     },
