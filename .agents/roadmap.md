@@ -344,6 +344,49 @@ Ship these first. None adds a runtime, a grammar, or a write path.
 6. Every tier keeps the two rules this plugin already follows: nothing
    blocks `setup`, and every failure is visible in the panel.
 
+## Progress
+
+Updated 2026-11-06. Times are estimates from the work as it was done, not
+measured; they include tests and the commits that carry them. A status of
+"done" means it is on `main` and the suite is green.
+
+| Item | Tier | Status | Time (est.) | Evidence |
+|---|---|---|---|---|
+| Reset the injection dedupe on compaction | S | Done | 0.5 h | `165af5c`; three hook tests |
+| `/xerj-wrapup` | S | Done | 0.5 h | `ea98e68`; `Lifecycle.latestSession` |
+| `xerj_refs` | S | Done | 1.0 h | `5a42bae`; service, tool, six tool tests |
+| `xerj_outline` | S | Done | 0.5 h | `5a42bae`; ordered by line |
+| `xerj_zoom` | S | Done | 0.5 h | `5a42bae`; symbol-hit line mapping |
+| Commit indexing | S | Done | 2.5 h | `7336268`; `index/commits.ts`, 4 tests, `index.git*` |
+| Memory verification | S | Done | 1.5 h | `baac28d`; `memory/verify.ts`, 10 tests, panel count |
+| Auto-search hint | S | Not started | — | — |
+| Memory curation | S | Not started | — | — |
+| `autoindex map` in the panel | S | Not started | — | The panel lists datasets and corpora; the map command itself is not wired |
+| `prjdocs` keyword surfacing | S | Partial | 0.2 h | Keys and tool argument exist; no panel row or command help yet |
+| Graph overview in the panel | M | Done (earlier) | 0 h this pass | Brains already report docs and live edges; the corpora list covers the rest |
+| Import graph and cycles | M | Not started | — | — |
+| Regex and glob search | M | Not started | — | — |
+| Structural search (`ast-grep`, read only) | M | Not started | — | Needs a presence check for the binary |
+| tree-sitter layer, one language | M | Not started | — | Blocked on the grammar source decision |
+| Complexity and duplicates | M | Not started | — | Needs the tree-sitter layer |
+| `xerj_code` | M | Not started | — | — |
+| `xerj_ask` and hub packs | M | Not started | — | Gated by `hub.enabled`, `hub.network` |
+| Turn archive | M | Not started | — | — |
+| `xerj_expand` | M | Not started | — | Needs the archive |
+| History search | M | Not started | — | Needs the archive |
+| LSP pool | L | Not started | — | Gated by `analysis.lsp.enabled` |
+| Server installer | L | Not started | — | — |
+| `xerj_callers`, `xerj_impact` | L | Not started | — | Needs the pool |
+| `xerj_inspect` | L | Not started | — | Needs LSP and tree-sitter |
+| `xerj_share` | L | Not started | — | Gated by `share.enabled` |
+| Dreamer child sessions | XL | Not started | — | — |
+| Notes and smart notes | XL | Not started | — | — |
+
+Tier S so far: **7.2 h** of an estimated 8 to 10 h for the whole tier, with
+three and a half items left. The per-item estimates held within about half an
+hour each except commit indexing, where the `git log` record layout cost an
+extra hour and a half.
+
 ## Settled decisions
 
 No decision blocks work. Each one has a default that changes nothing until a

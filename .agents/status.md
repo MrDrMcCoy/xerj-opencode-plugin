@@ -339,6 +339,19 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: Tier S begun: seven of eleven items shipped, with the time spent
+  recorded per item in `roadmap.md`. Done: the compaction dedupe reset
+  (`165af5c`, 0.5 h), `/xerj-wrapup` (`ea98e68`, 0.5 h), `xerj_refs`,
+  `xerj_outline`, and `xerj_zoom` (`5a42bae`, 2.0 h together), git history as a
+  corpus (`7336268`, 2.5 h, including the `git log` record-layout fix), and
+  memory verification (`baac28d`, 1.5 h). The tree stands at 877 unit tests,
+  typecheck clean. Remaining in S: the auto-search hint, memory curation,
+  `autoindex map` in the panel, and surfacing `prjdocs.eagerKeywords` in the
+  panel and command help. Tier M is untouched; the grammar source decision
+  still gates the tree-sitter item. Estimated 7.2 h spent against 8 to 10 h for
+  the tier, and the per-item estimates held within about half an hour except
+  commit indexing.
+
 - 2026-11-06: Toolchains assumed present (0.7.0 plan). The installer no longer
   treats a missing compiler as a reason to withhold a language: gopls and
   clangd publish their own binaries, so the server installs and loads whether
