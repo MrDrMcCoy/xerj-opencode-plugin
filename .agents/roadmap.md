@@ -214,8 +214,9 @@ Five rules make the gates trustworthy:
    beyond the project scan the index already performs.
 
 Tier XL adds gates of its own, closed the same way: `memory.curate` for the
-dreamer's memory work and `context.notes` for notes and smart notes. They
-follow the same five rules.
+dreamer's memory work, `memory.extract` for mining durable facts out of a
+compaction window, and `context.notes` for notes and smart notes. They follow
+the same five rules.
 
 The turn archive is data rather than a runtime, so it is not a capability
 gate. It is bounded instead: `context.archive.enabled` defaults to true
@@ -368,6 +369,8 @@ measured; they include tests and the commits that carry them. A status of
 | `autoindex map` in the panel | S | Done | 0.5 h | Record kinds from a `terms` aggregation, shown as `records: function 545 · section 401`; four panel tests |
 | `prjdocs` keyword surfacing | S | Done | 0.2 h | `config.prjdocsKeywords` in the status, a panel line, and the command description |
 | Graph overview in the panel | M | Done (earlier) | 0 h this pass | Brains already report docs and live edges; the corpora list covers the rest |
+| Pre-compaction window archive | M | Not started | — | Deferred by the user; design recorded |
+| Fact mining from the compaction window | M | Not started | — | Deferred by the user; heuristic and model routes costed |
 | Import graph and cycles | M | Done | 2.0 h | `analysis/imports.ts` plus `xerj_imports`; relative, Python, Go, and Rust specifiers resolve against project files, unresolved ones are counted; ten module tests and four tool tests |
 | Regex and glob search | M | Done | 1.5 h | `analysis/find.ts` plus `xerj_find`: glob-to-regex with `**` spanning folders, line-numbered matches, secret files skipped, 200-match cap; ten module tests and three tool tests |
 | Structural search (`ast-grep`, read only) | M | Done | 1.0 h | `analysis/ast.ts` plus `xerj_ast`: probes the binary, passes the pattern and glob as arguments, parses `--json=stream`, never rewrites; seven module tests and one tool test |
@@ -377,7 +380,8 @@ measured; they include tests and the commits that carry them. A status of
 | `xerj_ask` and hub packs | M | Not started | — | Gated by `hub.enabled`, `hub.network` |
 | Turn archive | M | Done | 1.5 h | `archive/turns.ts`: one NDJSON file per session under `<node dir>/archive`, 4 KB per turn, oldest half dropped past `context.archive.maxBytes`; prompts and answers both archived; eight module tests |
 | `xerj_expand` | M | Done | 0.5 h | Prints `[n] U:`/`[n] A:` for a turn range, or says the archive is off; wired for the plugin and the MCP server |
-| Pre-compaction capture | M | Not started | — | The `compaction` session hook receives `event.messages` before the summary exists, so the full window (tool calls, tool output, intermediate text) can be archived and scanned for durable facts; the archive already exists, so this is a hook plus a flattening pass |
+| Pre-compaction window archive | M | Not started | — | Deferred by the user. The `compaction` hook receives `event.messages` before the summary exists; flattening the text parts into the existing archive keeps tool output that a summary compresses away. Design is fixed: last N messages or about 200 KB, whichever comes first, deduped by message id against compaction retries, media parts skipped, and a marker so `xerj_expand` shows where the captured block starts |
+| Fact mining from the compaction window | M | Not started | — | Deferred by the user. Two routes: a heuristic pass over the same window (patterns for decisions, constraints, config keys, commands that worked) at about 2 h, or one model call bounded by a token budget at about 3 to 4 h. Needs a precision measurement before it defaults on, a `derived` memory kind, and reuse of the stale flag; gated by `memory.extract`, off by default |
 | History search | M | Done | 1.0 h | `archive/index.ts` bulk-loads one document per turn into `<prefix>-archive-docs`, idempotent by session and ordinal, with a manifest so a pruned turn leaves the index; the archive is now a search prefix and its own dataset row; five module tests |
 | LSP pool | L | Not started | — | Gated by `analysis.lsp.enabled` |
 | Server installer | L | Not started | — | — |
@@ -393,10 +397,11 @@ indexing, where the `git log` record layout cost an extra hour and a half, and
 the auto-search hint, where the dedupe test had to distinguish the hint pass
 from the retrieval pass.
 
-Tier M so far: **7.5 h** across six items. Remaining: the tree-sitter layer
-and the complexity work it enables (grammar source settled, work deferred),
-`xerj_code` (needs a network gate, since `corpus add` clones), and `xerj_ask`
-(gated by `hub.enabled` and `hub.network`).
+Tier M so far: **7.5 h** across six of twelve items. Remaining, all deferred or
+gated: the tree-sitter layer and the complexity work it enables (grammar source
+settled, work deferred), the pre-compaction window archive and fact mining
+(deferred by the user), `xerj_code` (needs a network gate, since `corpus add`
+clones), and `xerj_ask` (gated by `hub.enabled` and `hub.network`).
 
 ## Settled decisions
 

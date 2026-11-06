@@ -339,6 +339,17 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: Roadmap now carries both halves of pre-compaction work as separate
+  Tier M items, neither started, at the user's request. `Pre-compaction window
+  archive` fixes the design: flatten the text parts of `event.messages` into the
+  existing archive, last N messages or about 200 KB, deduped by message id
+  against compaction retries, media parts skipped, and a marker so `xerj_expand`
+  shows where the captured block starts. `Fact mining from the compaction
+  window` carries both routes with costs (heuristic about 2 h, one bounded model
+  call about 3 to 4 h) and the conditions before it defaults on: a precision
+  measurement, a `derived` memory kind, reuse of the stale flag, and a new
+  `memory.extract` gate, off by default. Tier M is six of twelve items done.
+
 - 2026-11-06: Checked what a plugin can see when compaction starts. `ctx.session.hook("compaction", handler)` is a real hook and its event is `SessionCompaction`, which extends `SessionContext`: the handler receives `messages` and `system` before the summary exists, so the whole window is available, including tool calls, tool output, and intermediate assistant text that the turn archive never records. `SessionCompaction.result` also lets a plugin supply its own `summary` or a `native.messages` replacement window and skip the model request; that is the compaction engine already listed as a non-goal, so it stays unused. `session.compaction.ended` still fires afterwards with only the summary text. Recorded in the roadmap as Tier M `Pre-compaction capture`, not started: archive the window behind a size cap and, separately, mine it for durable facts. No code changed.
 
 - 2026-11-06: Grammar source decided, and the reference-corpus surface checked.
