@@ -43,6 +43,7 @@ const SNAPSHOT: StatusSnapshot = {
     brain: [],
     watch: true,
     contextEnabled: true,
+    prjdocsKeywords: [],
   },
   usage: {
     queries: 1,
@@ -60,6 +61,7 @@ const SNAPSHOT: StatusSnapshot = {
   memory: { namespace: "proj-demo", count: 0, exists: true, stale: 0 },
   brains: [],
   disk: { engineBytes: 1024, logBytes: 2048 },
+  map: [],
   frameworks: [],
   process: null,
   embeddings: false,

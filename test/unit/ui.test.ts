@@ -56,6 +56,7 @@ function snapshot(overrides: Partial<StatusSnapshot> = {}): StatusSnapshot {
       brain: [],
       watch: true,
       contextEnabled: true,
+    prjdocsKeywords: [],
     },
     usage: {
       queries: 12,
@@ -73,6 +74,7 @@ function snapshot(overrides: Partial<StatusSnapshot> = {}): StatusSnapshot {
     memory: { namespace: "proj-demo-1a2b3c4d", count: 2, exists: true, stale: 0 },
     brains: [],
     disk: { engineBytes: 1024, logBytes: 2048 },
+    map: [],
     frameworks: [],
     process: null,
     embeddings: false,
@@ -523,5 +525,55 @@ describe("node line without an idle deadline", () => {
 
     expect(body).toContain("2 sessions");
     expect(body).not.toContain("idle stop");
+  });
+});
+
+describe("data map and keywords", () => {
+  function view(extra: Partial<StatusSnapshot>): StatusSnapshot {
+    return { ...snapshot(), ...extra };
+  }
+
+  test("the index section lists record kinds", () => {
+    const body = panelSections(
+      view({
+        map: [
+          { kind: "function", docs: 545 },
+          { kind: "section", docs: 401 },
+        ],
+      }),
+      NOW,
+    )
+      .flatMap((section) => section.lines)
+      .join("\n");
+
+    expect(body).toContain("records: function 545 · section 401");
+  });
+
+  test("the map is omitted when the corpus reports no kinds", () => {
+    const body = panelSections(view({ map: [] }), NOW)
+      .flatMap((section) => section.lines)
+      .join("\n");
+
+    expect(body).not.toContain("records:");
+  });
+
+  test("configured prjdocs keywords are shown", () => {
+    const base = snapshot();
+    const body = panelSections(
+      view({ config: { ...base.config, prjdocsKeywords: ["fastapi", "polars"] } }),
+      NOW,
+    )
+      .flatMap((section) => section.lines)
+      .join("\n");
+
+    expect(body).toContain("prjdocs keywords: fastapi, polars");
+  });
+
+  test("no keyword line when none are configured", () => {
+    const body = panelSections(view({}), NOW)
+      .flatMap((section) => section.lines)
+      .join("\n");
+
+    expect(body).not.toContain("prjdocs keywords");
   });
 });

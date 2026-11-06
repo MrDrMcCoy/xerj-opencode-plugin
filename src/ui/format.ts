@@ -164,6 +164,21 @@ export function panelSections(snapshot: StatusSnapshot, now: number): PanelSecti
             : `${formatCount(index.lastFiles)} files → ${formatCount(index.lastRecords ?? 0)} records`,
         ].join(" · "),
         `engine ${formatBytes(snapshot.disk.engineBytes)} · log ${formatBytes(snapshot.disk.logBytes)}`,
+        // What the corpus actually holds, by record kind: a data map rather
+        // than a document count.
+        ...(snapshot.map.length === 0
+          ? []
+          : [
+              `records: ${snapshot.map
+                .slice(0, MAP_ROWS)
+                .map((row) => `${row.kind} ${formatCount(row.docs)}`)
+                .join(" · ")}`,
+            ]),
+        // Keywords `prjdocs` documents even though the project does not use
+        // them, so the setting is visible where the corpus is described.
+        ...(snapshot.config.prjdocsKeywords.length === 0
+          ? []
+          : [`prjdocs keywords: ${snapshot.config.prjdocsKeywords.join(", ")}`]),
       ],
     },
     {
@@ -336,6 +351,8 @@ function targetSuffix(target: string | null): string {
 
 /** Rows the framework list shows before it is cut. */
 const FRAMEWORK_ROWS = 12;
+/** Record kinds the data map lists. */
+const MAP_ROWS = 6;
 
 /**
  * Datasets largest first, each with its share of the total. A corpus's size

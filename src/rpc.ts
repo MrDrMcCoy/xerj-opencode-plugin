@@ -113,6 +113,14 @@ export interface ConfigStatus {
   readonly brain: ReadonlyArray<string>;
   readonly watch: boolean;
   readonly contextEnabled: boolean;
+  /** Terms `prjdocs` documents even though the project does not use them. */
+  readonly prjdocsKeywords: ReadonlyArray<string>;
+}
+
+/** One record kind and how many records carry it, for the data map. */
+export interface MapRow {
+  readonly kind: string;
+  readonly docs: number;
 }
 
 /**
@@ -162,6 +170,8 @@ export interface StatusSnapshot {
   readonly corpora: ReadonlyArray<CorpusHealth>;
   /** Bytes on disk for the engine data and the node log. */
   readonly disk: DiskStatus;
+  /** Record kinds in the project corpus, largest first. */
+  readonly map: ReadonlyArray<MapRow>;
   /** Documentation per technology, largest first. */
   readonly frameworks: ReadonlyArray<FrameworkStatus>;
   /** Node process cost; null when the platform exposes no counters. */
@@ -256,6 +266,7 @@ const definition = {
           brain: { type: "array", items: { type: "string" } },
           watch: { type: "boolean" },
           contextEnabled: { type: "boolean" },
+          prjdocsKeywords: { type: "array", items: { type: "string" } },
         }),
         usage: object({
           queries: { type: "number" },
@@ -296,6 +307,10 @@ const definition = {
           engineBytes: { type: "number" },
           logBytes: { type: "number" },
         }),
+        map: {
+          type: "array",
+          items: object({ kind: { type: "string" }, docs: { type: "number" } }),
+        },
         corpora: {
           type: "array",
           items: object({

@@ -340,7 +340,7 @@ export default Plugin.define({
           id: "xerj.prjdocs",
           title: "XERJ project docs",
           description:
-            "Index official docs for this project's languages, frameworks, and cloud APIs",
+            "Index official docs for this project's languages, frameworks, and cloud APIs; keywords add terms the project does not use yet",
           group: "XERJ",
           palette: true,
           slash: { name: "xerj-prjdocs", arguments: true },

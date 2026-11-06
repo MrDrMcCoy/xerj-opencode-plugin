@@ -280,6 +280,7 @@ export default Plugin.define({
           brain: config.index.brain,
           watch: config.index.watch,
           contextEnabled: config.context.enabled,
+          prjdocsKeywords: config.prjdocs.eagerKeywords,
         },
         usage: {
           queries: usage.queries,
@@ -309,6 +310,7 @@ export default Plugin.define({
         recent: await recentMessages(logger),
         warnings: runtime.warnings,
         errors: runtime.error ? [runtime.error] : [],
+        map: [],
         frameworks: [],
         process: null,
         embeddings: false,
@@ -376,12 +378,16 @@ export default Plugin.define({
         const frameworks = await frameworkRows(client, prjdocsPrefix(projectRoot)).catch(
           () => [] as StatusSnapshot["frameworks"],
         );
+        const map = await recordKinds(client, prefix).catch(
+          () => [] as StatusSnapshot["map"],
+        );
         const pid = runtime.node?.pid ?? null;
         const usageNow = pid === null ? null : await sampleProcess(pid).catch(() => null);
 
         return {
           ...base,
           corpora,
+          map,
           frameworks,
           process: usageNow === null ? null : { cpuPercent: usageNow.cpuPercent, memoryBytes: usageNow.memoryBytes },
           // The node embeds only while a pass runs, and only when the index was
@@ -1289,6 +1295,33 @@ async function frameworkRows(
       bytes: typeof bucket.size?.value === "number" ? Math.round(bucket.size.value) : 0,
     }))
     .sort((left, right) => right.bytes - left.bytes);
+}
+
+/**
+ * What the project corpus holds, by record kind. A data map answers "what do
+ * you know about this repository" in one line, which a document count cannot.
+ */
+async function recordKinds(
+  client: XerjClient,
+  prefix: string,
+): Promise<StatusSnapshot["map"]> {
+  const response = await client.post(
+    `/${prefix}-docs/_search`,
+    { size: 0, aggs: { kinds: { terms: { field: "kind", size: 12 } } } },
+    "could not read the record map",
+  );
+
+  const buckets =
+    (response as {
+      aggregations?: { kinds?: { buckets?: Array<{ key?: unknown; doc_count?: unknown }> } };
+    }).aggregations?.kinds?.buckets ?? [];
+
+  return buckets
+    .map((bucket) => ({
+      kind: typeof bucket.key === "string" ? bucket.key : String(bucket.key ?? "unknown"),
+      docs: typeof bucket.doc_count === "number" ? bucket.doc_count : 0,
+    }))
+    .sort((left, right) => right.docs - left.docs);
 }
 
 function corpusStatus(corpus: CorpusService | null): Pick<
