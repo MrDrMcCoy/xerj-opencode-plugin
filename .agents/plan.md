@@ -2,6 +2,8 @@
 
 This refines `goals.md` into a buildable design. Goals stay the source of
 intent; this file decides *how*, in what order, and what counts as done.
+Forward-looking work, including capability absorbed from sibling plugins, is
+in `roadmap.md`.
 
 ## 1. What the plugin is
 
@@ -13,9 +15,10 @@ One OpenCode V2 plugin package with three parts:
 | RPC | `./rpc` → `src/rpc.ts` | shared contract | typed `stats`, `search`, `memory`, `reindex` methods + `stats.updated` event |
 | TUI | `./tui` → `src/tui.tsx` | terminal UI | sidebar stats, `/xerj` commands, details panel |
 
-No GUI part in v1. No MCP server: the plugin talks HTTP to the node directly
-so it can shape output, enforce token budgets, and account for every byte. MCP
-stays available to users who want it independently.
+No GUI part in v1. The server part talks HTTP to the node directly so it can
+shape output, enforce token budgets, and account for every byte. A standalone
+MCP server (`dist/mcp.mjs`, the `xerj-mcp` bin) exposes the same tools to
+agents that do not run OpenCode; it shares the project's node and its ledger.
 
 ### Layers
 

@@ -339,6 +339,26 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: Wrote `.agents/roadmap.md`: a formal, prioritized plan for
+  absorbing the CortexKit plugins and exposing more engine features. Sources
+  measured from the installed packages (`opencode-magic-context` 0.49.23,
+  `aft-opencode` 0.62.0). Candidates are scored on suitability (does it improve
+  retrieval, tokens, or access) and effort in working weeks; tiers run S (one
+  week) through XL (more than six). Five constraints shape it: the host exposes
+  22 plugin domains and no LSP, so a language-server pool would be ours to run;
+  compaction replaces Magic Context rather than joining it; grammars download
+  lazily through the existing verified-download path instead of shipping 52 to
+  100 MB in the package; every runtime reads only the canonical project root;
+  and nothing leaves the machine without an explicit opt-in. Baselines are
+  recorded (p50 2.5 ms and p95 82 ms retrieval, 970 MB node RSS, 105 s cold
+  index, 4.5 s type-check of 132 files, 88.3% coverage). Non-goals are named
+  with reasons: desktop app, LSP auto-install matrix, a second shell, silent
+  field reports, bundled grammars, and rewriting `read`/`grep` inputs. Four
+  decisions are left open to the user: compaction, share, hub network access,
+  and whether the plugin writes files. Tier S and M depend on none of them.
+  `plan.md` gained a pointer to the roadmap and lost a stale claim that the
+  plugin ships no MCP server.
+
 - 2026-11-06: Coverage and structure pass (0.7.0). `PrjdocsIndexer.run` was at
   cyclomatic complexity 39 after the keyword work; the three target-collection
   steps (builtins, keywords, detected techs) are methods now and `run` reads as
