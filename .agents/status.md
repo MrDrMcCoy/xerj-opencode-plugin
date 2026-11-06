@@ -283,7 +283,13 @@ test/unit/*.test.ts    pure-function tests
 
 ## Work in progress
 
-Nothing. M0–M6 and in-project storage are committed; only the restart,
+Local telemetry is designed in `roadmap.md` (Tier S, about 6 h) and not
+started. It records every operation's type, duration, and outcome into
+bounded NDJSON files under `<data root>/telemetry`, keeps a per-type ring of
+samples plus a per-day rollup, and exposes the figures through
+`xerj_telemetry` and the panel. On by default, local only, capped at 128 MiB.
+
+Nothing else. M0–M6 and in-project storage are committed; only the restart,
 publish, and live TUI verification remain.
 
 ## Blocked / unknown

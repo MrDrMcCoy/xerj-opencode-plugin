@@ -56,7 +56,9 @@ cheap half ships first.
    indexer refuses one today.
 5. **The plugin stays read-only.** It locates, explains, and cites; the host's
    tools and the model write. No tool in this plan opens a project file for
-   writing, so a bug here can cost a bad citation but not a file.
+   writing, so a bug here can cost a bad citation but not a file. The plugin's
+   own state is the exception and lives outside the project source: the
+   XERJ data root, and the hidden `.xerj` directory for per-project data.
 6. **No silent outbound traffic.** Anything that leaves the machine,
    including the engine's own field report, is opt-in and off by default:
    `share.enabled` for a listener, `hub.enabled` and `hub.network` for the
@@ -245,7 +247,9 @@ These numbers are the reason some items are cheap and others are not.
 
 ## Tier S: one week or less, high suitability
 
-Ship these first. None adds a runtime, a grammar, or a write path.
+Ship these first. None adds a resident runtime, a grammar download, a parser,
+or a listener. Telemetry writes files, but only its own state under the data
+root, and it stays in this tier because it needs no process and no network.
 
 | Item | Source | What it does | Done when |
 |---|---|---|---|
@@ -263,6 +267,7 @@ Ship these first. None adds a runtime, a grammar, or a write path.
 | Sidebar rebuild | AFT and Magic Context, layout only | Bordered box with a `▼ XERJ` accent header, click to collapse, three summary rows when collapsed and named sections when expanded; per-section on/off and collapse memory in the shared `tui-preferences.jsonc` under key `xerj` (`order` is not offered: this host's slots take `prepend`/`append` only); inline `⚠` for a failing corpus; 150 ms refresh debounce | Collapsed and expanded views both render from `StatusSnapshot` alone, a click survives a view switch, and formatting stays pure and tested |
 | **Config example formatting** | This plugin | Rewrite the complete-default options block in the README (and the copy in `plan.md` §3) as one key per line, grouped by section, with a comment naming the default and its unit; the README block omits 21 defaults today, including `node.logMaxBytes`, `index.graph`, `index.git`, `index.gitLimit`, `context.archiveEnabled`, `context.archiveMaxBytes`, every `prjdocs.*`, and every `sysdocs.*`; the `plan.md` copy is staler still (`context.maxPassages` reads 4 against a default of 8) | The block parses as JSONC, its key set equals `DEFAULT_CONFIG`, and a test fails when a new option lands without updating the example |
 | **CPU affinity (`node.cpus`)** | This plugin | Confine every XERJ process to a chosen CPU set: explicit indices and inclusive ranges, `odd` (the default), `even`, or a percentage of the CPUs available to the process, rounded down | `node.cpus: "0-3,8"` confines the node and every index run on Linux, `"50%"` resolves against the available CPU count, `null` or `"all"` leaves affinity unchanged, and an unsupported platform behaves as it does today |
+| **Local telemetry** | This plugin | Record every operation with its type, duration, and outcome into bounded files under the XERJ data root, so the plugin's own performance can be measured and improved | `xerj_telemetry` reports count, error rate, p50/p95, and total time per type from the local files; with telemetry on, retrieval p50 and p95 do not move and no flush lands inside a turn; the store never exceeds `telemetry.maxBytes` |
 
 ### CPU affinity value syntax
 
@@ -299,6 +304,239 @@ Platform behaviour:
   index of 64 or more is refused with a warning, because the mask is 64-bit.
 - macOS: no per-process CPU selection. The key is accepted, one warning says
   it has no effect, and nothing else changes.
+
+### Local telemetry design
+
+The plugin can only be made faster if its own costs are measured. Today the
+only durable record is the warning ring in `ctx.storage` and the per-process
+`Counters`, which reset on restart and count six events. That is enough for a
+panel and useless for profiling: it cannot answer "is `xerj_zoom` slower than
+`xerj_outline`", "did the last release regress retrieval", or "which tool
+errors most often".
+
+Telemetry records every operation the plugin performs. It is local data, not
+a field report: nothing in this design opens a socket, imports the network
+layer, or is read by anything outside the machine. The README, the panel, and
+the tool description each say so.
+
+#### Why not the existing log ring
+
+The log ring rewrites its whole array into key-value storage on every entry.
+That is fine for fifty warnings a day and wrong for thousands of operations in
+a session. Telemetry uses append-only files with explicit rotation, which cost
+one write per record and degrade gracefully as the corpus grows.
+
+The two stores stay separate on purpose:
+
+| Store | Answers | Bounded by |
+|---|---|---|
+| `src/log.ts` ring | "what went wrong that I must see" | 50 entries, key-value |
+| Telemetry | "what did the plugin cost, and where" | `telemetry.maxBytes`, files |
+
+#### Where it lives
+
+One store per installation, under the XERJ data root:
+
+```
+<data root>/telemetry/
+  ops.ndjson                    every operation, newest last
+  ops.1.ndjson … ops.N.ndjson   rotated, 1 is the newest rotation
+  rings/<type>.ndjson           last N samples for one type
+  rollup/<date>/<instance>.json per-day, per-instance counters
+  writer.lock                   owner pid and heartbeat
+  README.txt                    what this is and that nothing leaves
+```
+
+The data root, not `<project>/.xerj`, because the interesting question
+compares projects: "search is slower in this repo than in that one" needs one
+place to read from. It is also outside every project, so it cannot be indexed,
+committed, or walked by the watcher. Every record carries the project's prefix
+(slug and hash, never the absolute path) so the reader can filter.
+
+Per-project state under `storage.root` would split an installation's history
+across directories and lose it when a user moves a project. The existing
+shared state (binary, release cache, port lock) already lives at the data
+root for the same reason.
+
+#### What an operation is
+
+`OpType` is a closed set of dotted names. A closed set is the point: the panel
+groups by it, the rings are keyed by it, and a typo cannot silently create a
+new file. Groups and their types:
+
+| Group | Types |
+|---|---|
+| retrieval | `retrieve`, `inject`, `recall`, `hint`, `rehydrate` |
+| search | `search`, `search.lexical`, `search.semantic`, `search.name`, `brain.expand` |
+| tools | `tool.<name>` for every registered tool |
+| rpc | `rpc.<method>` |
+| index | `index.project`, `index.hidden`, `index.web`, `index.brain`, `index.git`, `index.archive`, `index.prjdocs`, `index.sysdocs` |
+| node | `node.spawn`, `node.attach`, `node.probe`, `node.stop` |
+| binary | `binary.detect`, `binary.install`, `binary.resolve` |
+| memory | `memory.store`, `memory.recall`, `memory.forget`, `memory.curate`, `memory.verify` |
+| hooks | `hook.prompt`, `hook.context`, `hook.tool` |
+| graph | `graph.ego`, `graph.overview` |
+| archive | `archive.append`, `archive.expand` |
+
+Two of those groups are wrapped generically rather than at each call site.
+`buildTools` times every tool it returns, and the RPC registration times every
+method it registers, so a tool added later is measured without touching it.
+The rest are explicit, at the boundary the layer already owns: the corpus
+service's run start and end, the supervisor's spawn and attach, the crawler's
+page loop.
+
+#### Record shape
+
+One JSON object per line, so `tail`, `jq`, and a line-oriented reader all work
+without a parser dependency:
+
+```jsonc
+{"at":1762470000000,"op":"search","ms":12,"ok":true,
+ "prefix":"xop-xerj-opencode-plugin-1a2b3c4d",
+ "meta":{"hits":6,"bytes":8120,"leg":"fused"}}
+```
+
+Fields are fixed and validated on write. `meta` accepts bounded scalars only:
+counts, byte sizes, booleans, enum strings, and the project prefix. It never
+accepts a prompt, a query, a file body, or an absolute path.
+
+An error is recorded as its class name and, for an HTTP failure, its status
+code. Error messages are not recorded, because they embed URLs, file contents,
+and model output.
+
+`telemetry.maxText` (default 0) is the one escape hatch: 0 records no text at
+all, and a positive number clips a caller-supplied string to that many
+characters. The default is what makes the privacy statement in the README
+true without a footnote.
+
+Durations use `performance.now()`, which is monotonic. Timestamps use
+`Date.now()`.
+
+#### Three files, three jobs
+
+| File | Holds | Written how | Bound |
+|---|---|---|---|
+| `ops.ndjson` | every operation, chronological | append, O_APPEND | rotates at `telemetry.rotateBytes` (8 MiB), `telemetry.rotations` (4) kept |
+| `rings/<type>.ndjson` | the last `telemetry.samplesPerType` (256) samples of one type | append by any instance, compacted by the owner | 256 lines, rewritten tail-only |
+| `rollup/<date>/<instance>.json` | per-day count, errors, total ms, max ms per type | each instance writes its own file | one small file per day per instance |
+
+The rings answer "what is the latency distribution of this operation now".
+The rollup answers "how many times did it run, over all time", which a
+256-line ring cannot. Keeping the count in the ring header instead would make
+the header wrong every time a second instance appends, so the counters live
+where each writer can own them.
+
+#### Multiple instances
+
+A server can load the plugin twice for one project (the repository and a
+subdirectory inside it). Appending a line under O_APPEND is atomic on every
+platform the plugin ships for, so any instance may append. Compaction rewrites
+a file, so exactly one instance may do it: the owner, claimed at
+`writer.lock` with mkdir and a pid heartbeat, stale after 60 seconds. A
+non-owner keeps appending and skips compaction; the owner's next flush tidies
+the file. When the owner dies, the next flush takes over.
+
+This is the same idiom as the port lock and the watcher claim, so there is one
+concurrency story in the codebase rather than three.
+
+#### Write path
+
+`span(type, body)` measures with `performance.now()`, runs `body`, and pushes
+a record onto an in-memory queue. It never awaits a write, and a full queue
+drops the oldest entry rather than delaying a turn. A flusher drains the queue
+every `telemetry.flushMs` (5 s) and at shutdown, appends the records, and then
+touches the rings and rollup it has accumulated.
+
+A failed write logs once and disables telemetry for the session. Telemetry
+must never be the reason a turn fails or a plugin does not load.
+
+Nothing in the retrieval path reads telemetry. `xerj_search` does not consult
+it, the prompt hook does not gate on it, and disabling it changes no output
+byte. That is the same rule the capability gates follow.
+
+#### The size limit
+
+`telemetry.maxBytes` defaults to 134217728 (128 MiB) and covers the whole
+directory. It is a backstop, not the normal bound: with the defaults above the
+log family tops out at 40 MiB, the rings at about 2 MiB, and rollups at
+kilobytes per day.
+
+The sweep runs at startup and every ten minutes. It removes, in order:
+
+1. the oldest rotated ops files, until the cap is met without touching
+   `ops.ndjson`, the rings, or the rollup;
+2. the oldest rollup days, oldest first;
+3. half of every ring, keeping the newest samples;
+4. if the cap still binds, telemetry drops to log-only for the session, which
+   stops ring and rollup writes and logs one warning naming the key.
+
+A directory walk measures the real size, cached for 60 seconds, because the
+files are also written by another process.
+
+#### Reading it
+
+`xerj_telemetry` takes `op` (a type, a prefix like `tool.`, or omitted for
+all), `window` (`session`, `day`, or `all`, default `day`), `sort` (`count`,
+`p95`, `total`, or `errors`), and `limit` (default 20). It returns one row per
+type: count, errors, p50, p95, max, and total milliseconds, plus the store's
+size and the date the surviving history starts.
+
+The panel gains a telemetry section with the same figures for the five
+busiest types and the line `local only · never sent`. The TUI reads them
+through the status RPC, never the filesystem.
+
+#### Configuration
+
+```jsonc
+"telemetry": {
+  "enabled": true,          // local files only; nothing is ever sent
+  "maxBytes": 134217728,    // 128 MiB for the whole directory
+  "samplesPerType": 256,    // ring length per operation type
+  "rotateBytes": 8388608,   // 8 MiB before ops.ndjson rotates
+  "rotations": 4,           // rotated ops files kept
+  "flushMs": 5000,          // queue drain period
+  "maxText": 0              // characters of caller text; 0 records none
+}
+```
+
+On by default because the data is local, bounded, and the only way the plugin
+can report its own cost. An installation that disagrees sets
+`telemetry.enabled: false`; the directory is then never created and no write
+path runs.
+
+#### Failure and edge cases
+
+| Case | Behaviour |
+|---|---|
+| data root unwritable | telemetry disabled for the session, one warning, plugin unaffected |
+| corrupt line in a ring or rollup | the line is skipped on read, the rest of the file is kept |
+| clock jumps backwards | `performance.now()` keeps durations sane; only the timestamp is odd |
+| two instances flush at once | appends are atomic; compaction is owner-only |
+| the owner dies | the lock goes stale after 60 s and the next flush takes over |
+| `maxText` above 0 | text is clipped, never written whole |
+| store over the cap | sweep in the documented order, then log-only |
+
+#### Tests
+
+Unit, with a temporary directory and a fake clock: ring cap and tail-only
+compaction; rotation names and order; the sweep's deletion order and that it
+stops at the cap; rollup summed across days and instances; p50/p95/p99 from a
+fixed sample set; disabled mode creates nothing; an unwritable directory warns
+once and keeps the plugin alive; a corrupt line is skipped; `maxText: 0`
+records no text even when a caller passes one; a full queue drops without
+throwing; two stores on one directory agree on the owner.
+
+Integration: drive one retrieval and one tool call with telemetry on, then
+assert both appear in `ops.ndjson` and in their rings, and that the count in
+the rollup matches.
+
+Performance gate: measure retrieval p50 and p95 and the prompt hook's wall
+time on this repository with telemetry off and on. On must be within noise,
+and no flush may appear inside a turn. If it does not hold, the flush moves
+off the turn path or the feature ships off by default.
+
+Effort: about 6 hours. Store and sweep 2 h, span API and wiring 1.5 h, report
+and tool 1 h, tests 1.5 h.
 
 ## Tier M: one to three weeks, high suitability
 
@@ -343,7 +581,7 @@ Platform behaviour:
 | Desktop app | A separate binary over another plugin's database; not a plugin feature |
 | Installing a language toolchain (Go, Rust, LLVM) | The compiler and sysroot belong to the project and are assumed to be there. The plugin installs the server, never the toolchain, and never gates a language on the toolchain's presence |
 | Bash detach, wait, notifications | The host owns the shell; a second one competes with it |
-| Silent field reports | Sends data outward; opt-in at most, never automatic |
+| Silent field reports | Sends data outward; opt-in at most, never automatic. Local telemetry is the opposite: bounded files under the XERJ data root, no network path, and an off switch |
 | Bundling grammars in the npm package | 50 to 100 MB and a per-platform native build matrix |
 | Enabling `analysis.*` by default | The gate exists so an install that wants retrieval pays nothing for a parser or a server |
 | A gate that silently widens | A gate covers one capability and one key; no key controls two capabilities, and no build flag changes what is registered |
@@ -369,6 +607,10 @@ Platform behaviour:
 | An installed server is compromised | Pinned version and checksum, `--ignore-scripts` on npm installs, and a `--version` probe before first use |
 | Installed servers fill the disk | Measured at about 26 MB for the npm set; the panel reports each install and a cache purge removes them |
 | CPU affinity is silently ignored | A missing `taskset`, a restrictive cpuset, or macOS logs one warning and leaves the process unpinned; indexing and retrieval never depend on the key |
+| Telemetry slows the turns it measures | Records go to an in-memory queue that a timer drains; `span` never awaits a write, a full queue drops, and the performance gate compares retrieval p50/p95 with telemetry off and on |
+| The telemetry store fills the disk | `telemetry.maxBytes` (128 MiB) bounds the directory, the sweep runs every ten minutes, and the defaults top out at about 42 MiB so the cap is a backstop |
+| Telemetry captures private text | `meta` is a fixed set of scalar fields, error messages are never recorded, and `telemetry.maxText` defaults to 0, which records no caller text at all |
+| Two instances corrupt the rings | Appends are atomic under O_APPEND; only the lock owner rewrites a file, and a stale lock is taken over after 60 s |
 
 ## Sequencing and gates
 
@@ -414,6 +656,7 @@ measured; they include tests and the commits that carry them. A status of
 | `prjdocs` keyword surfacing | S | Done | 0.2 h | `config.prjdocsKeywords` in the status, a panel line, and the command description |
 | Config example formatting | S | Done | 0.5 h | README block is one key per line with comments; `test/unit/config-example.test.ts` compares every flattened key and value with `DEFAULT_CONFIG`; `plan.md` §3 is a readable subset that points at the README for the full set |
 | CPU affinity (`node.cpus`) | S | Done | 1.5 h | `src/node/priority.ts` parses lists, ranges, `odd`, `even`, and percentages; resolves against `/proc/self/status` on Linux; applies `taskset -a -pc`, `ProcessorAffinity`, or one macOS warning; wired into node, watcher, and brain spawns; 29 unit tests |
+| Local telemetry | S | Not started | — | Design settled: three file families under `<data root>/telemetry`, a closed `OpType` set, generic wraps for tools and RPC, owner-only compaction, and a 128 MiB sweep. About 6 h |
 | Graph overview in the panel | M | Done (earlier) | 0 h this pass | Brains already report docs and live edges; the corpora list covers the rest |
 | Import graph and cycles | M | Done | 2.0 h | `analysis/imports.ts` plus `xerj_imports`; relative, Python, Go, and Rust specifiers resolve against project files, unresolved ones are counted; ten module tests and four tool tests |
 | Regex and glob search | M | Done | 1.5 h | `analysis/find.ts` plus `xerj_find`: glob-to-regex with `**` spanning folders, line-numbered matches, secret files skipped, 200-match cap; ten module tests and three tool tests |
@@ -436,10 +679,11 @@ measured; they include tests and the commits that carry them. A status of
 | Dreamer child sessions | XL | Not started | — | — |
 | Notes and smart notes | XL | Not started | — | — |
 
-**Tier S complete: fourteen of fourteen, 14.9 h** against an 8 to 10 h
+**Tier S: fourteen of fifteen shipped, 14.9 h** against an 8 to 10 h
 estimate. Two items landed on 2026-11-06 after the first twelve shipped: the
 config example formatting (0.5 h) and `node.cpus` (1.5 h). The sidebar took
-3 h against an 8 h plan; the overshoot is in the other items.
+3 h against an 8 h plan; the overshoot is in the other items. The fifteenth,
+local telemetry, is designed and not started.
 
 Per-item estimates held within about half an hour except commit indexing, where
 the `git log` record layout cost an extra hour and a half, and the auto-search
