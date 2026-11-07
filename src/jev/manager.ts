@@ -155,10 +155,12 @@ export class JevosManager {
       const binary = join(binDir, process.platform === "win32" ? "jev.exe" : "jev");
       await chmod(binary, 0o755).catch(() => {});
 
+      // The model is published as a zip on every platform; only the binary
+      // archive follows the target's archive kind.
       await extract(
         modelPath,
         staging,
-        this.target.archive,
+        "zip",
         this.logger,
         this.commandTimeoutMs,
       );
@@ -273,17 +275,21 @@ export class JevosManager {
 }
 
 /** The release archives root the binary under its own folder. */
-async function flatten(directory: string, name: string, logger: Logger): Promise<void> {
+export async function flatten(directory: string, name: string, logger: Logger): Promise<void> {
   const nested = join(directory, name);
   const isDir = await stat(nested).then((info) => info.isDirectory(), () => false);
   if (!isDir) return;
 
-  for (const entry of await readdir(nested)) {
-    await rename(join(nested, entry), join(directory, entry)).catch((error: unknown) => {
+  // Move the folder aside first: the binary inside it has the same name as
+  // the folder, so moving entries in place can hit a non-empty target.
+  const stash = `${nested}.extract`;
+  await rename(nested, stash);
+  for (const entry of await readdir(stash)) {
+    await rename(join(stash, entry), join(directory, entry)).catch((error: unknown) => {
       logger.debug("could not move an extracted file", String(error));
     });
   }
-  await rm(nested, { recursive: true, force: true }).catch(() => {});
+  await rm(stash, { recursive: true, force: true }).catch(() => {});
 }
 
 async function extract(
@@ -355,12 +361,12 @@ async function isFile(path: string): Promise<boolean> {
 }
 
 /** Streams the file so a 630 MB model is never held in memory. */
-function hashFile(path: string): Promise<string> {
+export function hashFile(path: string): Promise<string> {
   return new Promise((resolvePromise, reject) => {
     const hash = createHash("sha256");
     const stream = createReadStream(path);
     stream.once("error", reject);
-    stream.once("data", (chunk) => hash.update(chunk));
+    stream.on("data", (chunk) => hash.update(chunk));
     stream.once("end", () => resolvePromise(hash.digest("hex")));
   });
 }

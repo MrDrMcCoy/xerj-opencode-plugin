@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { createHash, randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { JevosManager } from "../../src/jev/manager.ts";
+import { JevosManager, flatten, hashFile } from "../../src/jev/manager.ts";
 import { JevosSupervisor } from "../../src/jev/supervisor.ts";
 
 const logger = {
@@ -79,6 +80,31 @@ describe("jevos manager", () => {
     const manager = new JevosManager({ root: dir, target, logger, path: dir });
     const install = await manager.ensure();
     expect(install.root).toBe(dir);
+  });
+});
+
+describe("install helpers", () => {
+  test("hashFile hashes every chunk, not only the first", async () => {
+    const dir = await tempDir();
+    const file = join(dir, "blob.bin");
+    const bytes = randomBytes(300_000);
+    await writeFile(file, bytes);
+    const expected = createHash("sha256").update(await readFile(file)).digest("hex");
+    expect(await hashFile(file)).toBe(expected);
+  });
+
+  test("flatten moves a binary out of a folder with the same name", async () => {
+    const dir = await tempDir();
+    const nested = join(dir, "jev");
+    await mkdir(nested, { recursive: true });
+    await writeFile(join(nested, "jev"), "binary");
+    await writeFile(join(nested, "libopenvino.so"), "library");
+
+    await flatten(dir, "jev", logger);
+
+    expect(await readFile(join(dir, "jev"), "utf8")).toBe("binary");
+    expect(await readFile(join(dir, "libopenvino.so"), "utf8")).toBe("library");
+    expect(await stat(join(dir, "jev")).then((info) => info.isDirectory())).toBe(false);
   });
 });
 

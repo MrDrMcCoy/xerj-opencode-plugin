@@ -394,20 +394,28 @@ publish, and live TUI verification remain.
   question and one five-way `choice`. The question is contrastive, "a lasting
   project rule or fact, rather than a report of what was just done", because
   the plain "durable fact" wording accepted 24 of 40 candidates mined from this
-  project's own turn archive, most of them progress reports. Measured
-  (jevos-v5, 2026-11-06): 10 of 11 durable sentences kept and 9 of 10 reports
-  rejected; the one durable miss is a preference the heuristic already
-  classifies. Putting the turn around the sentence lowered every score (6/8
-  with the sentence first, 3/8 with it last), so the state is the sentence.
-  Cold start is 4.5 s, the first judgement 1.6 s, later ones about 190 ms on
-  four threads.
+  project's own turn archive, most of them progress reports. On the labeled
+  set the contrastive wording accepts 7 of 8 memories and cuts report noise
+  from 3 of 10 to 2 of 10; on a hand-labeled history sample it kept 10 of 11
+  durable sentences and rejected 9 of 10 reports. Putting the turn around the
+  sentence lowered every score, so the state is the sentence. Cold start is
+  4.5 s, the first judgement 1.6 s, later ones about 190 ms on four threads.
 
-  `DISTILL_EVAL_JEVOS_URL` runs the local judge through the existing harness.
-  Telemetry gains a `local` count in the `distill` report block, and the panel
-  line only prints a judge's count while it is non-zero, so the common
-  heuristic-only install is unchanged. 25 new unit tests cover the release
-  metadata, the judge, the manager, and the supervisor; 1190 unit tests pass
-  and typecheck is clean. Nothing is pushed or released.
+  The install path was run end to end with the real assets served locally:
+  download, checksum, extraction, layout, and probe all pass, and a second
+  `ensure` reuses the tree. That run found three defects, now fixed and
+  covered by tests: the streaming hash read only the first chunk, the model
+  zip used the binary's archive kind, and the binary folder had the same name
+  as the binary it contained.
+
+  `DISTILL_EVAL_JEVOS_URL` runs the local judge through the existing harness,
+  which now also reports a labeled set of recoverable summaries so the keep
+  wording can be compared on two fronts. Telemetry gains a `local` count in the
+  `distill` report block, and the panel line only prints a judge's count while
+  it is non-zero, so the common heuristic-only install is unchanged. 21 new
+  unit tests cover the release metadata, the judge, the manager, and the
+  supervisor; 1193 unit tests pass and typecheck is clean. Nothing is pushed
+  or released.
 
 - 2026-11-06: The memory-index reset no longer destroys a correctly-moded
   store. `recoverMemoryIndex` reads `embedding_execution.json` before acting:
