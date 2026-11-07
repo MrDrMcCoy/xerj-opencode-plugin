@@ -2,8 +2,8 @@
 // RPC registered. Both shipped faults in this layer were wiring mistakes that
 // typechecking cannot see, so this drives the real setup against a stub host.
 
-import { describe, expect, test } from "bun:test";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { describe, expect, setSystemTime, test } from "bun:test";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import plugin from "../../src/index.ts";
@@ -268,6 +268,44 @@ describe("server setup wiring", () => {
       await rm(project, { recursive: true, force: true });
     }
   });
+});
+
+describe("bootstrap retry", () => {
+  // A failed install or node start used to be final: the plugin stayed
+  // `error` until the process restarted. A status call is the retry trigger.
+  test("a later status call tries the bootstrap again", async () => {
+    const project = await mkdtemp(join(tmpdir(), "xerj-setup-"));
+    const script = join(project, "fake-xerj");
+    const counter = join(project, "count");
+    await writeFile(
+      script,
+      '#!/bin/sh\necho x >> "$(dirname "$0")/count"\nexit 1\n',
+    );
+    await chmod(script, 0o755);
+    const host = stubHost(project, { binary: { path: script } });
+    const realNow = Date.now();
+    const attempts = async (): Promise<number> => {
+      const raw = await readFile(counter, "utf8").catch(() => "");
+      return raw.trim().split("\n").filter((line) => line.length > 0).length;
+    };
+
+    try {
+      const cleanup = (await plugin.setup(host.ctx as never)) as () => void;
+      await Bun.sleep(100);
+      expect(await attempts()).toBe(1);
+
+      // Past the one-minute cooldown; the next status read retries.
+      setSystemTime(new Date(realNow + 61_000));
+      await host.status();
+      await Bun.sleep(150);
+      expect(await attempts()).toBe(2);
+
+      cleanup?.();
+    } finally {
+      setSystemTime();
+      await rm(project, { recursive: true, force: true });
+    }
+  }, 10_000);
 });
 
 describe("server rpc handlers", () => {
