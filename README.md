@@ -240,7 +240,7 @@ This is the complete set with its defaults, in
           "port": 9200,
           "dataDir": null,
           "idleMs": 1800000,             // 30 minutes
-          "shutdownOnIdle": true,
+          "shutdownOnIdle": false,
           "clientTimeoutMs": 5000,       // read and search requests
           "writeTimeoutMs": 120000,      // writes that embed first
           "probeTimeoutMs": 800,         // one GET / health probe
@@ -344,7 +344,7 @@ This is the complete set with its defaults, in
             }
           },
           "extract": {                   // facts from the compaction window
-            "enabled": false,            // off; precision not measured yet
+            "enabled": true,             // on; uses the local judge
             "maxFacts": 3,               // memories promoted per window
             "maxBytes": 204800           // window text read per compaction
           }
@@ -358,7 +358,7 @@ This is the complete set with its defaults, in
           "enabled": true,              // registers xerj_run and xerj_out
           "suggest": true,              // teach the tools in the context block
           "mirrorHostResults": true,    // record host shell results too
-          "inject": false,              // include the corpus in prompt injection
+          "inject": true,               // include the corpus in prompt injection
           "maxBytes": 268435456,        // 256 MiB for the pair files
           "maxIndexBytes": 33554432,    // 32 MiB of indexed text
           "maxCommandBytes": 67108864,  // captured per command before truncation
@@ -370,13 +370,13 @@ This is the complete set with its defaults, in
           "hintLines": 40               // a mirrored result past this queues a hint
         },
         "analysis": {
-          "treeSitter": {               // structural parsing; off by default
-            "enabled": false,           // registers xerj_complexity
+          "treeSitter": {               // structural parsing
+            "enabled": true,            // registers xerj_complexity
             "languages": [],            // empty detects from the project
             "maxParseBytes": 1048576    // files above this are skipped
           },
-          "lsp": {                       // language servers; off by default
-            "enabled": false,           // registers callers and impact
+          "lsp": {                       // language servers
+            "enabled": true,            // registers callers and impact
             "servers": {},              // language -> command or [command, args]
             "autoInstall": true,        // install a missing pinned server
             "idleMs": 300000,           // stop an idle server
@@ -385,7 +385,7 @@ This is the complete set with its defaults, in
           }
         },
         "code": {                       // reference corpora
-          "enabled": false,             // registers xerj_code
+          "enabled": true,              // registers xerj_code
           "network": false,             // corpus add may clone git URLs
           "timeoutMs": 600000,          // one corpus command
           "maxResults": 8,              // passages per query
@@ -398,15 +398,15 @@ This is the complete set with its defaults, in
           "timeoutMs": 30000
         },
         "hub": {                        // signed pre-indexed corpora
-          "enabled": false,             // registers xerj_ask and xerj_hub
-          "network": false,             // cached packs only until true
+          "enabled": true,              // registers xerj_ask and xerj_hub
+          "network": true,              // pull packs and the catalogue
           "hosted": "off",              // off, auto, or on
           "url": "https://hub.xerj.org",// catalogue; key is in the binary
           "maxTokens": 1200,            // answer cap passed to xerj ask
           "timeoutMs": 120000           // one hub command
         },
         "telemetry": {
-          "anomaly": false,             // reserved; on-demand tool only
+          "anomaly": true,              // reserved; on-demand tool only
           "enabled": true,              // local files only; never sent
           "maxBytes": 134217728,        // 128 MiB for the whole directory
           "samplesPerType": 256,        // ring length per operation type
@@ -441,7 +441,7 @@ The same entry works with a checkout path instead of the package name; see
 | `node.cpus` | CPUs every XERJ process may use: a comma-separated list of indices and ranges (`"0-3,8"`), `odd` (default), `even`, or a percentage of the available CPUs (`"50%"`, rounded down). `null` or `"all"` leaves affinity unchanged. Linux uses `taskset`; Windows uses `ProcessorAffinity`; macOS has no per-process selection and warns once. |
 | `node.port` | Preferred port. The supervisor advances it if taken. |
 | `node.idleMs` | Stop this project's node after this long with no session activity. |
-| `node.shutdownOnIdle` | Set false to keep the node up after the last session closes. |
+| `node.shutdownOnIdle` | False by default; the node stays up after the last session closes. |
 | `node.clientTimeoutMs` | Deadline for a read or search request to the node. Default 5000. |
 | `node.writeTimeoutMs` | Deadline for a write. A semantic write embeds before it acknowledges, so this is longer than a read. Default 120000. |
 | `node.probeTimeoutMs` | Deadline for one `GET /` health probe. Default 800. |
@@ -498,7 +498,7 @@ The same entry works with a checkout path instead of the package name; see
 | `memory.distill.local.autotune.initialDelayMs` | Delay after setup before the first pass. |
 | `memory.distill.local.autotune.margin` | F1 percentage points a candidate needs over the active floor. |
 | `memory.distill.local.autotune.minSamples` | Answered samples a pass needs before it can decide. |
-| `memory.extract.enabled` | Mine the pre-compaction window for durable facts. Off by default; precision is not measured yet. |
+| `memory.extract.enabled` | Mine the pre-compaction window for durable facts. On by default; uses the local judge. |
 | `memory.extract.maxFacts` | Memories promoted from one compaction window. |
 | `memory.extract.maxBytes` | Window text read before extraction. |
 | `index.graph` | Index the project as one graph corpus (a "super brain"): sections, symbols, `path:line`, and edges. On by default; `false` restores the flat `--no-graph` corpus with the engine's own watcher. A change rebuilds the project corpus once. |
@@ -528,7 +528,7 @@ The same entry works with a checkout path instead of the package name; see
 | `cmd.enabled` | Register `xerj_run` and `xerj_out` and keep command output under `.xerj/cmd/`. On by default. |
 | `cmd.suggest` | Add the command-output instruction to the first model call of a session and hint after a large result. |
 | `cmd.mirrorHostResults` | Record results from the host's `bash`/`shell` tool too, so history covers commands `xerj_run` did not run. |
-| `cmd.inject` | Include the command corpus in prompt-time injection. Off by default; `xerj_search` and `xerj_out` still reach it. |
+| `cmd.inject` | Include the command corpus in prompt-time injection. On by default; `xerj_search` and `xerj_out` still reach it. |
 | `cmd.maxBytes` | Cap for the `<stem>-cmd.txt` and `<stem>-out.txt` pairs together. |
 | `cmd.maxIndexBytes` | Cap for the indexed text of the command corpus. |
 | `cmd.maxCommandBytes` | Captured bytes per command before truncation. |
@@ -537,9 +537,9 @@ The same entry works with a checkout path instead of the package name; see
 | `cmd.showTokens` | Output budget for one `xerj_out show`. |
 | `cmd.timeoutMs` | Deadline for one `xerj_run` command. |
 | `cmd.hintLines` | A mirrored command result past this many lines queues one hint for the next turn. |
-| `analysis.treeSitter.enabled` | Register `xerj_complexity`, download the grammar pack, and parse project files. Off by default. |
+| `analysis.treeSitter.enabled` | Register `xerj_complexity`, download the grammar pack, and parse project files. On by default. |
 | `analysis.treeSitter.languages` | Grammar ids to parse. Empty detects from file extensions. |
-| `code.enabled` | Register `xerj_code` for reference corpora. Off by default. |
+| `code.enabled` | Register `xerj_code` for reference corpora. On by default. |
 | `code.network` | Allow `corpus add` to clone its git URLs. Off by default. |
 | `code.timeoutMs` | Deadline for one corpus command, including an index build. |
 | `code.maxResults` | Passages returned by a reference query. |
@@ -548,14 +548,14 @@ The same entry works with a checkout path instead of the package name; see
 | `share.expires` | Default link lifetime, for example `24h` or `7d`. |
 | `share.maxClaims` | Default number of times a link can be opened. |
 | `share.timeoutMs` | Deadline for one share command. |
-| `analysis.lsp.enabled` | Register `xerj_callers` and `xerj_impact`, and start language servers. Off by default. |
+| `analysis.lsp.enabled` | Register `xerj_callers` and `xerj_impact`, and start language servers. On by default. |
 | `analysis.lsp.servers` | Language id to command or `[command, args]`. Empty means auto-resolve. |
 | `analysis.lsp.autoInstall` | Install a missing pinned TypeScript server into `<data root>/lsp`. |
 | `analysis.lsp.idleMs` | Stop a server after this long without a request. |
 | `analysis.lsp.maxServers` | Concurrent language servers. |
 | `analysis.lsp.timeoutMs` | Deadline for one language-server request. |
 | `analysis.treeSitter.maxParseBytes` | Files above this are skipped. |
-| `hub.enabled` | Register `xerj_ask` and `xerj_hub`. Off by default. |
+| `hub.enabled` | Register `xerj_ask` and `xerj_hub`. On by default. |
 | `hub.network` | Allow pack and catalogue downloads. When false, only cached packs answer. |
 | `hub.hosted` | `off`, `auto`, or `on`: may a question be sent to the hosted hub? |
 | `hub.url` | Catalogue base URL. The trust key stays the one compiled into the binary. |
@@ -873,7 +873,7 @@ plugin's own judge uses the host model when `judge` is `model`.
 
 ### Window extraction
 
-`memory.extract.enabled` (off by default) mines the same pre-compaction window
+`memory.extract.enabled` (on by default) mines the same pre-compaction window
 the turn archive sees. When the host compacts, the plugin flattens the user and
 assistant text, runs the same candidate extractor and judge as distillation,
 and writes up to `maxFacts` durable sentences to memory. The rest of the
@@ -1020,7 +1020,7 @@ to `xerj_expand`.
 
 ## Structural analysis
 
-`analysis.treeSitter.enabled` (off by default) adds `xerj_complexity`, which
+`analysis.treeSitter.enabled` (on by default) adds `xerj_complexity`, which
 parses project files and reports the functions with the most nodes plus groups
 of structurally identical functions. It answers "where is the hard part" and
 "is this copied" from the tree itself, before an edit.
@@ -1042,7 +1042,7 @@ registers no tool and downloads nothing.
 
 ## Language servers
 
-`analysis.lsp.enabled` (off by default) adds `xerj_callers` and
+`analysis.lsp.enabled` (on by default) adds `xerj_callers` and
 `xerj_impact`, and lets `xerj_inspect` add diagnostics. TypeScript is the
 supported server today. `xerj_callers` lists the functions that directly call a
 symbol; `xerj_impact` follows incoming calls up to a depth and caps the result
@@ -1070,7 +1070,7 @@ labelled heuristic.
 
 ## Reference corpora
 
-`code.enabled` (off) adds `xerj_code`, which wraps `xerj code` and the
+`code.enabled` (on) adds `xerj_code`, which wraps `xerj code` and the
 `xerj corpus` lifecycle. A reference corpus is a peer project, cloned once,
 licence-detected, and indexed under `<data root>/code` (the engine's
 `XERJ_CODE_HOME`). `action=list` shows them, `add` takes a name and git URLs,
@@ -1099,8 +1099,9 @@ one.
 
 The engine can answer from signed, pre-indexed corpora that it downloads on
 demand, with no clone and no local indexing. The plugin exposes that surface as
-`xerj_ask` and `xerj_hub` when `hub.enabled` is true. Off by default: the hub is
-public, but the questions and the download are still a deliberate choice.
+`xerj_ask` and `xerj_hub` when `hub.enabled` is true, which it is by default.
+`hub.network` is on, so a missing pack is pulled; `hub.hosted` stays `off`, so
+the question never leaves this machine.
 
 - `xerj_ask` routes the question to a corpus, or uses `--corpus`, pulls the
   signed pack once, restores its snapshot into the plugin's node, and returns
@@ -1119,10 +1120,10 @@ signed, and the trust key is compiled into the managed binary, so changing
 `~/.xerj/hub`, capped at 4 GB by the engine, and an automatic pull is limited to
 50 MB.
 
-To use it, set `hub.enabled: true`. With the network still off, run
-`xerj_hub action=sync` after setting `hub.network: true` once, or pull a
-specific pack with the engine CLI. Answers name the licence and the pin, and a
-pack whose licence class is excluded is refused before it is used.
+`hub.network` is on by default; run `xerj_hub action=sync` to refresh the
+catalogue, or let `xerj_ask` pull the pack it needs. `hub.hosted: "off"` keeps
+the question local. Answers name the licence and the pin, and a pack whose
+licence class is excluded is refused before it is used.
 
 [Back to top](#table-of-contents)
 

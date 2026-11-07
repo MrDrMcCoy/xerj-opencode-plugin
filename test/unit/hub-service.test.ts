@@ -69,7 +69,7 @@ function service(
   const args: string[][] = [];
   const envs: Array<NodeJS.ProcessEnv> = [];
   const hub = new HubService({
-    config: { ...DEFAULT_CONFIG.hub, ...overrides },
+    config: { ...DEFAULT_CONFIG.hub, network: false, hosted: "off", ...overrides },
     binary: () => "/tmp/xerj",
     nodeUrl: () => "http://127.0.0.1:9200",
     logger,

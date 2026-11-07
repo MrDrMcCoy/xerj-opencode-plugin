@@ -107,32 +107,30 @@ setting, not a build flag: the same published package carries the capability.
 
 | Key | Default | Effect |
 |---|---|---|
-| `analysis.treeSitter.enabled` | `false` | Parse project files for symbol ranges, complexity, duplicates, and structural search |
+| `analysis.treeSitter.enabled` | `true` | Parse project files for symbol ranges, complexity, duplicates, and structural search |
 | `analysis.treeSitter.languages` | `[]` | Which grammars to download. Empty means "detect": the languages the project's own files show, then download those grammars and no others |
 | `analysis.treeSitter.maxParseBytes` | 1 MiB | Files above this are skipped, so a bundled asset is never parsed |
-| `analysis.lsp.enabled` | `false` | Start language servers for definitions, references, call hierarchy, diagnostics |
+| `analysis.lsp.enabled` | `true` | Start language servers for definitions, references, call hierarchy, diagnostics |
 | `analysis.lsp.servers` | `{}` | Empty means auto: detect languages, then resolve each server in the order below, installing one when none is found. A non-empty map names the commands and turns auto-install off |
 | `analysis.lsp.autoInstall` | `true` | With `servers` empty, install a missing server into the plugin's cache. `false` reports the missing server instead |
 | `analysis.lsp.idleMs` | 5 min | Stop a server that answered nothing for this long |
 | `analysis.lsp.maxServers` | 2 | Cap concurrent servers, so one project cannot fill memory |
 | `analysis.lsp.timeoutMs` | 2 s | Per-request deadline; a miss returns no result rather than delaying a turn |
 | `share.enabled` | `false` | Register `xerj_share`, which wraps `xerj share` for a read-only link over one index |
-| `hub.enabled` | `false` | Register `xerj_ask` and the hub commands |
-| `hub.network` | `false` | Allow `xerj ask` to reach the catalogue and download packs; when false only already-cached packs answer |
-| `code.enabled` | `false` | Register `xerj_code` for reference corpora |
+| `hub.enabled` | `true` | Register `xerj_ask` and the hub commands |
+| `hub.network` | `true` | Allow `xerj ask` to reach the catalogue and download packs; when false only already-cached packs answer |
+| `code.enabled` | `true` | Register `xerj_code` for reference corpora |
 | `code.network` | `false` | Allow `xerj corpus add` to clone its git URLs |
-| `cmd.enabled` | `true` | Register `xerj_run` and `xerj_out`, and maintain the command-output corpus. The one open gate; see its design section |
+| `cmd.enabled` | `true` | Register `xerj_run` and `xerj_out`, and maintain the command-output corpus. Open by default; see its design section |
 | `memory.distill.enabled` | `true` | Turn finished turns into typed memories and retire distilled ones past their budget. The local judge is the default, so the first run downloads the jevos model |
 | `memory.distill.judge` | `local` | `local` runs the downloaded jevos CPU model; `heuristic` is the free local filter; `model` asks the current model per candidate |
 
-Defaults are closed because each capability adds something a retrieval plugin
-should not impose on its own: 52 to 100 MB of grammars, a process holding
-hundreds of megabytes, an open port, or traffic to a remote catalogue. The
-local distillation judge is the one open default: it is local, bounded, and
-the user asked for it; `memory.distill.enabled: false` removes the download and
-the server. The
-plugin's contract is that nothing blocks `setup`, and a closed gate keeps
-that true.
+The design defaulted every capability gate to closed. At the user's request on
+2026-11-07 the shipped defaults for tree-sitter, LSP, reference corpora, and
+the hub were opened, and `memory.extract.enabled`, `cmd.inject`,
+`telemetry.anomaly`, and `node.shutdownOnIdle` changed with them. `share`
+stays closed. Downloads and server starts still happen only on first use, so
+nothing blocks `setup`.
 
 `cmd.enabled` is the exception, at the user's request. It writes only inside
 the plugin's own state, it runs one foreground command with a deadline rather
@@ -171,8 +169,7 @@ downloads once through the same verified path the engine binary uses, into
 cache, so an upgrade is a version change rather than a silent replacement. One
 download for all languages beats a per-language fetch matrix: fewer failure
 states, and no language left unsupported because its grammar has no release
-asset. Work on it is deferred at the user's request; `analysis.treeSitter.enabled`
-stays closed until then.
+asset. The gate is on by default; the pack downloads on first use.
 
 ### Language servers the plugin can install
 
@@ -828,7 +825,7 @@ tests 2.5 h.
 | `xerj_expand` | Magic Context, reduced | Return the original `U:`/`A:` text for an archive range | The archive | `context.archive.enabled` |
 | History search | Magic Context, reduced | `xerj_search` over archived turns as an extra corpus | A second index prefix | `context.archive.enabled` |
 | Pre-compaction window archive | Magic Context, reduced | Flatten `event.messages` from the `compaction` hook into the archive before the summary replaces them | The turn archive | `context.archive.enabled` |
-| Fact mining from the compaction window | Magic Context, reduced | Turn the same window into durable memories; heuristic first, one bounded model call as the second route | A precision measurement | `memory.extract`, off by default |
+| Fact mining from the compaction window | Magic Context, reduced | Turn the same window into durable memories; heuristic first, one bounded model call as the second route | A precision measurement | `memory.extract`, on by default |
 | Post-compaction rehydration | This plugin, defect-driven | After the host compacts, re-inject two or three passages from the session's own working set before the next prompt arrives, under a separate budget and a `<xerj-recall>` marker | The dedupe reset (shipped) | `context.rehydrate`, on by default, capped by `context.rehydrateTokens` (600) |
 | Command output management | This plugin, new | Keep every long command's text in `.xerj/cmd/`, index it cheaply, and give the model `xerj_run` and `xerj_out` instead of `head`/`tail`/`grep` over a terminal | None | `cmd.enabled`, on by default |
 | Live context distillation | This plugin, new | After each turn, classify decisions, constraints, conventions, preferences, and facts into memory, and retire distilled memories by evidence and budget | The turn archive and the verification and curation passes (shipped) | `memory.distill.enabled`, on by default with the local judge |
@@ -1210,9 +1207,9 @@ metadata rather than a new kind, so recall keeps decision/constraint/... and
 the existing verification and budget sweep apply unchanged.
 
 The write is fire-and-forget: the hook returns before the judge answers, and a
-failure is a debug line. The gate is off (`memory.extract.enabled: false`)
-because the window has not had a precision measurement; only the turn pipeline
-has. The labelled set and the replay harness are the path to that measurement.
+failure is a debug line. The gate is on by default; the window has not had a
+separate precision measurement, so a wrong extraction falls back to the turn
+pipeline's labelled behaviour and the budget sweep.
 
 #### Retirement
 
@@ -1292,8 +1289,8 @@ snapshot into the plugin's node, and returns `file:line` passages with the
 corpus, pin, age, and licence. `xerj hub find` reads only the cached catalogue;
 `sync` refreshes it; `status` shows packs and the node.
 
-The defaults are closed and private: `hub.enabled: false`,
-`hub.network: false` (so `--offline`), `hub.hosted: "off"`, and the public
+The defaults are open and private: `hub.enabled: true`,
+`hub.network: true`, `hub.hosted: "off"`, and the public
 `https://hub.xerj.org`. A change to `hub.url` needs a binary whose embedded key
 matches the catalogue, so a private hub is a build decision, not a config one.
 The cache is `~/.xerj/hub` (4 GB, engine-managed). Exit 3 is a verification
@@ -1397,21 +1394,21 @@ measured; they include tests and the commits that carry them. A status of
 | Import graph and cycles | M | Done | 2.0 h | `analysis/imports.ts` plus `xerj_imports`; relative, Python, Go, and Rust specifiers resolve against project files, unresolved ones are counted; ten module tests and four tool tests |
 | Regex and glob search | M | Done | 1.5 h | `analysis/find.ts` plus `xerj_find`: glob-to-regex with `**` spanning folders, line-numbered matches, secret files skipped, 200-match cap; ten module tests and three tool tests |
 | Structural search (`ast-grep`, read only) | M | Done | 1.0 h | `analysis/ast.ts` plus `xerj_ast`: probes the binary, passes the pattern and glob as arguments, parses `--json=stream`, never rewrites; seven module tests and one tool test |
-| tree-sitter layer, one language | M | Done (gated off) | 4.0 h | `analysis/grammar.ts` downloads the pinned `tree-sitter-wasms` 0.1.13 tarball (4.4 MB, sha512 verified) into `<data root>/grammars/0.1.13/out`; `analysis/treesitter.ts` lazily loads `web-tree-sitter`, maps extensions to grammars, parses project files under a size cap, and extracts function ranges, named-node counts, and structural hashes. TypeScript/TSX are the tested pair; JavaScript, Python, Rust, Go, Java, C/C++, Ruby, PHP, Kotlin, Lua, and shell are mapped. Gate stays closed |
-| Complexity and duplicates | M | Done (gated off) | 1.0 h | `xerj_complexity` lists the largest functions by named-node count and groups structurally identical functions above `min_nodes`; `formatStructure` cites `path:line`. Four module tests and one tool test; the parser was verified against a real TypeScript tree and the real pack |
-| `xerj_code` | M | Done (gated off) | 1.5 h | `src/code/service.ts` wraps `xerj code` and `xerj corpus list/add/index`: `code.enabled` registers the tool, `code.network` gates cloning, `XERJ_CODE_HOME` is `<data root>/code`, and `--url` points at the plugin node. Query passes corpus, mode, `-k`, `--full`, and `--lang`; add/list/index return the engine output. Eight service and tool tests. |
-| `xerj_ask` and hub packs | M | Done (gated off) | 2.0 h | `src/hub/service.ts` wraps `xerj ask`/`xerj hub`: `--offline` and `--hosted off` when the network is off, `--url` to the plugin node, JSON answer formatting with corpus/pin/licence, exit-code mapping, and `find`/`sync`/`status`. Defaults: `hub.enabled` false, `hub.network` false, `hub.hosted` off, `https://hub.xerj.org`, 1200 tokens, 120 s. Packs, signatures, catalogue, and cache stay in the engine. Seven service/tool tests plus a live cached-pack answer. |
+| tree-sitter layer, one language | M | Done; default on | 4.0 h | `analysis/grammar.ts` downloads the pinned `tree-sitter-wasms` 0.1.13 tarball (4.4 MB, sha512 verified) into `<data root>/grammars/0.1.13/out`; `analysis/treesitter.ts` lazily loads `web-tree-sitter`, maps extensions to grammars, parses project files under a size cap, and extracts function ranges, named-node counts, and structural hashes. TypeScript/TSX are the tested pair; JavaScript, Python, Rust, Go, Java, C/C++, Ruby, PHP, Kotlin, Lua, and shell are mapped. Gate is on by default |
+| Complexity and duplicates | M | Done; default on | 1.0 h | `xerj_complexity` lists the largest functions by named-node count and groups structurally identical functions above `min_nodes`; `formatStructure` cites `path:line`. Four module tests and one tool test; the parser was verified against a real TypeScript tree and the real pack |
+| `xerj_code` | M | Done; default on | 1.5 h | `src/code/service.ts` wraps `xerj code` and `xerj corpus list/add/index`: `code.enabled` registers the tool, `code.network` gates cloning, `XERJ_CODE_HOME` is `<data root>/code`, and `--url` points at the plugin node. Query passes corpus, mode, `-k`, `--full`, and `--lang`; add/list/index return the engine output. Eight service and tool tests. |
+| `xerj_ask` and hub packs | M | Done; default on | 2.0 h | `src/hub/service.ts` wraps `xerj ask`/`xerj hub`: `--offline` and `--hosted off` when the network is off, `--url` to the plugin node, JSON answer formatting with corpus/pin/licence, exit-code mapping, and `find`/`sync`/`status`. Defaults: `hub.enabled` true, `hub.network` true, `hub.hosted` off, `https://hub.xerj.org`, 1200 tokens, 120 s. Packs, signatures, catalogue, and cache stay in the engine. Seven service/tool tests plus a live cached-pack answer. |
 | Turn archive | M | Done | 1.5 h | `archive/turns.ts`: one NDJSON file per session under `<node dir>/archive`, 4 KB per turn, oldest half dropped past `context.archive.maxBytes`; prompts and answers both archived; eight module tests |
 | `xerj_expand` | M | Done | 0.5 h | Prints `[n] U:`/`[n] A:` for a turn range, or says the archive is off; wired for the plugin and the MCP server |
 | Pre-compaction window archive | M | Done | 1.5 h | `archive/window.ts` flattens text and tool-result bodies from the newest messages (40 or about 200 KB, whichever binds first) into the turn archive behind a `system` marker; media, reasoning, and compaction parts are skipped, message ids are deduped against retries, and only this instance's sessions are captured. Roles gained `tool` and `system`, and `xerj_expand` labels them `T` and `S`. Eleven module tests |
-| Fact mining from the compaction window | M | Done (gated off) | 2.0 h | `src/memory/extract.ts`: the `compaction` hook flattens the window with the archive's own `captureWindow`, runs `extractCandidates` and the shared judge, and writes up to `maxFacts` memories with `source: extract:<judge>` and `derived: true`. It reuses `memory.distill.judge`, `minConfidence`, and `modelMaxCalls`; retirement counts extracted memories toward `maxPerProject`. Runs in the background, so a slow judge never delays the summary. `memory.extract` telemetry reports candidates/promoted/duplicates/rejected/calls. Five module tests. The gate stays off until the window's precision is measured |
+| Fact mining from the compaction window | M | Done; default on | 2.0 h | `src/memory/extract.ts`: the `compaction` hook flattens the window with the archive's own `captureWindow`, runs `extractCandidates` and the shared judge, and writes up to `maxFacts` memories with `source: extract:<judge>` and `derived: true`. It reuses `memory.distill.judge`, `minConfidence`, and `modelMaxCalls`; retirement counts extracted memories toward `maxPerProject`. Runs in the background, so a slow judge never delays the summary. `memory.extract` telemetry reports candidates/promoted/duplicates/rejected/calls. Five module tests. The gate is on by default; the window has no separate precision measurement |
 | Post-compaction rehydration | M | Done | 2.0 h | `src/rehydrate.ts` builds the block from the three newest citations, re-reading a 24-line window inside the project root and capping the result at `context.rehydrateTokens` (600); `session.compaction.ended` snapshots the working set, the `model.request` hook suppresses the summariser's own call, and a fresh retrieval with hits supersedes the recall. Ten module tests and six hook tests |
 | History search | M | Done | 1.0 h | `archive/index.ts` bulk-loads one document per turn into `<prefix>-archive-docs`, idempotent by session and ordinal, with a manifest so a pruned turn leaves the index; the archive is now a search prefix and its own dataset row; five module tests |
 | Live context distillation | M | Done | 10.0 h | `src/memory/distill.ts`: five classes, heuristic and model judges behind one write path, idempotent promotion with `source: distill:<judge>` and `confidence`, budget retirement, `memory.distill`/`memory.recall` telemetry with a report line and per-judge calls/chars. The model judge caps calls per turn, clips the turn, times out, and falls back. 16 distill tests, a capture test, config tests, and a report test. A golden set of 8 labeled memory sentences plus 7 sentences that must never be promoted: 8/8 recalled and classified, 0 false positives. The measurement harness is `bun run eval:distill` (heuristic always, local with `DISTILL_EVAL_JEVOS_URL`, model with an explicit OpenAI-compatible endpoint); the model delta is not yet recorded. The local jevos judge (`src/jev/`) is the default: checksum-verified install of the binary and the 630 MB model, one shared loopback server with attach and idle stop, a contrastive keep question at 7/8 recall on the labelled set and 1/10 report noise at 0.20 (3/10 without a judge), and a heuristic fallback on every failure path. Every judgement is a `memory.distill.judge` telemetry record; `bun run tune:local` turns the live store into a labelled JSONL corpus and `bun run replay:judge` sweeps wordings and thresholds against it. `local.autotune` (on) replays the fixed labelled set every 24 hours and moves the floor only on a 5-point F1 gain, with the chosen value and evidence in `<data root>/jev/autotune.json`. 33 new unit tests across release, judge, manager, supervisor, distill, the tuning report, the replay sweep, and autotune, plus an end-to-end install run against the real assets |
 | Command output management | M | Done | 5.0 h | `src/cmd/{store,runner,corpus,service}.ts` plus `xerj_run` and `xerj_out`: two files per command under `.xerj/cmd/`, a manifest for exit codes, windowed plain-text index, debounced ingest, two caps (256 MiB files, 32 MiB index), host-result mirroring, the context block and the large-result hint. 21 unit tests across three suites and 2 integration tests; 1101 unit tests pass |
-| LSP pool | L | Done (gated off) | 6.0 h | `analysis/lsp/client.ts` speaks JSON-RPC over stdio (initialize, didOpen, workspace/symbol, call hierarchy, definitions, references, publishDiagnostics, server-request answers). `analysis/lsp/pool.ts` resolves a configured command, project `node_modules`, PATH, or the cache; starts at most `maxServers`; opens up to 500 TypeScript files because tsserver only indexes opened documents; stops after `idleMs`. Verified against `typescript-language-server@6.0.3` on a two-file fixture: one caller, one impact, clean shutdown. Gate stays closed |
+| LSP pool | L | Done; default on | 6.0 h | `analysis/lsp/client.ts` speaks JSON-RPC over stdio (initialize, didOpen, workspace/symbol, call hierarchy, definitions, references, publishDiagnostics, server-request answers). `analysis/lsp/pool.ts` resolves a configured command, project `node_modules`, PATH, or the cache; starts at most `maxServers`; opens up to 500 TypeScript files because tsserver only indexes opened documents; stops after `idleMs`. Verified against `typescript-language-server@6.0.3` on a two-file fixture: one caller, one impact, clean shutdown. Gate is on by default |
 | Server installer | L | Done (TypeScript) | 1.0 h | `LspPool.installTypeScript` runs `npm install --prefix <staging> --ignore-scripts --no-audit --no-fund typescript-language-server@6.0.3 typescript@5.9.3` into `<data root>/lsp/typescript/6.0.3`, probes `lib/cli.mjs`, and renames under a lock. Other languages use `analysis.lsp.servers` for now |
-| `xerj_callers`, `xerj_impact` | L | Done (gated off) | 1.5 h | Both use `workspace/symbol` to locate the definition, `textDocument/documentSymbol` or the source line to find the name column, then `prepareCallHierarchy` and incoming calls. `impact` follows up to depth 5 and caps at 50. Gated by `analysis.lsp.enabled` |
+| `xerj_callers`, `xerj_impact` | L | Done; default on | 1.5 h | Both use `workspace/symbol` to locate the definition, `textDocument/documentSymbol` or the source line to find the name column, then `prepareCallHierarchy` and incoming calls. `impact` follows up to depth 5 and caps at 50. Gated by `analysis.lsp.enabled` |
 | `xerj_inspect` | L | Done | 1.5 h | Registered without a gate: TODO/FIXME/HACK markers everywhere, published diagnostics for one file when `analysis.lsp.enabled`, and a heuristic unused-export list when `analysis.treeSitter.enabled`. `analysis/exports.ts` counts identifiers per file; string references and dynamic imports can still fool it, so the section is labelled heuristic. Three module tests |
 | `xerj_share` | L | Done (gated off) | 0.5 h | `src/share/service.ts` wraps `xerj share` create/list/revoke with `--expires`, `--max-claims`, optional passcode and label, and `--url` to the plugin node. No tunnel is offered. `share.enabled` is false. Three service tests and a registration test. |
 | Dreamer child sessions | XL | Not started | — | — |

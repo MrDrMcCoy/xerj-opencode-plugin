@@ -331,14 +331,14 @@ describe("git history indexing", () => {
 });
 
 describe("analysis gates", () => {
-  test("tree-sitter and LSP are off by default", () => {
+  test("tree-sitter and LSP are on by default", () => {
     expect(DEFAULT_CONFIG.analysis.treeSitter).toEqual({
-      enabled: false,
+      enabled: true,
       languages: [],
       maxParseBytes: 1048576,
     });
     expect(DEFAULT_CONFIG.analysis.lsp).toEqual({
-      enabled: false,
+      enabled: true,
       servers: {},
       autoInstall: true,
       idleMs: 300000,
@@ -377,9 +377,9 @@ describe("analysis gates", () => {
 });
 
 describe("reference corpora and share", () => {
-  test("both are off by default", () => {
+  test("code is on and share is off by default", () => {
     expect(DEFAULT_CONFIG.code).toEqual({
-      enabled: false,
+      enabled: true,
       network: false,
       timeoutMs: 600000,
       maxResults: 8,
@@ -408,10 +408,10 @@ describe("reference corpora and share", () => {
 });
 
 describe("hub", () => {
-  test("off by default, cached only, hosted off", () => {
+  test("on with network, hosted off", () => {
     expect(DEFAULT_CONFIG.hub).toEqual({
-      enabled: false,
-      network: false,
+      enabled: true,
+      network: true,
       hosted: "off",
       url: "https://hub.xerj.org",
       maxTokens: 1200,
@@ -480,9 +480,9 @@ describe("memory distillation", () => {
     });
   });
 
-  test("extract is off by default with bounded counts", () => {
+  test("extract is on by default with bounded counts", () => {
     expect(DEFAULT_CONFIG.memory.extract).toEqual({
-      enabled: false,
+      enabled: true,
       maxFacts: 3,
       maxBytes: 204800,
     });

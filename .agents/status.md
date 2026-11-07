@@ -387,6 +387,17 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-07: The defaults changed at the user's request:
+  `node.shutdownOnIdle: false`, `memory.extract.enabled: true`,
+  `cmd.inject: true`, `analysis.treeSitter.enabled: true`,
+  `analysis.lsp.enabled: true`, `code.enabled: true`, `hub.enabled: true`,
+  `hub.network: true`, and `telemetry.anomaly: true`. `share.enabled` stays
+  false, `code.network` stays false, and `hub.hosted` stays `off`, so share and
+  cloning remain deliberate, and questions never leave the machine. The README
+  example, option table, roadmap gate table, setup/MCP tool lists, and config
+  tests follow. 1254 unit and 14 integration tests pass; typecheck clean.
+  Nothing is pushed or released.
+
 - 2026-11-07: `xerj_inspect` now covers unused exports. When
   `analysis.treeSitter.enabled` is on, `analysis/exports.ts` counts every
   identifier per file and reports exported top-level names that no other file

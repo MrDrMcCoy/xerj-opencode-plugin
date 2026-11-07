@@ -431,7 +431,7 @@ export const DEFAULT_CONFIG: Config = {
     port: 9200,
     dataDir: null,
     idleMs: 1_800_000,
-    shutdownOnIdle: true,
+    shutdownOnIdle: false,
     clientTimeoutMs: 5_000,
     writeTimeoutMs: 120_000,
     probeTimeoutMs: 800,
@@ -528,7 +528,7 @@ export const DEFAULT_CONFIG: Config = {
       },
     },
     extract: {
-      enabled: false,
+      enabled: true,
       maxFacts: 3,
       maxBytes: 200 * 1024,
     },
@@ -536,12 +536,12 @@ export const DEFAULT_CONFIG: Config = {
   stats: { enabled: true, bytesPerToken: 4, maxBaselineBytes: 128 * 1024 },
   analysis: {
     treeSitter: {
-      enabled: false,
+      enabled: true,
       languages: [],
       maxParseBytes: 1_048_576,
     },
     lsp: {
-      enabled: false,
+      enabled: true,
       servers: {},
       autoInstall: true,
       idleMs: 300_000,
@@ -550,7 +550,7 @@ export const DEFAULT_CONFIG: Config = {
     },
   },
   code: {
-    enabled: false,
+    enabled: true,
     network: false,
     timeoutMs: 600_000,
     maxResults: 8,
@@ -563,8 +563,8 @@ export const DEFAULT_CONFIG: Config = {
     timeoutMs: 30_000,
   },
   hub: {
-    enabled: false,
-    network: false,
+    enabled: true,
+    network: true,
     hosted: "off",
     url: "https://hub.xerj.org",
     maxTokens: 1_200,
@@ -574,7 +574,7 @@ export const DEFAULT_CONFIG: Config = {
     enabled: true,
     suggest: true,
     mirrorHostResults: true,
-    inject: false,
+    inject: true,
     maxBytes: 256 * 1024 ** 2,
     maxIndexBytes: 32 * 1024 ** 2,
     maxCommandBytes: 64 * 1024 ** 2,
@@ -586,7 +586,7 @@ export const DEFAULT_CONFIG: Config = {
     hintLines: 40,
   },
   telemetry: {
-    anomaly: false,
+    anomaly: true,
     enabled: true,
     maxBytes: 128 * 1024 ** 2,
     samplesPerType: 256,
