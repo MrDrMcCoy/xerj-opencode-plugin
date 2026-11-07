@@ -3,6 +3,8 @@
 // documentation site cannot turn one command into an unbounded download.
 
 import type { Logger } from "../log.ts";
+import { retryAfterMs, type HostRateLimiter } from "./ratelimit.ts";
+import { DEFAULT_DOCS_USER_AGENT } from "./user-agent.ts";
 
 export interface CrawlOptions {
   readonly entry: string;
@@ -27,6 +29,10 @@ export interface CrawlOptions {
   readonly anyText?: boolean;
   /** Deadline for one page request. */
   readonly requestTimeoutMs?: number;
+  /** Per-host spacing shared by every crawl in one run. */
+  readonly limiter?: HostRateLimiter;
+  /** `User-Agent` sent with every request. */
+  readonly userAgent?: string;
   /**
    * Decides whether a page is worth keeping and worth following links from.
    * Without it every page within the budget is kept.
@@ -44,6 +50,8 @@ export interface CrawledPage {
 const DEFAULT_MAX_BYTES = 2_000_000;
 const DEFAULT_MAX_DEPTH = 2;
 const REQUEST_TIMEOUT_MS = 15_000;
+/** A throttled host is retried once, after at most this long. */
+const MAX_RETRY_AFTER_MS = 30_000;
 
 /** Crawls one documentation site, breadth first, from its entry URL. */
 export async function crawlDocs(options: CrawlOptions): Promise<CrawledPage[]> {
@@ -72,16 +80,33 @@ export async function crawlDocs(options: CrawlOptions): Promise<CrawledPage[]> {
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
 
-    const response = await fetchImpl(next.url, {
-      headers: { "user-agent": "xerj-opencode-plugin (documentation indexer)" },
-      signal: mergedSignal(
-        options.signal,
-        options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS,
-      ),
-    }).catch((error: unknown) => {
-      options.logger.debug("docs fetch failed", `${next.url}: ${String(error)}`);
-      return null;
-    });
+    const fetchPage = (): Promise<Response | null> =>
+      fetchImpl(next.url, {
+        headers: { "user-agent": options.userAgent ?? DEFAULT_DOCS_USER_AGENT },
+        signal: mergedSignal(
+          options.signal,
+          options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS,
+        ),
+      }).catch((error: unknown) => {
+        options.logger.debug("docs fetch failed", `${next.url}: ${String(error)}`);
+        return null;
+      });
+
+    await options.limiter?.wait(next.url);
+    let response = await fetchPage();
+    if (response !== null && (response.status === 429 || response.status === 503)) {
+      const wait = Math.min(
+        retryAfterMs(response.headers.get("retry-after")) ?? 5_000,
+        MAX_RETRY_AFTER_MS,
+      );
+      options.limiter?.noteRetryAfter(next.url, wait);
+      options.logger.debug("docs host throttled", `${next.url}: waiting ${wait} ms`);
+      await options.limiter?.wait(next.url);
+      if (options.limiter === undefined) {
+        await new Promise((resolve) => setTimeout(resolve, wait));
+      }
+      response = await fetchPage();
+    }
     if (response === null || !response.ok) continue;
 
     const type = response.headers.get("content-type") ?? "";

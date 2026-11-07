@@ -489,6 +489,7 @@ export class McpHost {
       disk: { engineBytes: 0, logBytes: 0 },
       map: [],
       frameworks: [],
+  docs: { prjdocs: { lastRunAt: null, pages: 0 }, sysdocs: { lastRunAt: null, pages: 0 } },
       process: null,
       embeddings: false,
       state: {

@@ -233,7 +233,10 @@ This is the complete set with its defaults, in
           "builtinElasticsearchPages": 2500,
           "builtinRefreshDays": 7,
           "requestTimeoutMs": 15000,     // one page request
-          "latestTimeoutMs": 5000        // one release lookup
+          "latestTimeoutMs": 5000,       // one release lookup
+          "userAgent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+          "requestIntervalMs": 250,      // one request per host interval
+          "requestJitterMs": 100         // random extra delay
         },
         "sysdocs": {
           "maxDocs": 5000,
@@ -328,6 +331,9 @@ The same entry works with a checkout path instead of the package name; see
 | `prjdocs.builtinXerjPages` | Markdown files taken from the XERJ repository. Default 200. |
 | `prjdocs.builtinElasticsearchPages` | Crawl budget for the Elasticsearch reference; 2500 yields about 630 API pages. Default 2500. |
 | `prjdocs.builtinRefreshDays` | Days before the always-on sources are crawled again. Default 7; `0` always refreshes. |
+| `prjdocs.userAgent` | `User-Agent` sent with every documentation request. |
+| `prjdocs.requestIntervalMs` | Minimum gap between two requests to one documentation host; all crawls in a run share it. |
+| `prjdocs.requestJitterMs` | Random extra delay added to that gap. |
 | `prjdocs.requestTimeoutMs` | Deadline for one documentation page request. Default 15000. |
 | `prjdocs.latestTimeoutMs` | Deadline for one latest-release lookup. Default 5000. |
 | `sysdocs.maxDocs` | Pages indexed per run. Default 5000. |
@@ -602,6 +608,15 @@ pages and adding concepts, configuration, and operations. Three families stay
 out because they describe versions other than the one in use: release notes,
 migration guides, and deprecated APIs. The same rule filters links, so a
 chapter that cites a migration page does not drag it in.
+
+The crawler spaces its requests per host (`prjdocs.requestIntervalMs`, 250 ms,
+plus `prjdocs.requestJitterMs`, 100 ms) so component guides and the builtin
+chapters that share a host do not reach it in parallel, and it honours a
+server's `Retry-After` once before giving up on a page. It sends
+`prjdocs.userAgent`, which defaults to a crawler token documentation hosts
+already admit; set it to your own bot string if you would rather identify the
+plugin directly, since naming another crawler is your call and can breach a
+site's terms.
 
 Set `prjdocs.builtin: false` to skip both, and size them with
 `prjdocs.builtinXerjPages` (200) and `prjdocs.builtinElasticsearchPages`

@@ -9,6 +9,12 @@ import { Plugin } from "@opencode/plugin/tui";
 import { PLUGIN_VERSION, XerjRpc, type StatusSnapshot } from "./rpc.ts";
 import { panelSections, sidebarLines, sidebarView, type SidebarRow } from "./ui/format.ts";
 import {
+  completionNotices,
+  EMPTY_NOTICE_STATE,
+  type NoticeState,
+  type PendingNotice,
+} from "./ui/notify.ts";
+import {
   DEFAULT_PREFS,
   readPrefs,
   seedCollapsed,
@@ -132,6 +138,10 @@ export default Plugin.define({
     let inFlight = false;
     // Plain counter, not the reactive state: the ticker runs outside render.
     let runningJobs = 0;
+    // Completion notices: the first status is the baseline, so a corpus that
+    // was already built before this session does not announce itself.
+    let noticeState: NoticeState = EMPTY_NOTICE_STATE;
+    let pendingNotice: PendingNotice | null = null;
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
     let disposed = false;
     let unsubscribe: (() => void) | null = null;
@@ -157,6 +167,31 @@ export default Plugin.define({
       }, REFRESH_DEBOUNCE_MS);
     };
 
+    /** Toasts a completion once, whoever started the run. */
+    const notifyCompletions = (snapshot: StatusSnapshot): void => {
+      const result = completionNotices(snapshot, noticeState, pendingNotice);
+      noticeState = result.state;
+      pendingNotice = result.pending;
+      for (const notice of result.notices) {
+        context.ui.toast.show({ message: notice.message, variant: "success" });
+      }
+    };
+
+    /** Announces a run this command just finished, exactly once. */
+    const announce = async (
+      kind: "project" | "prjdocs" | "sysdocs",
+      message: string,
+    ): Promise<void> => {
+      pendingNotice = { kind, message };
+      await refresh();
+      // No completion was observed (a static status, or a refresh that failed):
+      // report the run this command performed rather than stay silent.
+      const leftover = pendingNotice;
+      if (leftover === null || leftover.kind !== kind) return;
+      pendingNotice = null;
+      context.ui.toast.show({ message: leftover.message, variant: "success" });
+    };
+
     const refresh = async (): Promise<void> => {
       if (disposed || inFlight) return;
       inFlight = true;
@@ -171,6 +206,7 @@ export default Plugin.define({
         });
         runningJobs = snapshot.state.jobs?.length ?? 0;
         setClock(Date.now());
+        notifyCompletions(snapshot);
         noteUi(
           "debug",
           "status received",
@@ -244,10 +280,12 @@ export default Plugin.define({
           : typeof result.records === "number"
             ? `XERJ reindexed · ${result.records.toLocaleString("en-US")} records`
             : "XERJ reindex queued";
-        context.ui.toast.show({
-          message,
-          variant: result.queued ? "success" : "info",
-        });
+        if (!result.queued) {
+          context.ui.toast.show({ message, variant: "info" });
+          return;
+        }
+        // The status watcher announces the completion once, with this text.
+        await announce("project", message);
       } catch (error) {
         context.ui.toast.show({
           message: `XERJ is not available: ${describe(error)}`,
@@ -313,15 +351,14 @@ export default Plugin.define({
         const pruned = result.pruned ?? 0;
         const failed = result.failed ?? 0;
         const techs = result.techs?.length ?? 0;
-        context.ui.toast.show({
-          message:
-            `XERJ project docs · ${techs} technologies · ` +
+        await announce(
+          "prjdocs",
+          `XERJ project docs · ${techs} technologies · ` +
             `${indexed.toLocaleString("en-US")} pages indexed · ` +
             `${skipped.toLocaleString("en-US")} unchanged · ` +
             `${pruned.toLocaleString("en-US")} pruned` +
             (failed > 0 ? ` · ${failed} failed` : ""),
-          variant: failed > 0 ? "info" : "success",
-        });
+        );
       } catch (error) {
         context.ui.toast.show({
           message: `XERJ project docs failed: ${describe(error)}`,
@@ -347,14 +384,13 @@ export default Plugin.define({
         const skipped = result.skipped ?? 0;
         const pruned = result.pruned ?? 0;
         const failed = result.failed ?? 0;
-        context.ui.toast.show({
-          message:
-            `XERJ system docs · ${indexed.toLocaleString("en-US")} indexed · ` +
+        await announce(
+          "sysdocs",
+          `XERJ system docs · ${indexed.toLocaleString("en-US")} indexed · ` +
             `${skipped.toLocaleString("en-US")} unchanged · ` +
             `${pruned.toLocaleString("en-US")} pruned` +
             (failed > 0 ? ` · ${failed} failed` : ""),
-          variant: failed > 0 ? "info" : "success",
-        });
+        );
       } catch (error) {
         context.ui.toast.show({
           message: `XERJ system docs failed: ${describe(error)}`,

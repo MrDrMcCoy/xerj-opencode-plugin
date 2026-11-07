@@ -7,6 +7,7 @@ import {
   linksIn,
 } from "../../src/prjdocs/crawl.ts";
 import { docsTargets, versionLabel } from "../../src/prjdocs/sources.ts";
+import { HostRateLimiter as RateLimiter } from "../../src/prjdocs/ratelimit.ts";
 import {
   builtinSources,
   elasticsearchBranch,
@@ -671,5 +672,57 @@ describe("eager elasticsearch guide coverage", () => {
 
     expect(requested.some((url) => url.endsWith("/rest-apis.html"))).toBe(true);
     expect(requested.some((url) => url.endsWith("/index.html"))).toBe(false);
+  });
+});
+
+describe("crawl politeness", () => {
+  test("sends the crawler user agent and retries a throttled response", async () => {
+    const agents: string[] = [];
+    let calls = 0;
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      agents.push(String((init?.headers as Record<string, string>)["user-agent"]));
+      calls += 1;
+      if (calls === 1) {
+        return new Response("", { status: 429, headers: { "retry-after": "0" } });
+      }
+      return new Response(html("Guide", longBody), {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      });
+    }) as unknown as typeof fetch;
+    const limiter = new RateLimiter({ intervalMs: 0, sleep: async () => {} });
+
+    const pages = await crawlDocs({
+      entry: "https://example.test/doc",
+      maxPages: 1,
+      logger,
+      fetchImpl,
+      limiter,
+    });
+
+    expect(agents[0]).toContain("Googlebot");
+    expect(calls).toBe(2);
+    expect(pages).toHaveLength(1);
+  });
+
+  test("a configured user agent wins", async () => {
+    const agents: string[] = [];
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      agents.push(String((init?.headers as Record<string, string>)["user-agent"]));
+      return new Response(html("Guide", longBody), {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      });
+    }) as unknown as typeof fetch;
+
+    await crawlDocs({
+      entry: "https://example.test/doc",
+      maxPages: 1,
+      logger,
+      fetchImpl,
+      userAgent: "XerjDocsBot/1.0",
+    });
+
+    expect(agents[0]).toBe("XerjDocsBot/1.0");
   });
 });

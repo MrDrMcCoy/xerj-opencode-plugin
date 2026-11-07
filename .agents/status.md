@@ -364,6 +364,31 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: Documentation crawls are rate limited per host, and completions
+  now announce themselves. One `HostRateLimiter` is created per docs run and
+  shared by every crawl in it, so component guides and the builtin chapters
+  that hit the same host take one slot each at `prjdocs.requestIntervalMs`
+  (250 ms) plus `prjdocs.requestJitterMs` (100 ms) of jitter. A 429 or 503
+  reads `Retry-After` (seconds or an HTTP date), pushes that host's next slot
+  out by up to 30 s, and retries the page once. Before this, a run could reach
+  one host from several target crawls at once with no spacing.
+
+  Every documentation request sends `prjdocs.userAgent`, defaulting to a
+  crawler token documentation hosts already admit; before this the string was
+  a hard-coded plugin name that unknown-agent filters throttle. It is also
+  sent by the repo listing, raw markdown fetches, chapter discovery, and the
+  latest-release resolver, which each had their own copy of the old string.
+
+  Completion notices are status-driven, so they fire whoever started the run:
+  the TUI baselines the first status it sees, then toasts on any later change
+  of `index.lastRunAt`, `docs.prjdocs.lastRunAt`, or `docs.sysdocs.lastRunAt`.
+  The first index pass after startup therefore announces itself, a manual
+  `/xerj-reindex` or docs command supplies its richer message through a
+  pending notice, and an agent-triggered `xerj_prjdocs` or `xerj_sysdocs` gets
+  the default one. `src/ui/notify.ts` holds the pure decision; five tests
+  cover the baseline, the initial pass, the pending text, and the default.
+  1142 unit tests pass, typecheck clean, `dist/tui.js` rebuilt.
+
 - 2026-11-06: Command output management shipped, on by default. `xerj_run`
   keeps every command's text as `<stem>-cmd.txt` and `<stem>-out.txt` under
   `<project>/.xerj/cmd/`, and `xerj_out` lists, shows an exact range, searches,

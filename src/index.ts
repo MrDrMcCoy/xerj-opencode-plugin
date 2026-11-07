@@ -62,6 +62,7 @@ import {
   type StatusSnapshot,
 } from "./rpc.ts";
 import { PrjdocsIndexer, type PrjdocsSummary } from "./prjdocs/index.ts";
+import { HostRateLimiter } from "./prjdocs/ratelimit.ts";
 import { LatestVersions } from "./prjdocs/latest.ts";
 import { SysdocIndexer } from "./sysdocs/index.ts";
 import { MemoryStore } from "./memory/store.ts";
@@ -138,6 +139,9 @@ interface Runtime {
   anomaly: AnomalyService | null;
   /** Command output: the directory, the runner, and its corpus. */
   cmd: CmdService | null;
+  /** When this instance last finished a docs run; null until then. */
+  prjdocsAt: number | null;
+  sysdocsAt: number | null;
   error: string | null;
   warnings: string[];
 }
@@ -255,6 +259,8 @@ export default Plugin.define({
       hiddenRoots,
       anomaly: null,
       cmd: null,
+      prjdocsAt: null,
+      sysdocsAt: null,
       error: null,
       warnings: indexWarnings,
     };
@@ -554,6 +560,7 @@ export default Plugin.define({
         errors: runtime.error ? [runtime.error] : [],
         map: [],
         frameworks: [],
+        docs: { prjdocs: { lastRunAt: null, pages: 0 }, sysdocs: { lastRunAt: null, pages: 0 } },
         process: null,
         embeddings: false,
       };
@@ -653,6 +660,16 @@ export default Plugin.define({
           ),
           map,
           frameworks,
+          docs: {
+            prjdocs: {
+              lastRunAt: runtime.prjdocsAt,
+              pages: datasets.find((dataset) => dataset.name === "prjdocs")?.docs ?? 0,
+            },
+            sysdocs: {
+              lastRunAt: runtime.sysdocsAt,
+              pages: datasets.find((dataset) => dataset.name === "sysdocs")?.docs ?? 0,
+            },
+          },
           process: usageNow === null ? null : { cpuPercent: usageNow.cpuPercent, memoryBytes: usageNow.memoryBytes },
           // The node embeds only while a pass runs, and only when the index was
           // built with the semantic field set.
@@ -719,6 +736,7 @@ export default Plugin.define({
           logger,
           signal: shutdown.signal,
           requestTimeoutMs: config.prjdocs.latestTimeoutMs,
+          userAgent: config.prjdocs.userAgent,
         });
         // Eager mode asks the host for its model and its search provider; both
         // are optional, and the heuristic covers a missing model.
@@ -751,6 +769,12 @@ export default Plugin.define({
         // The docs branch follows the wire version this node reports, so the
         // Elasticsearch reference matches the API the engine answers with.
         const banner = await client.info().catch(() => null);
+        // One limiter for the whole run: component guides and the builtin
+        // chapters hit the same hosts, so their budget has to be shared.
+        const limiter = new HostRateLimiter({
+          intervalMs: config.prjdocs.requestIntervalMs,
+          jitterMs: config.prjdocs.requestJitterMs,
+        });
         const indexer = new PrjdocsIndexer({
           client,
           builtin: {
@@ -769,12 +793,15 @@ export default Plugin.define({
           maxPages: config.prjdocs.maxPages > 0 ? config.prjdocs.maxPages : undefined,
           signal: shutdown.signal,
           requestTimeoutMs: config.prjdocs.requestTimeoutMs,
+          userAgent: config.prjdocs.userAgent,
+          limiter,
           latestVersion: (ref) => latest.resolve(ref),
           eager: eagerMode,
         });
 
         const summary = await indexer.run();
         counters.noteIndexRun();
+        runtime.prjdocsAt = Date.now();
         void registration.events.emit("updated", { updatedAt: Date.now() }).catch(() => {});
         logger.info("project docs indexed", {
           techs: summary.techs.length,
@@ -882,6 +909,7 @@ export default Plugin.define({
 
         const summary = await indexer.run();
         counters.noteIndexRun();
+        runtime.sysdocsAt = Date.now();
         void registration.events.emit("updated", { updatedAt: Date.now() }).catch(() => {});
         logger.info("system docs indexed", { ...summary });
         return summary;

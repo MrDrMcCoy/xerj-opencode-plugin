@@ -5,6 +5,8 @@
 
 import type { Logger } from "../log.ts";
 import { extractPlain, type CrawledPage } from "./crawl.ts";
+import type { HostRateLimiter } from "./ratelimit.ts";
+import { DEFAULT_DOCS_USER_AGENT } from "./user-agent.ts";
 
 const REPO = "xerj-org/xerj";
 const REPO_BRANCH = "main";
@@ -51,6 +53,10 @@ export interface BuiltinOptions {
   readonly eager?: boolean;
   /** Deadline for one page request. */
   readonly requestTimeoutMs?: number;
+  /** `User-Agent` sent with every request. */
+  readonly userAgent?: string;
+  /** Per-host spacing shared by every crawl in one run. */
+  readonly limiter?: HostRateLimiter;
 }
 
 /** Guide chapters that are about history rather than the current API. */
@@ -111,8 +117,9 @@ export function builtinSources(
 /** Markdown paths under `docs/`, shallow paths first so the overview lands early. */
 export async function listRepoDocs(options: BuiltinOptions): Promise<string[]> {
   const fetchImpl = options.fetchImpl ?? fetch;
+  await options.limiter?.wait(TREE_API);
   const response = await fetchImpl(TREE_API, {
-    headers: { "user-agent": "xerj-opencode-plugin (documentation indexer)" },
+    headers: { "user-agent": options.userAgent ?? DEFAULT_DOCS_USER_AGENT },
     signal: mergeSignal(
       options.signal,
       options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS,
@@ -168,8 +175,9 @@ async function fetchRepoPage(
   const fetchImpl = options.fetchImpl ?? fetch;
   if (options.signal?.aborted === true) return null;
 
+  await options.limiter?.wait(`${RAW_BASE}/${path}`);
   const response = await fetchImpl(`${RAW_BASE}/${path}`, {
-    headers: { "user-agent": "xerj-opencode-plugin (documentation indexer)" },
+    headers: { "user-agent": options.userAgent ?? DEFAULT_DOCS_USER_AGENT },
     signal: mergeSignal(
       options.signal,
       options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS,
@@ -229,6 +237,8 @@ async function fetchElasticsearchDocs(
           urlFilter: keep,
           logger: options.logger,
           fetchImpl: options.fetchImpl,
+          limiter: options.limiter,
+          userAgent: options.userAgent,
           signal: options.signal,
           requestTimeoutMs: options.requestTimeoutMs,
           judge: async (page) =>
@@ -263,8 +273,9 @@ async function chapterUrls(
   // Eager mode takes its chapters from the guide's own index, which covers the
   // concepts chapters as well as the API groups.
   const listing = options.eager === true ? "index.html" : "rest-apis.html";
+  await options.limiter?.wait(`${base}/${listing}`);
   const response = await fetchImpl(`${base}/${listing}`, {
-    headers: { "user-agent": "xerj-opencode-plugin (documentation indexer)" },
+    headers: { "user-agent": options.userAgent ?? DEFAULT_DOCS_USER_AGENT },
     signal: mergeSignal(
       options.signal,
       options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS,

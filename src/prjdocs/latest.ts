@@ -5,6 +5,7 @@
 
 import type { TechRef } from "./detect.ts";
 import type { Logger } from "../log.ts";
+import { DEFAULT_DOCS_USER_AGENT } from "./user-agent.ts";
 
 const NODE_RELEASES = "https://nodejs.org/dist/index.json";
 const PYTHON_RELEASES = "https://endoflife.date/api/python.json";
@@ -24,6 +25,8 @@ export interface LatestOptions {
   readonly ttlMs?: number;
   /** Deadline for one release-metadata request. */
   readonly requestTimeoutMs?: number;
+  /** `User-Agent` sent with every metadata request. */
+  readonly userAgent?: string;
 }
 
 /** Newest published version per technology id, resolved at most once per TTL. */
@@ -61,7 +64,7 @@ export class LatestVersions {
 
     const url = id === "node" ? NODE_RELEASES : PYTHON_RELEASES;
     const response = await fetchImpl(url, {
-      headers: { "user-agent": "xerj-opencode-plugin (documentation indexer)" },
+      headers: { "user-agent": this.options.userAgent ?? DEFAULT_DOCS_USER_AGENT },
       signal: mergeSignal(
         this.options.signal,
         this.options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS,
@@ -87,7 +90,7 @@ export class LatestVersions {
   /** Highest `archive/<major>.<minor>.<patch>/` directory on the CUDA site. */
   private async fetchCudaLatest(fetchImpl: typeof fetch): Promise<string | null> {
     const response = await fetchImpl(CUDA_ARCHIVE, {
-      headers: { "user-agent": "xerj-opencode-plugin (documentation indexer)" },
+      headers: { "user-agent": this.options.userAgent ?? DEFAULT_DOCS_USER_AGENT },
       signal: mergeSignal(
         this.options.signal,
         this.options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS,
@@ -106,7 +109,7 @@ export class LatestVersions {
   /** The release the ROCm docs landing page advertises, for example 10.1.0. */
   private async fetchRocmLatest(fetchImpl: typeof fetch): Promise<string | null> {
     const response = await fetchImpl(ROCM_LATEST, {
-      headers: { "user-agent": "xerj-opencode-plugin (documentation indexer)" },
+      headers: { "user-agent": this.options.userAgent ?? DEFAULT_DOCS_USER_AGENT },
       signal: mergeSignal(
         this.options.signal,
         this.options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS,

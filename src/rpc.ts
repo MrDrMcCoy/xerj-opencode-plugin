@@ -245,6 +245,11 @@ export interface StatusSnapshot {
   readonly map: ReadonlyArray<MapRow>;
   /** Documentation per technology, largest first. */
   readonly frameworks: ReadonlyArray<FrameworkStatus>;
+  /** When this instance last finished a docs run, and how many pages it holds. */
+  readonly docs: {
+    readonly prjdocs: { readonly lastRunAt: number | null; readonly pages: number };
+    readonly sysdocs: { readonly lastRunAt: number | null; readonly pages: number };
+  };
   /** Node process cost; null when the platform exposes no counters. */
   readonly process: ProcessStatus | null;
   /** True while an index pass is building embeddings. */
@@ -410,6 +415,16 @@ const definition = {
             bytes: { type: "number" },
           }),
         },
+        docs: object({
+          prjdocs: object({
+            lastRunAt: { type: ["number", "null"] },
+            pages: { type: "number" },
+          }),
+          sysdocs: object({
+            lastRunAt: { type: ["number", "null"] },
+            pages: { type: "number" },
+          }),
+        }),
         process: {
           type: ["object", "null"],
           properties: {

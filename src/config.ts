@@ -159,6 +159,12 @@ export interface PrjdocsOptions {
   readonly requestTimeoutMs: number;
   /** Deadline for one latest-release lookup. */
   readonly latestTimeoutMs: number;
+  /** `User-Agent` sent with every documentation request. */
+  readonly userAgent: string;
+  /** Minimum gap between two requests to one documentation host. */
+  readonly requestIntervalMs: number;
+  /** Random extra delay added to that gap. */
+  readonly requestJitterMs: number;
 }
 
 export interface SysdocsOptions {
@@ -339,6 +345,10 @@ export const DEFAULT_CONFIG: Config = {
     builtinRefreshDays: 7,
     requestTimeoutMs: 15_000,
     latestTimeoutMs: 5_000,
+    userAgent:
+      "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+    requestIntervalMs: 250,
+    requestJitterMs: 100,
   },
   sysdocs: {
     maxDocs: 5000,
@@ -775,6 +785,26 @@ export function loadConfig(
         500,
         120_000,
         "prjdocs.latestTimeoutMs",
+        warnings,
+      ),
+      userAgent: readString(
+        prjdocs.userAgent,
+        DEFAULT_CONFIG.prjdocs.userAgent,
+      ) as string,
+      requestIntervalMs: readInteger(
+        prjdocs.requestIntervalMs,
+        DEFAULT_CONFIG.prjdocs.requestIntervalMs,
+        0,
+        60_000,
+        "prjdocs.requestIntervalMs",
+        warnings,
+      ),
+      requestJitterMs: readInteger(
+        prjdocs.requestJitterMs,
+        DEFAULT_CONFIG.prjdocs.requestJitterMs,
+        0,
+        30_000,
+        "prjdocs.requestJitterMs",
         warnings,
       ),
     },

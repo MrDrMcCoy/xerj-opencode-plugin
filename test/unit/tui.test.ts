@@ -65,6 +65,7 @@ const SNAPSHOT: StatusSnapshot = {
   disk: { engineBytes: 1024, logBytes: 2048 },
   map: [],
   frameworks: [],
+  docs: { prjdocs: { lastRunAt: null, pages: 0 }, sysdocs: { lastRunAt: null, pages: 0 } },
   process: null,
   embeddings: false,
   state: {

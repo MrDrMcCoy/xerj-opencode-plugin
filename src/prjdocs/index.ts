@@ -21,6 +21,7 @@ import {
 } from "./discover.ts";
 import { PageJudge, projectTerms } from "./relevance.ts";
 import { builtinSources, type BuiltinSource } from "./builtin.ts";
+import type { HostRateLimiter } from "./ratelimit.ts";
 import { detectTech, type TechRef } from "./detect.ts";
 import { docsTargets, maxPagesFor, type DocsTarget } from "./sources.ts";
 
@@ -42,6 +43,10 @@ export interface PrjdocsOptions {
   readonly signal?: AbortSignal;
   /** Deadline for one documentation page request. */
   readonly requestTimeoutMs?: number;
+  /** `User-Agent` every documentation fetch sends. */
+  readonly userAgent?: string;
+  /** Per-host spacing, shared by every crawl in this run. */
+  readonly limiter?: HostRateLimiter;
   /** Resolves the latest release of a technology; null when unknown. */
   readonly latestVersion?: (ref: TechRef) => Promise<string | null>;
   /** Eager mode: no depth cap, any text page, model-judged relevance. */
@@ -338,6 +343,8 @@ export class PrjdocsIndexer {
         fetchImpl: this.options.fetchImpl,
         signal: this.options.signal,
         requestTimeoutMs: this.options.requestTimeoutMs,
+        limiter: this.options.limiter,
+        userAgent: this.options.userAgent,
       }).catch((error: unknown) => {
         this.options.logger.debug("docs crawl failed", String(error));
         return [] as CrawledPage[];
@@ -385,6 +392,8 @@ export class PrjdocsIndexer {
       fetchImpl: this.options.fetchImpl,
       signal: this.options.signal,
       requestTimeoutMs: this.options.requestTimeoutMs,
+      userAgent: this.options.userAgent,
+      limiter: this.options.limiter,
       xerjMaxPages: this.options.builtin.xerjPages,
       maxPages: this.options.builtin.elasticsearchPages,
       eager: this.options.builtin.eager,
