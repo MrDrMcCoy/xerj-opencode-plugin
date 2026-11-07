@@ -51,6 +51,8 @@ export interface JevosManagerOptions {
   /** Deadline for one asset download; the model is large. */
   readonly downloadTimeoutMs?: number;
   readonly commandTimeoutMs?: number;
+  /** Override the release base URL; tests serve fixtures on loopback. */
+  readonly releaseBase?: string;
 }
 
 const MODEL_FILES = [
@@ -72,6 +74,7 @@ export class JevosManager {
   private readonly pathOverride: string | null;
   private readonly downloadTimeoutMs: number;
   private readonly commandTimeoutMs: number;
+  private readonly releaseBase: string | null;
 
   constructor(options: JevosManagerOptions) {
     this.root = options.root;
@@ -81,6 +84,14 @@ export class JevosManager {
     this.pathOverride = options.path ?? null;
     this.downloadTimeoutMs = options.downloadTimeoutMs ?? DEFAULT_DOWNLOAD_TIMEOUT_MS;
     this.commandTimeoutMs = options.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
+    this.releaseBase = options.releaseBase ?? null;
+  }
+
+  /** The pinned release URL, or the test base joined with the same path. */
+  private assetUrlFor(asset: string): string {
+    return this.releaseBase === null
+      ? assetUrl(this.version, asset)
+      : `${this.releaseBase}/${this.version}/${asset}`;
   }
 
   get directory(): string {
@@ -133,14 +144,14 @@ export class JevosManager {
 
       this.logger.info("downloading the jevos binary", { asset: binaryName });
       const binaryPath = join(staging, binaryName);
-      await this.download(assetUrl(this.version, binaryName), binaryPath, sums);
+      await this.download(this.assetUrlFor(binaryName), binaryPath, sums);
 
       this.logger.info("downloading the jevos model", {
         asset: modelName,
         note: "about 630 MB, one time",
       });
       const modelPath = join(staging, modelName);
-      await this.download(assetUrl(this.version, modelName), modelPath, sums);
+      await this.download(this.assetUrlFor(modelName), modelPath, sums);
 
       const binDir = join(staging, "bin");
       await mkdir(binDir, { recursive: true, mode: 0o700 });
@@ -193,7 +204,7 @@ export class JevosManager {
   }
 
   private async fetchSums(): Promise<Map<string, string>> {
-    const response = await fetch(assetUrl(this.version, JEVOS_SUMS_ASSET), {
+    const response = await fetch(this.assetUrlFor(JEVOS_SUMS_ASSET), {
       redirect: "follow",
       signal: AbortSignal.timeout(30_000),
     });

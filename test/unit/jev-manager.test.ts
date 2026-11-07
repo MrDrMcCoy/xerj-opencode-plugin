@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { chmod, mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createHash, randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { JevosManager, flatten, hashFile } from "../../src/jev/manager.ts";
 import { JevosSupervisor } from "../../src/jev/supervisor.ts";
 
@@ -197,4 +199,131 @@ describe("jevos supervisor", () => {
     expect(attempts).toBe(1);
     expect(warnings.some((line) => line.includes("heuristic"))).toBe(true);
   });
+});
+
+const runCommand = promisify(execFile);
+const hasPython = Bun.which("python3") !== null;
+const binaryName = "jev-linux-x64.tar.gz";
+const modelName = "jevos-v5-openvino-int8.zip";
+
+async function sha256(path: string): Promise<string> {
+  const hash = createHash("sha256");
+  hash.update(await readFile(path));
+  return hash.digest("hex");
+}
+
+function serveRelease(dir: string): { base: string; stop: () => void } {
+  const server = Bun.serve({
+    port: 0,
+    fetch: (request) => {
+      const name = new URL(request.url).pathname.split("/").pop() ?? "";
+      return new Response(Bun.file(join(dir, name)));
+    },
+  });
+  return {
+    base: String(server.url).replace(/\/$/, ""),
+    stop: () => server.stop(true),
+  };
+}
+
+async function buildBinary(dir: string): Promise<string> {
+  const stage = join(dir, "binary");
+  await mkdir(stage, { recursive: true });
+  const binary = join(stage, "jev");
+  await writeFile(binary, "#!/bin/sh\necho 'usage: jev' >&2\nexit 2\n");
+  await chmod(binary, 0o755);
+  const tarball = join(dir, binaryName);
+  await runCommand("tar", ["-czf", tarball, "-C", stage, "jev"]);
+  return tarball;
+}
+
+async function buildModel(dir: string): Promise<string> {
+  const stage = join(dir, "model-stage");
+  await mkdir(join(stage, "model"), { recursive: true });
+  for (const name of MODEL_FILES) {
+    await writeFile(join(stage, "model", name), "x");
+  }
+  const zip = join(dir, modelName);
+  await runCommand("python3", [
+    "-c",
+    [
+      "import os, sys, zipfile",
+      "z = zipfile.ZipFile(sys.argv[1], 'w')",
+      "for root, _, files in os.walk(sys.argv[2]):",
+      "    for name in files:",
+      "        path = os.path.join(root, name)",
+      "        z.write(path, os.path.relpath(path, sys.argv[2]))",
+      "z.close()",
+    ].join("\n"),
+    zip,
+    stage,
+  ]);
+  return zip;
+}
+
+describe("jevos install", () => {
+  test.skipIf(!hasPython || process.platform === "win32")(
+    "downloads, verifies, and lays out the binary and model",
+    async () => {
+      const dir = await tempDir();
+      const tarball = await buildBinary(dir);
+      const zip = await buildModel(dir);
+      await writeFile(
+        join(dir, "SHA256SUMS.txt"),
+        `${await sha256(tarball)}  ${binaryName}\n` +
+          `${await sha256(zip)}  ${modelName}\n`,
+      );
+      const served = serveRelease(dir);
+      const manager = new JevosManager({
+        root: join(dir, "root"),
+        version: "jevos-v5",
+        target: { name: "linux-x64", archive: "tar.gz" },
+        logger,
+        releaseBase: served.base,
+        downloadTimeoutMs: 10_000,
+        commandTimeoutMs: 10_000,
+      });
+
+      try {
+        const installed = await manager.ensure();
+        expect(installed.binary).toContain(join("bin", "jev"));
+        expect(await readFile(installed.binary, "utf8")).toContain("usage: jev");
+        for (const name of MODEL_FILES) {
+          expect(await readFile(join(installed.modelDir, name), "utf8")).toBe("x");
+        }
+        // A second ensure reuses the tree without a request.
+        expect(await manager.inspect()).toEqual(installed);
+      } finally {
+        served.stop();
+      }
+    },
+    30_000,
+  );
+
+  test("a checksum mismatch fails closed and leaves no tree", async () => {
+    const dir = await tempDir();
+    const tarball = await buildBinary(dir);
+    await writeFile(
+      join(dir, "SHA256SUMS.txt"),
+      `${"0".repeat(64)}  ${binaryName}\n`,
+    );
+    const served = serveRelease(dir);
+    const manager = new JevosManager({
+      root: join(dir, "root"),
+      version: "jevos-v5",
+      target: { name: "linux-x64", archive: "tar.gz" },
+      logger,
+      releaseBase: served.base,
+      downloadTimeoutMs: 10_000,
+      commandTimeoutMs: 10_000,
+    });
+
+    try {
+      await expect(manager.ensure()).rejects.toThrow(/checksum mismatch/);
+      expect(await manager.inspect()).toBeNull();
+      expect((await stat(tarball).catch(() => null))?.isFile()).toBe(true);
+    } finally {
+      served.stop();
+    }
+  }, 30_000);
 });
