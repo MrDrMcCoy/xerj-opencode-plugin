@@ -8,7 +8,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { Logger } from "../log.ts";
-import type { XerjClient } from "../node/client.ts";
+import { NodeRequestError, type XerjClient } from "../node/client.ts";
 import { readManifest, writeManifest } from "../manifest.ts";
 
 export interface ArchiveIndexOptions {
@@ -124,9 +124,15 @@ export class ArchiveIndex {
 
     if (actions.length > 0) {
       await this.options.client
-        .put(this.options.indexName, MAPPING, "could not create the archive index")
+        .put(`/${this.options.indexName}`, MAPPING, "could not create the archive index")
         .catch((error: unknown) => {
-          this.options.logger.debug("archive index already present", String(error));
+          // 409 is the normal repeat case. Anything else means the mapping was
+          // never created and `_bulk` built the index from dynamic inference.
+          const status = error instanceof NodeRequestError ? error.status : null;
+          const existing = status === 400 || status === 409;
+          const message = "archive index mapping not created";
+          if (existing) this.options.logger.debug(message, String(error));
+          else this.options.logger.warn(message, String(error));
         });
       await this.options.client.bulk(this.options.indexName, actions);
     }

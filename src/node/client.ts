@@ -373,9 +373,12 @@ export class XerjClient {
     timeoutMs = this.timeoutMs,
   ): Promise<Response> {
     const base = await this.resolveBase();
+    // Callers name either a route (`/_bulk`) or a bare index; both have to
+    // resolve against the base URL, not concatenate onto its port.
+    const target = path.startsWith("/") ? path : `/${path}`;
 
     try {
-      return await this.send(base, path, init, timeoutMs);
+      return await this.send(base, target, init, timeoutMs);
     } catch (error) {
       // A stopped node is expected: the idle timer shuts it down. Re-ensure and
       // retry once, unless the caller cancelled or the failure was not a
@@ -387,7 +390,7 @@ export class XerjClient {
       this.resolver.invalidate?.();
       const retryBase = await this.resolver.ensure();
       this.current = retryBase;
-      return this.send(retryBase, path, init, timeoutMs);
+      return this.send(retryBase, target, init, timeoutMs);
     }
   }
 

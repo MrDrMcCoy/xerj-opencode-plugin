@@ -82,6 +82,23 @@ function client(
   });
 }
 
+describe("request paths", () => {
+  // A caller that names an index without a leading slash used to build
+  // `http://127.0.0.1:9200xop-...`, which fetch rejects as an invalid URL and
+  // the caller's catch reported as "already present".
+  test("a path without a leading slash targets the root", async () => {
+    stubFetch();
+    await client().put("xop-test-docs", { mappings: {} }, "could not create the index");
+    expect(calls[0]?.url).toBe("http://127.0.0.1:9200/xop-test-docs");
+  });
+
+  test("a path with a leading slash is unchanged", async () => {
+    stubFetch();
+    await client().put("/_ml/anomaly_detectors/job", {}, "could not create the detector");
+    expect(calls[0]?.url).toBe("http://127.0.0.1:9200/_ml/anomaly_detectors/job");
+  });
+});
+
 describe("XerjClient.info", () => {
   test("identifies a xerj node by cluster name", async () => {
     stubFetch();

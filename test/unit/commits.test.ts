@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CommitIndex, readCommits } from "../../src/index/commits.ts";
 import type { XerjClient } from "../../src/node/client.ts";
+import { NodeRequestError } from "../../src/node/client.ts";
 
 const logger = {
   debug: () => {},
@@ -83,6 +84,61 @@ describe("readCommits", () => {
 });
 
 describe("CommitIndex", () => {
+  test("a mapping failure that is not 409 warns and still indexes", async () => {
+    const warnings: string[] = [];
+    const debugged: string[] = [];
+    const client = fakeClient();
+    client.put = async (path: string) => {
+      throw new NodeRequestError(`could not create ${path}`, 500, "boom");
+    };
+
+    const index = new CommitIndex({
+      client,
+      indexName: "xop-p-git-docs",
+      projectRoot: root,
+      statePath: join(root, ".state", "warn.json"),
+      logger: {
+        ...logger,
+        warn: (message: string) => void warnings.push(message),
+        debug: (message: string) => void debugged.push(message),
+      } as never,
+      limit: 10,
+    });
+
+    const summary = await index.run();
+
+    expect(summary.indexed).toBe(2);
+    expect(warnings).toEqual(["commit index mapping not created"]);
+    expect(debugged).toEqual([]);
+  });
+
+  test("a mapping that already exists stays quiet", async () => {
+    const warnings: string[] = [];
+    const debugged: string[] = [];
+    const client = fakeClient();
+    client.put = async () => {
+      throw new NodeRequestError("could not create the commit index", 409, "exists");
+    };
+
+    const index = new CommitIndex({
+      client,
+      indexName: "xop-p-git-docs",
+      projectRoot: root,
+      statePath: join(root, ".state", "exists.json"),
+      logger: {
+        ...logger,
+        warn: (message: string) => void warnings.push(message),
+        debug: (message: string) => void debugged.push(message),
+      } as never,
+      limit: 10,
+    });
+
+    await index.run();
+
+    expect(warnings).toEqual([]);
+    expect(debugged).toEqual(["commit index mapping not created"]);
+  });
+
   test("indexes every commit once and records them", async () => {
     const client = fakeClient();
     const index = new CommitIndex({
@@ -97,7 +153,7 @@ describe("CommitIndex", () => {
     const first = await index.run();
 
     expect(first.indexed).toBe(2);
-    expect(client.puts).toEqual(["xop-p-git-docs"]);
+    expect(client.puts).toEqual(["/xop-p-git-docs"]);
     expect(client.bulks).toHaveLength(1);
     expect(client.bulks[0]?.ids).toHaveLength(2);
 

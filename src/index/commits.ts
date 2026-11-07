@@ -10,7 +10,7 @@ import { spawn } from "node:child_process";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { Logger } from "../log.ts";
-import type { XerjClient } from "../node/client.ts";
+import { NodeRequestError, type XerjClient } from "../node/client.ts";
 
 export interface CommitRecord {
   readonly hash: string;
@@ -196,13 +196,19 @@ export class CommitIndex {
   private async ensureMapping(): Promise<void> {
     try {
       await this.options.client.put(
-        this.options.indexName,
+        `/${this.options.indexName}`,
         MAPPING,
         "could not create the commit index",
       );
     } catch (error) {
-      // 409 means it already exists, which is the normal repeat case.
-      this.options.logger.debug("commit index already present", String(error));
+      // 409 means it already exists, which is the normal repeat case. Anything
+      // else means the mapping was never created and `_bulk` built the index
+      // from dynamic inference instead, so the keyword fields are not keyword.
+      const status = error instanceof NodeRequestError ? error.status : null;
+      const existing = status === 400 || status === 409;
+      const message = "commit index mapping not created";
+      if (existing) this.options.logger.debug(message, String(error));
+      else this.options.logger.warn(message, String(error));
     }
   }
 

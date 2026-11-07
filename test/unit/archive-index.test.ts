@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ArchiveIndex, turnId } from "../../src/archive/index.ts";
 import type { XerjClient } from "../../src/node/client.ts";
+import { NodeRequestError } from "../../src/node/client.ts";
 
 const logger = {
   debug: () => {},
@@ -81,6 +82,7 @@ describe("ArchiveIndex", () => {
 
     const first = await index.run();
     expect(first.indexed).toBe(2);
+    expect(xerj.puts).toEqual(["/xop-p-archive-docs"]);
     expect(xerj.bulks[0]?.ids).toHaveLength(2);
 
     const second = await index.run();
@@ -121,5 +123,29 @@ describe("ArchiveIndex", () => {
     const { index } = indexer(directory, join(root, "state-d.json"));
 
     expect((await index.run()).indexed).toBe(1);
+  });
+
+  test("a mapping failure that is not 409 warns and still indexes", async () => {
+    const directory = join(root, "sessions-e");
+    await writeSession(directory, "abc", [{ role: "user", text: "still indexed" }]);
+    const warnings: string[] = [];
+    const xerj = client();
+    xerj.put = async (path: string) => {
+      throw new NodeRequestError(`could not create ${path}`, 500, "boom");
+    };
+
+    const index = new ArchiveIndex({
+      client: xerj,
+      indexName: "xop-p-archive-docs",
+      directory,
+      statePath: join(root, "state-e.json"),
+      logger: { ...logger, warn: (message: string) => void warnings.push(message) } as never,
+    });
+
+    const summary = await index.run();
+
+    expect(summary.indexed).toBe(1);
+    expect(warnings).toEqual(["archive index mapping not created"]);
+    expect(xerj.bulks).toHaveLength(1);
   });
 });
