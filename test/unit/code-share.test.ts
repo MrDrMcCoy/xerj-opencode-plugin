@@ -81,6 +81,7 @@ describe("tool registration", () => {
       code: {} as never,
       share: {} as never,
       lsp: {} as never,
+      notes: {} as never,
       snapshot: async () => ({}) as never,
     }).map((tool) => tool.name);
   }

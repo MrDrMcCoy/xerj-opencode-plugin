@@ -14,6 +14,15 @@ const SHARE_STUB = {
   list: async () => ({ ok: false, text: "share disabled" }),
   revoke: async () => ({ ok: false, text: "share disabled" }),
 } as never;
+const NOTES_STUB = {
+  add: async () => ({ id: "n" }),
+  list: async () => [],
+  remove: async () => false,
+  search: async () => [],
+  match: async () => null,
+  recordHit: async () => {},
+} as never;
+
 const LSP_STUB = {
   callers: async () => [],
   impact: async () => [],
@@ -100,6 +109,7 @@ describe("hub tools", () => {
       code: CODE_STUB,
       share: SHARE_STUB,
       lsp: LSP_STUB,
+      notes: NOTES_STUB,
       snapshot: async () => ({}) as never,
     }).map((tool) => tool.name);
   }

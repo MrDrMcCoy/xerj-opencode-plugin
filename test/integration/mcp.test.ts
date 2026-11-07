@@ -119,6 +119,7 @@ describe("MCP server", () => {
       "imports",
       "index",
       "inspect",
+      "notes",
       "outline",
       "prjdocs",
       "recall",

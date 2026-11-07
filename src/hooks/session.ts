@@ -18,12 +18,15 @@ import {
 } from "../rehydrate.ts";
 import { contentTerms, coversTerms } from "../search/rank.ts";
 import type { SearchHit, SearchService } from "../search/service.ts";
+import { formatNote, type NoteRecord, type NoteStore } from "../notes/store.ts";
 
 export interface SessionHookOptions {
   readonly config: Config;
   readonly logger: Logger;
   readonly getSearch: () => SearchService | null;
   readonly getMemory: () => MemoryStore | null;
+  /** Project notes, surfaced when a prompt matches; optional. */
+  readonly getNotes?: () => NoteStore | null;
   readonly summarize: () => Promise<string>;
   /** Times one retrieval leg; omitted leaves the pass unmeasured. */
   readonly measure?: <T>(
@@ -75,6 +78,9 @@ interface Prepared {
   /** Passage bytes inside `block`, already charged through `recordQuery`. */
   readonly passageBytes: number;
   readonly memory: string;
+  /** Project note block, empty when none matched. */
+  readonly note: string;
+  readonly noteID: string;
   readonly hits: number;
   /** `path:line` keys of the passages in this block, for session dedupe. */
   readonly locations: ReadonlyArray<string>;
@@ -176,6 +182,16 @@ export function formatCommandHint(stem: string, lines: number): string {
   ].join("\n");
 }
 
+async function loadNote(
+  options: SessionHookOptions,
+  prompt: string,
+): Promise<NoteRecord | null> {
+  if (!options.config.context.notes.enabled || prompt.length === 0) return null;
+  const store = options.getNotes?.();
+  if (!store) return null;
+  return store.match(prompt).catch(() => null);
+}
+
 export async function registerSessionHooks(
   ctx: Plugin.Context,
   options: SessionHookOptions,
@@ -205,6 +221,7 @@ export async function registerSessionHooks(
   const seen = new Map<string, Set<string>>();
   const summarized = new Map<string, true>();
   const commandShown = new Map<string, true>();
+  const noteShown = new Map<string, string>();
   // The passages the session is currently working from, and the snapshot taken
   // when the host compacted, waiting for the next model call.
   const working = new Map<string, ReadonlyArray<CitedLocation>>();
@@ -216,11 +233,49 @@ export async function registerSessionHooks(
     options.onActivity?.(event.sessionID);
     const text = event.prompt.text.trim();
     if (text.length > 0) options.onPromptArchive?.(event.sessionID, text);
-    if (!shouldRetrieve(text)) return;
+
+    const note = await loadNote(options, text);
+    const noteBlock =
+      note !== null && noteShown.get(event.sessionID) !== note.id
+        ? formatNote(note, options.config.context.notes.maxChars)
+        : "";
+    const noteID = noteBlock.length > 0 && note !== null ? note.id : "";
+
+    if (!shouldRetrieve(text)) {
+      if (noteBlock.length > 0) {
+        forgetOldest(prepared, event.sessionID, {
+          messageID: event.messageID,
+          block: "",
+          passageBytes: 0,
+          memory: "",
+          note: noteBlock,
+          noteID,
+          hits: 0,
+          locations: [],
+          recall: [],
+        });
+      }
+      return;
+    }
     options.onPrompt?.(event.sessionID, text);
 
     const search = options.getSearch();
-    if (!search) return;
+    if (!search) {
+      if (noteBlock.length > 0) {
+        forgetOldest(prepared, event.sessionID, {
+          messageID: event.messageID,
+          block: "",
+          passageBytes: 0,
+          memory: "",
+          note: noteBlock,
+          noteID,
+          hits: 0,
+          locations: [],
+          recall: [],
+        });
+      }
+      return;
+    }
 
     try {
       const already = seen.get(event.sessionID);
@@ -246,7 +301,21 @@ export async function registerSessionHooks(
           retrieveHint(search, text, options, already),
         );
         if (hint === null) {
-          options.onNoiseSkip?.();
+          if (noteBlock.length > 0) {
+            forgetOldest(prepared, event.sessionID, {
+              messageID: event.messageID,
+              block: "",
+              passageBytes: 0,
+              memory: "",
+              note: noteBlock,
+              noteID,
+              hits: 0,
+              locations: [],
+              recall: [],
+            });
+          } else {
+            options.onNoiseSkip?.();
+          }
           return;
         }
 
@@ -255,6 +324,8 @@ export async function registerSessionHooks(
           block: formatHintBlock(hint, text),
           passageBytes: 0,
           memory: "",
+          note: noteBlock,
+          noteID,
           hits: 0,
           locations: [],
           recall: [],
@@ -266,6 +337,8 @@ export async function registerSessionHooks(
         block: result.text.trim().length === 0 ? "" : formatContextBlock(result.text),
         passageBytes: result.text.trim().length === 0 ? 0 : result.bytes,
         memory,
+        note: noteBlock,
+        noteID,
         hits: result.hits.length,
         locations: result.hits.map(locationKey),
         recall: result.hits.flatMap((hit) =>
@@ -321,6 +394,15 @@ export async function registerSessionHooks(
       forgetOldest(lastInjected, event.sessionID, entry.messageID);
       prepared.delete(event.sessionID);
 
+      if (entry.note.length > 0) {
+        event.system.push({ type: "text", text: entry.note });
+        overhead += Buffer.byteLength(entry.note, "utf8");
+        if (entry.noteID.length > 0) {
+          forgetOldest(noteShown, event.sessionID, entry.noteID);
+          const store = options.getNotes?.();
+          if (store) void store.recordHit(entry.noteID).catch(() => {});
+        }
+      }
       if (entry.memory.length > 0) {
         event.system.push({ type: "text", text: entry.memory });
         overhead += Buffer.byteLength(entry.memory, "utf8");
@@ -333,7 +415,7 @@ export async function registerSessionHooks(
         );
       }
 
-      if (entry.memory.length > 0 || entry.block.length > 0) {
+      if (entry.note.length > 0 || entry.memory.length > 0 || entry.block.length > 0) {
         injected = true;
         freshHits = entry.hits > 0 && entry.block.length > 0;
         if (entry.block.length > 0) {

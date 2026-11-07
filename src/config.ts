@@ -121,6 +121,14 @@ export interface ContextOptions {
   readonly recallTimeoutMs: number;
   /** Deadline for the one-line search hint when the gate rejects a prompt. */
   readonly hintTimeoutMs: number;
+  /** Project notes surfaced when a prompt matches their conditions. */
+  readonly notes: NoteOptions;
+}
+
+export interface NoteOptions {
+  readonly enabled: boolean;
+  /** Characters of one injected note. */
+  readonly maxChars: number;
 }
 
 export interface PrjdocsOptions {
@@ -197,6 +205,22 @@ export interface MemoryOptions {
   readonly distill: DistillOptions;
   /** Mine the pre-compaction window for durable facts. */
   readonly extract: ExtractOptions;
+  /** The idle child session that curates memory and writes a primer. */
+  readonly dreamer: DreamerOptions;
+}
+
+export interface DreamerOptions {
+  readonly enabled: boolean;
+  /** `provider/model`, or null to inherit the parent session's model. */
+  readonly model: string | null;
+  /** Minimum time between dreamer runs, per project. */
+  readonly intervalMs: number;
+  /** Quiet time after a session idles before the dreamer starts. */
+  readonly idleMs: number;
+  /** Tool calls the child is asked to stay within. */
+  readonly maxTurns: number;
+  /** Answer budget the child is asked to stay within. */
+  readonly maxTokens: number;
 }
 
 export interface ExtractOptions {
@@ -468,6 +492,7 @@ export const DEFAULT_CONFIG: Config = {
     timeoutMs: 400,
     recallTimeoutMs: 120,
     hintTimeoutMs: 150,
+    notes: { enabled: true, maxChars: 400 },
   },
   prjdocs: {
     maxTargets: 40,
@@ -531,6 +556,14 @@ export const DEFAULT_CONFIG: Config = {
       enabled: true,
       maxFacts: 3,
       maxBytes: 200 * 1024,
+    },
+    dreamer: {
+      enabled: true,
+      model: null,
+      intervalMs: 86_400_000,
+      idleMs: 600_000,
+      maxTurns: 3,
+      maxTokens: 4_000,
     },
   },
   stats: { enabled: true, bytesPerToken: 4, maxBaselineBytes: 128 * 1024 },
@@ -622,6 +655,8 @@ export function loadConfig(
   const local = asObject(distill.local);
   const tune = asObject(local.autotune);
   const extract = asObject(memory.extract);
+  const dreamer = asObject(memory.dreamer);
+  const notes = asObject(context.notes);
   const stats = asObject(root.stats);
   const telemetry = asObject(root.telemetry);
   const cmd = asObject(root.cmd);
@@ -906,6 +941,22 @@ export function loadConfig(
         "context.hintTimeoutMs",
         warnings,
       ),
+      notes: {
+        enabled: readBoolean(
+          notes.enabled,
+          DEFAULT_CONFIG.context.notes.enabled,
+          "context.notes.enabled",
+          warnings,
+        ),
+        maxChars: readInteger(
+          notes.maxChars,
+          DEFAULT_CONFIG.context.notes.maxChars,
+          40,
+          2_000,
+          "context.notes.maxChars",
+          warnings,
+        ),
+      },
     },
     prjdocs: {
       maxTargets: readInteger(
@@ -1248,6 +1299,47 @@ export function loadConfig(
             ),
           },
         },
+      },
+      dreamer: {
+        enabled: readBoolean(
+          dreamer.enabled,
+          DEFAULT_CONFIG.memory.dreamer.enabled,
+          "memory.dreamer.enabled",
+          warnings,
+        ),
+        model: readDreamerModel(dreamer.model, warnings),
+        intervalMs: readInteger(
+          dreamer.intervalMs,
+          DEFAULT_CONFIG.memory.dreamer.intervalMs,
+          60_000,
+          30 * 86_400_000,
+          "memory.dreamer.intervalMs",
+          warnings,
+        ),
+        idleMs: readInteger(
+          dreamer.idleMs,
+          DEFAULT_CONFIG.memory.dreamer.idleMs,
+          0,
+          86_400_000,
+          "memory.dreamer.idleMs",
+          warnings,
+        ),
+        maxTurns: readInteger(
+          dreamer.maxTurns,
+          DEFAULT_CONFIG.memory.dreamer.maxTurns,
+          1,
+          20,
+          "memory.dreamer.maxTurns",
+          warnings,
+        ),
+        maxTokens: readInteger(
+          dreamer.maxTokens,
+          DEFAULT_CONFIG.memory.dreamer.maxTokens,
+          200,
+          32_000,
+          "memory.dreamer.maxTokens",
+          warnings,
+        ),
       },
       extract: {
         enabled: readBoolean(
@@ -1706,6 +1798,20 @@ function readBoolean(value: unknown, fallback: boolean, key: string, warnings: s
   if (typeof value === "boolean") return value;
   warnings.push(`${key} must be a boolean; using ${fallback}`);
   return fallback;
+}
+
+function readDreamerModel(
+  value: unknown,
+  warnings: string[],
+): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string" || !value.includes("/")) {
+    warnings.push(
+      "memory.dreamer.model must be \"provider/model\"; inheriting the session model",
+    );
+    return null;
+  }
+  return value.trim();
 }
 
 function readLspServers(

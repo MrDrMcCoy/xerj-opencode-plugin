@@ -376,6 +376,36 @@ describe("analysis gates", () => {
   });
 });
 
+describe("dreamer and notes", () => {
+  test("both are on by default", () => {
+    expect(DEFAULT_CONFIG.memory.dreamer).toEqual({
+      enabled: true,
+      model: null,
+      intervalMs: 86400000,
+      idleMs: 600000,
+      maxTurns: 3,
+      maxTokens: 4000,
+    });
+    expect(DEFAULT_CONFIG.context.notes).toEqual({
+      enabled: true,
+      maxChars: 400,
+    });
+  });
+
+  test("a bad dreamer model warns and inherits the session model", () => {
+    const { config, warnings } = loadConfig({
+      memory: { dreamer: { model: "noslash", maxTurns: 0, maxTokens: 1 } },
+      context: { notes: { maxChars: 1 } },
+    });
+
+    expect(config.memory.dreamer.model).toBeNull();
+    expect(config.memory.dreamer.maxTurns).toBe(1);
+    expect(config.memory.dreamer.maxTokens).toBe(200);
+    expect(config.context.notes.maxChars).toBe(40);
+    expect(warnings.filter((w) => w.includes("dreamer") || w.includes("notes"))).toHaveLength(4);
+  });
+});
+
 describe("reference corpora and share", () => {
   test("code is on and share is off by default", () => {
     expect(DEFAULT_CONFIG.code).toEqual({

@@ -16,6 +16,15 @@ const SHARE_STUB = {
   list: async () => ({ ok: false, text: "share disabled" }),
   revoke: async () => ({ ok: false, text: "share disabled" }),
 } as never;
+const NOTES_STUB = {
+  add: async () => ({ id: "n" }),
+  list: async () => [],
+  remove: async () => false,
+  search: async () => [],
+  match: async () => null,
+  recordHit: async () => {},
+} as never;
+
 const LSP_STUB = {
   callers: async () => [],
   impact: async () => [],
@@ -85,6 +94,7 @@ function toolFor(
     code: CODE_STUB,
     share: SHARE_STUB,
     lsp: LSP_STUB,
+    notes: NOTES_STUB,
     snapshot: async () => status,
     ledger: {
       recordQuery: async (_session: string, paths: string[], bytes: number, hits: number) => {
@@ -181,6 +191,7 @@ describe("the rest of the tool surface", () => {
       code: CODE_STUB,
       share: SHARE_STUB,
       lsp: LSP_STUB,
+      notes: NOTES_STUB,
 
       snapshot: async () => snapshot(),
       ledger: { recordQuery: async () => {} } as never,
@@ -514,6 +525,7 @@ describe("dataset tool", () => {
       code: CODE_STUB,
       share: SHARE_STUB,
       lsp: LSP_STUB,
+      notes: NOTES_STUB,
 
       snapshot: async () => ({}) as never,
     }) as never;
@@ -632,6 +644,7 @@ describe("dataset tool export and import", () => {
       code: CODE_STUB,
       share: SHARE_STUB,
       lsp: LSP_STUB,
+      notes: NOTES_STUB,
       snapshot: async () => ({}) as never,
     });
     const tool = tools.find((candidate) => candidate.name === "dataset");
@@ -685,6 +698,7 @@ describe("dataset tool export and import", () => {
       code: CODE_STUB,
       share: SHARE_STUB,
       lsp: LSP_STUB,
+      notes: NOTES_STUB,
       snapshot: async () => ({}) as never,
     });
     const tool = tools.find((candidate) => candidate.name === "dataset");

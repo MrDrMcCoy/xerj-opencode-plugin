@@ -1411,8 +1411,8 @@ measured; they include tests and the commits that carry them. A status of
 | `xerj_callers`, `xerj_impact` | L | Done; default on | 1.5 h | Both use `workspace/symbol` to locate the definition, `textDocument/documentSymbol` or the source line to find the name column, then `prepareCallHierarchy` and incoming calls. `impact` follows up to depth 5 and caps at 50. Gated by `analysis.lsp.enabled` |
 | `xerj_inspect` | L | Done | 1.5 h | Registered without a gate: TODO/FIXME/HACK markers everywhere, published diagnostics for one file when `analysis.lsp.enabled`, and a heuristic unused-export list when `analysis.treeSitter.enabled`. `analysis/exports.ts` counts identifiers per file; string references and dynamic imports can still fool it, so the section is labelled heuristic. Three module tests |
 | `xerj_share` | L | Done (gated off) | 0.5 h | `src/share/service.ts` wraps `xerj share` create/list/revoke with `--expires`, `--max-claims`, optional passcode and label, and `--url` to the plugin node. No tunnel is offered. `share.enabled` is false. Three service tests and a registration test. |
-| Dreamer child sessions | XL | Not started | — | — |
-| Notes and smart notes | XL | Not started | — | — |
+| Dreamer child sessions | XL | Done | 3.0 h | `src/memory/dreamer.ts` registers `experimental.idle`, waits `idleMs`, runs verification and curation in-process, then creates a child of the idle session with `edit`/`write`/`bash`/`shell`/`webfetch` denied and prompts it for one primer via `xerj_remember`. `memory.dreamer.model` takes `provider/model`; `null` inherits. One run per `intervalMs`, last run in `.xerj/dreamer.json`, telemetry `memory.dreamer`. Four module tests |
+| Notes and smart notes | XL | Done | 2.0 h | `src/notes/store.ts` keeps `<project>/.xerj/notes.jsonl` (0600) with conditions, tags, hits, and last hit. `xerj_notes` add/list/remove/search; the prompt hook injects at most one matching note as `<xerj-note>`, once per session, and charges the context budget. Four store tests and one hook test |
 
 **Tier S: fourteen of fifteen shipped, 14.9 h** against an 8 to 10 h
 estimate. Two items landed on 2026-11-06 after the first twelve shipped: the
@@ -1426,10 +1426,9 @@ hint, where the dedupe test had to distinguish the hint pass from the retrieval
 pass.
 
 Tier M so far: **18.0 h** across eleven items this pass, twelve of fourteen
-with the graph overview that predates it. Remaining: the two XL design items
-(dreamer sessions and notes). Tree-sitter, complexity, LSP, callers, impact,
-inspect, `xerj_ask`, `xerj_code`, `xerj_share`, and window extraction are
-shipped behind their gates.
+with the graph overview that predates it. No roadmap item remains. The dreamer
+and notes ship on by default with the rest of the user's chosen defaults; the
+dreamer child session needs live verification in a running host.
 
 ## Settled decisions
 

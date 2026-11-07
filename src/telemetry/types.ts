@@ -39,6 +39,7 @@ export const OP_TYPES = [
   "memory.distill.judge",
   "memory.distill.autotune",
   "memory.extract",
+  "memory.dreamer",
   "hook.prompt",
   "hook.context",
   "hook.tool",

@@ -289,11 +289,12 @@ test/unit/*.test.ts    pure-function tests
 
 ## Work in progress
 
-All gated engineering items are implemented and committed: local judge and
-autotune, window extraction, tree-sitter complexity, the hub tools, reference
-corpora, share links, the LSP pool, call hierarchy, and inspect. The two XL
-items (dreamer child sessions and notes) remain blocked on a host contract and
-a scheduler, both documented in `roadmap.md`. Nothing is pushed.
+The roadmap is implemented: local judge and autotune, window extraction,
+tree-sitter complexity, the hub tools, reference corpora, share links, the LSP
+pool, call hierarchy, inspect, the dreamer child session, and notes. The user
+opened the defaults, including the dreamer and notes. Nothing is pushed. The
+dreamer child session still needs a live host verification; every other path
+has unit or integration coverage.
 
 The local distillation judge is the default and needs a restart to load.
 Distillation is on by default with `memory.distill.judge: "local"`, so setup
@@ -386,6 +387,22 @@ publish, and live TUI verification remain.
   expected, z-score, and score. Warm-up buckets are not flagged.
 
 ## Log
+
+- 2026-11-07: Dreamer child sessions and notes shipped, both on by default.
+  The dreamer registers `experimental.idle`, waits `idleMs` (10 min), runs
+  memory verification and curation, then creates a child of the idle session
+  titled `XERJ dreamer` with edit/write/bash/shell/webfetch denied. Its model
+  is `memory.dreamer.model` as `provider/model`; null inherits the parent. It
+  asks for at most three tool calls, about 4k tokens, and one primer via
+  `xerj_remember`; the last run lives in `.xerj/dreamer.json`, and the run is
+  telemetry `memory.dreamer`.
+
+  Notes live in `.xerj/notes.jsonl` (0600) with conditions, tags, hits, and
+  last hit. `xerj_notes` adds, lists, removes, and searches them. The prompt
+  hook injects at most one matching note as `<xerj-note>`, once per session,
+  and charges it to the context budget. Four dreamer tests, four note store
+  tests, and one hook test cover the paths; 1265 unit and 14 integration tests
+  pass, typecheck clean. Nothing is pushed or released.
 
 - 2026-11-07: The defaults changed at the user's request:
   `node.shutdownOnIdle: false`, `memory.extract.enabled: true`,

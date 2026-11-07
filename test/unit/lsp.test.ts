@@ -63,6 +63,7 @@ function tools(options: {
     code: {} as never,
     share: {} as never,
     lsp: (options.lsp ?? {}) as never,
+    notes: {} as never,
     snapshot: async () => ({}) as never,
   });
 }

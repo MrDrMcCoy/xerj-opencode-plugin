@@ -124,6 +124,7 @@ describe("tree-sitter analysis", () => {
       code: {} as never,
       share: {} as never,
       lsp: {} as never,
+      notes: {} as never,
       treeSitter: {
         report: async () => ({
           files: 1,

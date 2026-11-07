@@ -10,6 +10,10 @@ import { DEFAULT_CONFIG, type Config } from "../../src/config.ts";
 import type { Logger } from "../../src/log.ts";
 import type { SearchService } from "../../src/search/service.ts";
 import type { MemoryStore } from "../../src/memory/store.ts";
+import { NoteStore } from "../../src/notes/store.ts";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 describe("shouldRetrieve", () => {
   test("skips slash commands", () => {
@@ -184,6 +188,7 @@ async function register(
     config?: Partial<Config["context"]>;
     search?: SearchService;
     memory?: MemoryStore;
+    notes?: NoteStore;
     projectRoot?: string;
     readRecallFile?: (path: string) => Promise<string | null>;
   } = {},
@@ -203,6 +208,7 @@ async function register(
     logger,
     getSearch: () => overrides.search ?? null,
     getMemory: () => overrides.memory ?? null,
+    getNotes: () => overrides.notes ?? null,
     summarize: async () => "42 records, watching",
     onActivity: (sessionID) => {
       hooks.activity.push(sessionID);
@@ -812,6 +818,33 @@ describe("auto-search hint", () => {
     await hooks.ctx.handlers.prompt(promptEvent("s1", LONG, "m1"));
 
     expect(hooks.noiseSkips).toBe(1);
+  });
+
+  test("a matching note is injected once per session", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "xerj-hooks-notes-"));
+    const notes = new NoteStore({ directory, logger });
+    await notes.add({
+      text: "Check the watcher journal before touching the state file.",
+      conditions: ["watcher", "journal"],
+    });
+    const hooks = await register({ notes });
+
+    await hooks.ctx.handlers.prompt(promptEvent("s1", LONG, "m1"));
+    const first = contextEvent("s1", "m1") as {
+      system: Array<{ type: string; text: string }>;
+    };
+    await hooks.ctx.handlers.context(first);
+    expect(first.system.map((part) => part.text).join("\n")).toContain("<xerj-note>");
+
+    await hooks.ctx.handlers.prompt(promptEvent("s1", LONG, "m2"));
+    const second = contextEvent("s1", "m2") as {
+      system: Array<{ type: string; text: string }>;
+    };
+    await hooks.ctx.handlers.context(second);
+    expect(second.system.map((part) => part.text).join("\n")).not.toContain(
+      "<xerj-note>",
+    );
+    await rm(directory, { recursive: true, force: true });
   });
 
   test("the hint block stays one line and names the prompt", () => {

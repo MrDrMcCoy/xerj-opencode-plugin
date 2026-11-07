@@ -22,6 +22,8 @@ cited passages instead of whole files. Nothing leaves the machine.
 - [Memory](#memory)
   - [Distillation](#distillation)
   - [Window extraction](#window-extraction)
+  - [Dreamer](#dreamer)
+  - [Notes](#notes)
 - [Command output](#command-output)
 - [Fetched pages and external files](#fetched-pages-and-external-files)
 - [Tools](#tools)
@@ -280,7 +282,11 @@ This is the complete set with its defaults, in
           "maxPassages": 8,
           "timeoutMs": 400,              // retrieval deadline
           "recallTimeoutMs": 120,        // post-compaction re-read
-          "hintTimeoutMs": 150           // one-line search hint
+          "hintTimeoutMs": 150,          // one-line search hint
+          "notes": {
+            "enabled": true,             // surface notes on a prompt match
+            "maxChars": 400              // one injected note
+          }
         },
         "prjdocs": {
           "maxTargets": 40,
@@ -347,6 +353,14 @@ This is the complete set with its defaults, in
             "enabled": true,             // on; uses the local judge
             "maxFacts": 3,               // memories promoted per window
             "maxBytes": 204800           // window text read per compaction
+          },
+          "dreamer": {                   // idle child session
+            "enabled": true,             // run after a quiet period
+            "model": null,               // "provider/model", or null to inherit
+            "intervalMs": 86400000,      // at most one run per day
+            "idleMs": 600000,            // quiet time before it starts
+            "maxTurns": 3,               // tool calls it is asked to stay within
+            "maxTokens": 4000            // answer budget it is asked to stay within
           }
         },
         "stats": {
@@ -501,6 +515,14 @@ The same entry works with a checkout path instead of the package name; see
 | `memory.extract.enabled` | Mine the pre-compaction window for durable facts. On by default; uses the local judge. |
 | `memory.extract.maxFacts` | Memories promoted from one compaction window. |
 | `memory.extract.maxBytes` | Window text read before extraction. |
+| `context.notes.enabled` | Surface a matching project note in the prompt. On by default. |
+| `context.notes.maxChars` | Characters of one injected note. |
+| `memory.dreamer.enabled` | Run the idle child session that curates memory. On by default. |
+| `memory.dreamer.model` | `provider/model` for the child, or `null` to inherit the session model. |
+| `memory.dreamer.intervalMs` | Minimum time between dreamer runs. |
+| `memory.dreamer.idleMs` | Quiet time after a session idles before the dreamer starts. |
+| `memory.dreamer.maxTurns` | Tool calls the child is asked to stay within. |
+| `memory.dreamer.maxTokens` | Answer budget the child is asked to stay within. |
 | `index.graph` | Index the project as one graph corpus (a "super brain"): sections, symbols, `path:line`, and edges. On by default; `false` restores the flat `--no-graph` corpus with the engine's own watcher. A change rebuilds the project corpus once. |
 | `index.semantic` | Include the semantic retrieval leg. |
 | `index.neural` | Embed passages with the node's neural model (`--embed-mode neural`). Set `false` for lexical embeddings. Changing it rebuilds the project index once; neural indexing is roughly ten times slower than lexical. |
@@ -889,6 +911,35 @@ in the background: a slow judge or a failed memory write is logged and never
 delays the summary. `xerj_telemetry op=memory.extract` reports candidates,
 promoted, duplicates, rejected, and calls per window.
 
+### Dreamer
+
+`memory.dreamer.enabled` (on) starts a child session after 10 minutes of
+quiet, at most once per 24 hours per project. The plugin first runs the
+existing memory verification and curation in-process, then creates a child of
+the idle session titled `XERJ dreamer` with `edit`, `write`, `bash`, `shell`,
+and `webfetch` denied. Its prompt asks for at most three tool calls, about 4k
+tokens, and one short primer or correction written with `xerj_remember`; it
+must not touch project files.
+
+`memory.dreamer.model` takes `"provider/model"` and is passed to
+`session.create`; `null` inherits the parent session's model. The run is
+recorded as `memory.dreamer` telemetry and the last run lives in
+`<project>/.xerj/dreamer.json`. A busy project cancels the pending run, and a
+failed child creation is logged without retrying until the next interval.
+
+### Notes
+
+`context.notes.enabled` (on) gives `xerj_notes` and prompt-time surfacing.
+Notes live in `<project>/.xerj/notes.jsonl`, mode 0600, with `id`, `text`,
+`created`, `conditions`, `tags`, `hits`, and `lastHit`. `add` takes the text
+and optional conditions or tags; `list`, `remove`, and `search` cover the rest.
+
+A note is injected as a `<xerj-note>` block only when the prompt matches a
+condition or tag, or two of its own content terms. At most one note is injected
+per turn, and the same note is not repeated in one session. The block is
+charged to the context budget and increments the note's hit count. Notes never
+write a project file.
+
 [Back to top](#table-of-contents)
 
 ## Command output
@@ -1010,6 +1061,7 @@ index can answer, and none writes a project file.
 | `xerj_callers` | `symbol`, `path?` | Direct callers from the language server. Registered with `analysis.lsp.enabled`. |
 | `xerj_impact` | `symbol`, `path?`, `depth?` | Callers up to a depth. Registered with `analysis.lsp.enabled`. |
 | `xerj_inspect` | `path?`, `top?` | TODO markers always; diagnostics when the LSP gate is on. |
+| `xerj_notes` | `action`, `text?`, `conditions?`, `tags?`, `id?`, `query?` | Add, list, remove, or search deferred notes. Registered with `context.notes.enabled`. |
 
 The turn archive is one file per session under the project's node directory,
 capped by `context.archiveMaxBytes`. Before the host compacts, the plugin

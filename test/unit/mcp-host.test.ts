@@ -97,6 +97,7 @@ describe("McpHost", () => {
       "imports",
       "index",
       "inspect",
+      "notes",
       "outline",
       "prjdocs",
       "recall",

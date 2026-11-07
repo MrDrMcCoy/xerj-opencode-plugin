@@ -101,7 +101,9 @@ import { HubService } from "./hub/service.ts";
 import { TreeSitterService } from "./analysis/treesitter.ts";
 import { CodeService } from "./code/service.ts";
 import { ShareService } from "./share/service.ts";
+import { NoteStore } from "./notes/store.ts";
 import { LspPool } from "./analysis/lsp/pool.ts";
+import { Dreamer } from "./memory/dreamer.ts";
 import { jevosTarget, normaliseVersion } from "./jev/release.ts";
 import { migrateMemoryIndex, migrateProjectStorage } from "./memory/migrate.ts";
 import { RemoteSpool } from "./remote/spool.ts";
@@ -1091,7 +1093,12 @@ export default Plugin.define({
     let jevos: JevosSupervisor | null = null;
     let autotuner: Autotuner | null = null;
     let tuningView: TuningView | null = null;
+    let dreamer: Dreamer | null = null;
 
+    const notes = new NoteStore({
+      directory: projectStateDir(projectRoot),
+      logger,
+    });
     const treeSitter = new TreeSitterService({
       projectRoot,
       grammarRoot: join(root, "grammars"),
@@ -1142,6 +1149,7 @@ export default Plugin.define({
       code: codeService,
       share: shareService,
       lsp,
+      notes,
       snapshot,
     });
 
@@ -1336,7 +1344,10 @@ export default Plugin.define({
         return hint;
       },
       summarize,
-      onActivity: (sessionID) => runtime.lifecycle?.touch(sessionID),
+        onActivity: (sessionID) => {
+        runtime.lifecycle?.touch(sessionID);
+        dreamer?.touch();
+      },
       measure: (op, body) => telemetry.span(op, body),
       onInject: () => {
         counters.noteInjection();
@@ -1346,6 +1357,7 @@ export default Plugin.define({
       onCost: (_sessionID, bytes) => void ledger.recordInjection(bytes),
       onPrompt: (sessionID, text) => prompts.note(sessionID, text),
       onPromptArchive: (sessionID, text) => void archive?.append(sessionID, "user", text),
+      getNotes: () => notes,
       signal: shutdown.signal,
       projectRoot,
       recordQuery: (sessionID, paths, bytes, hits) =>
@@ -2080,6 +2092,29 @@ export default Plugin.define({
             });
           }
 
+          dreamer = new Dreamer({
+            config: config.memory.dreamer,
+            projectRoot,
+            stateDirectory: projectStateDir(projectRoot),
+            logger,
+            signal: shutdown.signal,
+            memory: () => runtime.memory,
+            owns: (sessionID) => prompts.knows(sessionID),
+            createSession: (input) =>
+              ctx.session.create(input as never) as Promise<{ id: string }>,
+            prompt: (input) => ctx.session.prompt(input as never),
+            record: (result) =>
+              telemetry.record("memory.dreamer", 0, result.ran, {
+                child: result.child,
+                checked: result.checked,
+                stale: result.stale,
+                merged: result.merged,
+                flagged: result.flagged,
+                reason: result.reason ?? null,
+              }),
+          });
+          await dreamer.register(ctx);
+
           startTurnCapture({
             events: ctx.event,
             memory: runtime.memory,
@@ -2217,6 +2252,7 @@ export default Plugin.define({
         try {
           runtime.cmd?.stop();
           autotuner?.stop();
+          dreamer?.touch();
           await lsp.stopAll();
           await jevos?.stop();
           await runtime.lifecycle?.stop();

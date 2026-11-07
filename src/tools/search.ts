@@ -23,6 +23,7 @@ import type { TreeSitterService } from "../analysis/treesitter.ts";
 import type { CodeService } from "../code/service.ts";
 import type { ShareService } from "../share/service.ts";
 import type { LspPool } from "../analysis/lsp/pool.ts";
+import type { NoteStore } from "../notes/store.ts";
 import { listProjectFiles } from "../analysis/walk.ts";
 import { unusedExports } from "../analysis/exports.ts";
 
@@ -45,6 +46,7 @@ export interface ToolOptions {
   readonly code: CodeService;
   readonly share: ShareService;
   readonly lsp: LspPool;
+  readonly notes: NoteStore;
   readonly snapshot: () => Promise<StatusSnapshot>;
 }
 
@@ -901,6 +903,7 @@ export function buildTools(options: ToolOptions): ReadonlyArray<{
     ...(options.config.share.enabled ? [shareTool(options)] : []),
     ...(options.config.analysis.lsp.enabled ? lspTools(options) : []),
     inspectTool(options),
+    ...(options.config.context.notes.enabled ? [notesTool(options)] : []),
   ];
 }
 
@@ -1098,6 +1101,114 @@ const INSPECT_INPUT = {
   },
   additionalProperties: false,
 } as const;
+
+const NOTES_INPUT = {
+  type: "object",
+  properties: {
+    action: {
+      type: "string",
+      enum: ["add", "list", "remove", "search"],
+      description: "Add, list, remove, or search project notes.",
+    },
+    text: { type: "string", description: "Note text for action=add." },
+    conditions: {
+      type: "array",
+      items: { type: "string" },
+      description: "Prompt terms that should surface the note.",
+    },
+    tags: {
+      type: "array",
+      items: { type: "string" },
+      description: "Short tags that also surface the note.",
+    },
+    id: { type: "string", description: "Note id for action=remove." },
+    query: { type: "string", description: "Search terms for action=search." },
+  },
+  required: ["action"],
+  additionalProperties: false,
+} as const;
+
+/** Deferred notes; registered with `context.notes.enabled`. */
+function notesTool(options: ToolOptions): {
+  name: string;
+  description: string;
+  input: unknown;
+  options: { namespace: string };
+  execute: (input: unknown) => Promise<unknown>;
+} {
+  return {
+    name: "notes",
+    description:
+      "Save a deferred intention or reminder as a project note. A note is surfaced automatically when the prompt matches its conditions or tags, and stays out of context otherwise. Use add for a new note, list to see them, remove by id, or search to look one up.",
+    input: NOTES_INPUT,
+    options: { namespace: "xerj" },
+    execute: async (input) => {
+      const args = input as {
+        action: "add" | "list" | "remove" | "search";
+        text?: string;
+        conditions?: string[];
+        tags?: string[];
+        id?: string;
+        query?: string;
+      };
+      try {
+        if (args.action === "add") {
+          const note = await options.notes.add({
+            text: args.text ?? "",
+            conditions: args.conditions,
+            tags: args.tags,
+          });
+          return {
+            content: `Saved note ${note.id}.`,
+            metadata: { xerj: { notes: 1, id: note.id } },
+          };
+        }
+        if (args.action === "remove") {
+          const removed = await options.notes.remove(args.id ?? "");
+          return {
+            content: removed
+              ? `Removed note ${args.id ?? ""}.`
+              : `No note with id ${args.id ?? ""}.`,
+            metadata: { xerj: { notes: removed ? 1 : 0 } },
+          };
+        }
+        if (args.action === "search") {
+          const found = await options.notes.search(args.query ?? "", 20);
+          return {
+            content:
+              found.length === 0
+                ? "No notes matched."
+                : found
+                    .map(
+                      (note) =>
+                        `${note.id}  ${note.conditions.join(", ") || "-"}  ${note.text}`,
+                    )
+                    .join("\n"),
+            metadata: { xerj: { notes: found.length } },
+          };
+        }
+        const notes = await options.notes.list();
+        return {
+          content:
+            notes.length === 0
+              ? "No notes yet."
+              : notes
+                  .map(
+                    (note) =>
+                      `${note.id}  ${note.conditions.join(", ") || "-"}  ${note.text}`,
+                  )
+                  .join("\n"),
+          metadata: { xerj: { notes: notes.length } },
+        };
+      } catch (error) {
+        return {
+          content: `Notes failed: ${String(error)}`,
+          metadata: { xerj: { notes: 0 } },
+        };
+      }
+    },
+  };
+}
 
 /** TODO markers always, diagnostics when the LSP gate is open. */
 function inspectTool(options: ToolOptions): {
