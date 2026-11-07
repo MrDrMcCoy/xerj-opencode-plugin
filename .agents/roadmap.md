@@ -1412,7 +1412,7 @@ measured; they include tests and the commits that carry them. A status of
 | LSP pool | L | Done (gated off) | 6.0 h | `analysis/lsp/client.ts` speaks JSON-RPC over stdio (initialize, didOpen, workspace/symbol, call hierarchy, definitions, references, publishDiagnostics, server-request answers). `analysis/lsp/pool.ts` resolves a configured command, project `node_modules`, PATH, or the cache; starts at most `maxServers`; opens up to 500 TypeScript files because tsserver only indexes opened documents; stops after `idleMs`. Verified against `typescript-language-server@6.0.3` on a two-file fixture: one caller, one impact, clean shutdown. Gate stays closed |
 | Server installer | L | Done (TypeScript) | 1.0 h | `LspPool.installTypeScript` runs `npm install --prefix <staging> --ignore-scripts --no-audit --no-fund typescript-language-server@6.0.3 typescript@5.9.3` into `<data root>/lsp/typescript/6.0.3`, probes `lib/cli.mjs`, and renames under a lock. Other languages use `analysis.lsp.servers` for now |
 | `xerj_callers`, `xerj_impact` | L | Done (gated off) | 1.5 h | Both use `workspace/symbol` to locate the definition, `textDocument/documentSymbol` or the source line to find the name column, then `prepareCallHierarchy` and incoming calls. `impact` follows up to depth 5 and caps at 50. Gated by `analysis.lsp.enabled` |
-| `xerj_inspect` | L | Done (partial) | 1.0 h | Registered without a gate: scans the project for TODO/FIXME/HACK markers. With `analysis.lsp.enabled` and a path, opens the file and reports published diagnostics. Unused exports and dead-code analysis are deferred |
+| `xerj_inspect` | L | Done | 1.5 h | Registered without a gate: TODO/FIXME/HACK markers everywhere, published diagnostics for one file when `analysis.lsp.enabled`, and a heuristic unused-export list when `analysis.treeSitter.enabled`. `analysis/exports.ts` counts identifiers per file; string references and dynamic imports can still fool it, so the section is labelled heuristic. Three module tests |
 | `xerj_share` | L | Done (gated off) | 0.5 h | `src/share/service.ts` wraps `xerj share` create/list/revoke with `--expires`, `--max-claims`, optional passcode and label, and `--url` to the plugin node. No tunnel is offered. `share.enabled` is false. Three service tests and a registration test. |
 | Dreamer child sessions | XL | Not started | — | — |
 | Notes and smart notes | XL | Not started | — | — |
@@ -1430,10 +1430,9 @@ pass.
 
 Tier M so far: **18.0 h** across eleven items this pass, twelve of fourteen
 with the graph overview that predates it. Remaining: the two XL design items
-(dreamer sessions and notes), plus unused-export analysis inside
-`xerj_inspect`. Tree-sitter, complexity, LSP, callers, impact, inspect,
-`xerj_ask`, `xerj_code`, `xerj_share`, and window extraction are shipped behind
-their gates.
+(dreamer sessions and notes). Tree-sitter, complexity, LSP, callers, impact,
+inspect, `xerj_ask`, `xerj_code`, `xerj_share`, and window extraction are
+shipped behind their gates.
 
 ## Settled decisions
 

@@ -1060,7 +1060,10 @@ At most `maxServers` run at once.
 `xerj_inspect` is always registered, even with both parser gates closed. It
 scans for TODO/FIXME/HACK markers in the project. When the LSP gate is open and
 a file is given, it also opens that file and reports diagnostics the server
-publishes. Unused exports and dead-code analysis are not implemented yet.
+publishes. When the tree-sitter gate is open it adds a heuristic unused-export
+list: an exported name that no project file mentions again. String references
+and dynamic imports can make a live export look unused, so the section is
+labelled heuristic.
 
 [Back to top](#table-of-contents)
 

@@ -381,6 +381,13 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-07: `xerj_inspect` now covers unused exports. When
+  `analysis.treeSitter.enabled` is on, `analysis/exports.ts` counts every
+  identifier per file and reports exported top-level names that no other file
+  mentions again, labelled heuristic because a string reference or dynamic
+  import can make a live export look unused. Three module tests. 1254 unit
+  tests pass and typecheck is clean. Nothing is pushed or released.
+
 - 2026-11-07: The LSP pool, the pinned TypeScript installer, and the
   `xerj_callers`/`xerj_impact` tools are implemented behind
   `analysis.lsp.enabled` (off); `xerj_inspect` is always registered for TODOs

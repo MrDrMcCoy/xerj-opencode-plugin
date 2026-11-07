@@ -24,6 +24,7 @@ import type { CodeService } from "../code/service.ts";
 import type { ShareService } from "../share/service.ts";
 import type { LspPool } from "../analysis/lsp/pool.ts";
 import { listProjectFiles } from "../analysis/walk.ts";
+import { unusedExports } from "../analysis/exports.ts";
 
 export interface ToolOptions {
   readonly config: Config;
@@ -1121,10 +1122,12 @@ function inspectTool(options: ToolOptions): {
           : await listProjectFiles(options.projectRoot, { maxFiles: 2_000 });
       const limit = Math.max(1, Math.min(args.top ?? 50, 200));
       const todos: string[] = [];
+      const texts = new Map<string, string>();
       for (const path of files) {
         if (tool.signal?.aborted) break;
         const text = await readProjectFile(options.projectRoot, path, 512 * 1024);
         if (text === null) continue;
+        texts.set(path, text);
         const lines = text.split("\n");
         for (let index = 0; index < lines.length; index += 1) {
           if (/\b(TODO|FIXME|HACK|XXX)\b/.test(lines[index] ?? "")) {
@@ -1140,6 +1143,29 @@ function inspectTool(options: ToolOptions): {
           ? "No TODO/FIXME/HACK markers found."
           : `${todos.length} marker${todos.length === 1 ? "" : "s"}:\n${todos.join("\n")}`,
       ];
+      let unused = 0;
+      if (options.config.analysis.treeSitter.enabled) {
+        if (args.path !== undefined) {
+          const all = await listProjectFiles(options.projectRoot, { maxFiles: 2_000 });
+          for (const path of all) {
+            if (texts.has(path)) continue;
+            if (!/\.(ts|tsx|js|jsx|mjs|cjs)$/.test(path)) continue;
+            const text = await readProjectFile(options.projectRoot, path, 512 * 1024);
+            if (text !== null) texts.set(path, text);
+          }
+        }
+        const found = unusedExports(texts, 50).filter(
+          (entry) => args.path === undefined || entry.path === args.path,
+        );
+        unused = found.length;
+        lines.push(
+          found.length === 0
+            ? "No unused exports found (heuristic)."
+            : `Unused exports (heuristic):\n${found
+                .map((entry) => `${entry.path}:${entry.line}  ${entry.kind} ${entry.name}`)
+                .join("\n")}`,
+        );
+      }
       let diagnostics = 0;
       if (options.config.analysis.lsp.enabled && args.path !== undefined) {
         const items = await options.lsp
@@ -1170,7 +1196,7 @@ function inspectTool(options: ToolOptions): {
       }
       return {
         content: lines.join("\n\n"),
-        metadata: { xerj: { todos: todos.length, diagnostics } },
+        metadata: { xerj: { todos: todos.length, unused, diagnostics } },
       };
     },
   };
