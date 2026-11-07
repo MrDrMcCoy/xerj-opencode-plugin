@@ -386,7 +386,14 @@ publish, and live TUI verification remain.
   names only the indices whose mapping says `semantic_text`, and skips itself
   when there are none. Verified live: the query answers with hits on the
   project index and 400s with "it is not a `semantic_text` field" when the docs
-  index joins the pattern. 1092 unit tests pass, typecheck clean. Neither fix
+  index joins the pattern.
+
+  The recall cost of the dead leg is measured. On an isolated node started from
+  a copy of this project's engine data (362 MB, `--embed-mode neural`, its own
+  port) the labeled 60-prompt eval scored 26/60 at 335 KB with the pre-fix leg
+  and 39/60 at 299 KB with the fix, back to back on one corpus. Restoring the
+  leg also cut injected bytes by 11%, because fusion promotes the file the
+  lexical hits were burying. 1092 unit tests pass, typecheck clean. Neither fix
   is loaded in the running server; both need the OpenCode restart.
 
 - 2026-11-06: The stale web run record is fixed, and the badge no longer flaps.
