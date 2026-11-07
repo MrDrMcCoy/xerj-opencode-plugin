@@ -635,6 +635,17 @@ function telemetryLines(snapshot: StatusSnapshot): string[] {
           ? ""
           : ` · indexed ${formatDuration(last.indexedMs)}`) +
         (last.crashed ? " · previous run crashed" : ""),
+    ...(telemetry.distill.promoted === 0 && telemetry.distill.recalled === 0
+      ? []
+      : [
+          `distilled ${formatCount(telemetry.distill.promoted)} · ` +
+            `heuristic ${formatCount(telemetry.distill.heuristic)} · ` +
+            `model ${formatCount(telemetry.distill.model)}` +
+            (telemetry.distill.calls > 0
+              ? ` · ${formatCount(telemetry.distill.calls)} calls`
+              : "") +
+            ` · recalled ${formatCount(telemetry.distill.recalled)}`,
+        ]),
     `${formatCount(telemetry.crashes)} crashes · ` +
       `${formatCount(telemetry.restarts)} restarts · ` +
       `${formatBytes(telemetry.storeBytes)} store` +

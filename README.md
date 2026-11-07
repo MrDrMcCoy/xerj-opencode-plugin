@@ -688,7 +688,8 @@ the candidate, promoted, duplicate, and rejected counts, and the recall pass
 records how many of its hits were distilled. Together those are the cost side
 (duration and count per judge) and the effectiveness side (promoted memories
 that are actually recalled), readable through `xerj_telemetry op=memory.distill`
-and `xerj_telemetry op=memory.recall`.
+and `xerj_telemetry op=memory.recall`. The panel's Telemetry section shows the
+same line: `distilled N · heuristic A · model B · calls C · recalled R`.
 
 [Back to top](#table-of-contents)
 

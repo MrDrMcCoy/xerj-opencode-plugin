@@ -379,9 +379,11 @@ publish, and live TUI verification remain.
   measurement on a labeled set is still pending, which is the remaining gate
   before recommending the model route.
 
-  16 distill tests pass (parse, invalid answer, timeout, fallback, call cap),
-  plus the capture, config, and report tests; the full unit suite is green and
-  typecheck is clean.
+  The panel's Telemetry section now carries the same line
+  (`distilled N · heuristic A · model B · calls C · recalled R`), so the
+  effectiveness pair is visible without running the tool. 18 distill and panel
+  tests cover parsing, invalid answers, timeouts, fallback, the call cap, and
+  the rendered line.
 
 - 2026-11-06: Live context distillation shipped behind `memory.distill.enabled`
   (off). After each turn the plugin classifies sentences from that turn's own

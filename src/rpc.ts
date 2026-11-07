@@ -224,8 +224,19 @@ export interface TelemetryStatus {
   readonly process: TelemetryProcessStatus | null;
   readonly storeBytes: number;
   readonly historyStart: string | null;
+  /** Cost and effect of live-context distillation, by judge. */
+  readonly distill: TelemetryDistillStatus;
   /** Why the store stopped recording, if it did. */
   readonly disabled: string | null;
+}
+
+export interface TelemetryDistillStatus {
+  readonly promoted: number;
+  readonly heuristic: number;
+  readonly model: number;
+  readonly recalled: number;
+  readonly calls: number;
+  readonly chars: number;
 }
 
 export interface StatusSnapshot {
@@ -522,6 +533,14 @@ const definition = {
           },
           storeBytes: { type: "number" },
           historyStart: { type: ["string", "null"] },
+          distill: object({
+            promoted: { type: "number" },
+            heuristic: { type: "number" },
+            model: { type: "number" },
+            recalled: { type: "number" },
+            calls: { type: "number" },
+            chars: { type: "number" },
+          }),
           disabled: { type: ["string", "null"] },
         }),
         counters: object({

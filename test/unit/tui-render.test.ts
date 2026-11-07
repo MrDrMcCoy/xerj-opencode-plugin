@@ -126,6 +126,7 @@ const SNAPSHOT: StatusSnapshot = {
     process: null,
     storeBytes: 0,
     historyStart: null,
+    distill: { promoted: 0, heuristic: 0, model: 0, recalled: 0, calls: 0, chars: 0 },
     disabled: null,
   },
   corpora: [

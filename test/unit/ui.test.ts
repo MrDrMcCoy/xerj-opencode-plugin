@@ -126,6 +126,7 @@ function snapshot(overrides: Partial<StatusSnapshot> = {}): StatusSnapshot {
     process: null,
     storeBytes: 0,
     historyStart: null,
+    distill: { promoted: 0, heuristic: 0, model: 0, recalled: 0, calls: 0, chars: 0 },
     disabled: null,
   },
     corpora: [
@@ -770,5 +771,39 @@ describe("sidebarView", () => {
     const net = savings?.rows.find((row) => row.label === "net");
 
     expect(net?.tone).toBe("bad");
+  });
+});
+
+describe("distillation in the panel", () => {
+  test("reports promoted, per-judge, calls, and recalled", () => {
+    const base = snapshot();
+    const view = snapshot({
+      telemetry: {
+        ...base.telemetry,
+        distill: {
+          promoted: 3,
+          heuristic: 2,
+          model: 1,
+          recalled: 2,
+          calls: 3,
+          chars: 4_000,
+        },
+      },
+    });
+    const telemetry = panelSections(view, NOW).find(
+      (section) => section.title === "Telemetry",
+    );
+    const text = telemetry?.lines.join("\n") ?? "";
+
+    expect(text).toContain(
+      "distilled 3 · heuristic 2 · model 1 · 3 calls · recalled 2",
+    );
+  });
+
+  test("says nothing when no memory was distilled", () => {
+    const telemetry = panelSections(snapshot(), NOW).find(
+      (section) => section.title === "Telemetry",
+    );
+    expect(telemetry?.lines.join("\n")).not.toContain("distilled");
   });
 });
