@@ -165,3 +165,45 @@ describe("ProcessSampler", () => {
 function counters(ticks: number, memoryBytes: number): ProcessCounters {
   return { ticks, cpuPercent: null, memoryBytes, threads: 4 };
 }
+
+describe("ProcessSampler.forget", () => {
+  test("a forgotten pid starts at null CPU again", async () => {
+    const { store, samples } = fakeStore();
+    let ticks = 100;
+    let now = 1_000;
+    const sampler = new ProcessSampler({
+      store,
+      logger,
+      intervalMs: 0,
+      targets: () => [{ kind: "node", pid: 42 }],
+      load: () => 0,
+      read: async () => counters((ticks += 100), 64),
+      now: () => now,
+    });
+
+    await sampler.sampleOnce();
+    now += 1_000;
+    await sampler.sampleOnce();
+    expect(samples[1]?.cpuPct).toBe(100);
+
+    sampler.forget(42);
+    now += 1_000;
+    await sampler.sampleOnce();
+    expect(samples[2]?.cpuPct).toBeNull();
+  });
+
+  test("stop is idempotent", () => {
+    const { store } = fakeStore();
+    const sampler = new ProcessSampler({
+      store,
+      logger,
+      intervalMs: 0,
+      targets: () => [],
+      load: () => 0,
+    });
+    expect(() => {
+      sampler.stop();
+      sampler.stop();
+    }).not.toThrow();
+  });
+});

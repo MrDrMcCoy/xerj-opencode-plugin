@@ -50,18 +50,26 @@ export interface GrammarManagerOptions {
   readonly root: string;
   readonly logger: Logger;
   readonly timeoutMs?: number;
+  /** Override the pinned tarball URL; tests use a local server. */
+  readonly url?: string;
+  /** Override the pinned sha512; tests use a fixture tarball. */
+  readonly integrity?: string;
 }
 
 export class GrammarManager {
   private readonly root: string;
   private readonly logger: Logger;
   private readonly timeoutMs: number;
+  private readonly url: string;
+  private readonly integrity: string;
   private pending: Promise<string | null> | null = null;
 
   constructor(options: GrammarManagerOptions) {
     this.root = options.root;
     this.logger = options.logger;
     this.timeoutMs = options.timeoutMs ?? 300_000;
+    this.url = options.url ?? GRAMMAR_PACK_URL;
+    this.integrity = options.integrity ?? GRAMMAR_PACK_INTEGRITY;
   }
 
   get directory(): string {
@@ -112,8 +120,8 @@ export class GrammarManager {
       });
       await this.download(tarball);
       const hash = await sha512(tarball);
-      if (hash !== GRAMMAR_PACK_INTEGRITY) {
-        throw new Error(`grammar pack integrity mismatch (want ${GRAMMAR_PACK_INTEGRITY})`);
+      if (hash !== this.integrity) {
+        throw new Error(`grammar pack integrity mismatch (want ${this.integrity})`);
       }
       await extract(tarball, staging, this.timeoutMs);
       const out = join(staging, "package", "out");
@@ -125,7 +133,7 @@ export class GrammarManager {
         `${JSON.stringify(
           {
             version: GRAMMAR_PACK_VERSION,
-            integrity: GRAMMAR_PACK_INTEGRITY,
+            integrity: this.integrity,
             installedAt: new Date().toISOString(),
           },
           null,
@@ -147,7 +155,7 @@ export class GrammarManager {
   }
 
   private async download(destination: string): Promise<void> {
-    const response = await fetch(GRAMMAR_PACK_URL, {
+    const response = await fetch(this.url, {
       redirect: "follow",
       signal: AbortSignal.timeout(this.timeoutMs),
     });

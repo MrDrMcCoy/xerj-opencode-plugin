@@ -29,17 +29,29 @@ export function runEngine(
     });
     let stdout = "";
     let stderr = "";
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
       child.kill("SIGKILL");
     }, timeoutMs);
     timer.unref?.();
+    // Keep at most the cap, not "append a whole chunk while under it": one
+    // 64 KiB stderr chunk would otherwise double a 64 KiB limit.
     child.stdout.on("data", (chunk: Buffer) => {
-      if (stdout.length < MAX_OUTPUT_BYTES) stdout += chunk.toString("utf8");
+      if (stdoutBytes >= MAX_OUTPUT_BYTES) return;
+      const room = MAX_OUTPUT_BYTES - stdoutBytes;
+      const part = chunk.length > room ? chunk.subarray(0, room) : chunk;
+      stdout += part.toString("utf8");
+      stdoutBytes += part.length;
     });
     child.stderr.on("data", (chunk: Buffer) => {
-      if (stderr.length < MAX_ERROR_BYTES) stderr += chunk.toString("utf8");
+      if (stderrBytes >= MAX_ERROR_BYTES) return;
+      const room = MAX_ERROR_BYTES - stderrBytes;
+      const part = chunk.length > room ? chunk.subarray(0, room) : chunk;
+      stderr += part.toString("utf8");
+      stderrBytes += part.length;
     });
     child.once("error", (error) => {
       clearTimeout(timer);

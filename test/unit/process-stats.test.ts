@@ -43,3 +43,57 @@ describe("sampleProcess", () => {
     expect(await sampleProcess(1, { sampleMs: 1, read })).toBeNull();
   });
 });
+
+describe("readProcessCounters", () => {
+  const stat = "100 (cmd with space) S 1 2 3 4 5 6 7 8 9 10 11 12\n";
+  const status = "Name:\txerj\nVmRSS:\t 2048 kB\nThreads:\t7\n";
+
+  test("reads ticks, RSS, and threads from /proc", async () => {
+    const { readProcessCounters } = await import("../../src/process-stats.ts");
+    const read = async (path: string) => {
+      if (path.endsWith("/stat")) return stat;
+      if (path.endsWith("/status")) return status;
+      throw new Error(`unexpected ${path}`);
+    };
+
+    const counters = await readProcessCounters(42, {
+      platform: "linux",
+      read: read as never,
+    });
+    expect(counters).toEqual({
+      ticks: 23,
+      cpuPercent: null,
+      memoryBytes: 2_097_152,
+      threads: 7,
+    });
+  });
+
+  test("a missing /proc entry is null", async () => {
+    const { readProcessCounters } = await import("../../src/process-stats.ts");
+    const read = async () => {
+      throw new Error("gone");
+    };
+    expect(
+      await readProcessCounters(42, { platform: "linux", read: read as never }),
+    ).toBeNull();
+  });
+
+  test("the ps reader reports a percentage and no ticks", async () => {
+    const { readProcessCounters } = await import("../../src/process-stats.ts");
+    const counters = await readProcessCounters(42, {
+      platform: "darwin",
+      ps: async () => "  12.5 2048\n",
+    });
+    expect(counters).toEqual({
+      ticks: null,
+      cpuPercent: 12.5,
+      memoryBytes: 2_097_152,
+      threads: null,
+    });
+  });
+
+  test("Windows has no reader", async () => {
+    const { readProcessCounters } = await import("../../src/process-stats.ts");
+    expect(await readProcessCounters(42, { platform: "win32" })).toBeNull();
+  });
+});

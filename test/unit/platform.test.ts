@@ -80,3 +80,60 @@ describe("isRosetta", () => {
     expect(isRosetta("0\n")).toBe(false);
   });
 });
+
+describe("detectRuntime", () => {
+  test("selects the host triple and libc", async () => {
+    const { detectRuntime } = await import("../../src/binary/detect.ts");
+    const detected = await detectRuntime({
+      libc: "musl",
+      target: null,
+      platform: "linux",
+      arch: "x64",
+      rosetta: false,
+    });
+
+    expect(detected).toMatchObject({
+      platform: "linux",
+      arch: "x64",
+      rosetta: false,
+      info: { target: "x86_64-unknown-linux-musl", archive: "tar.gz" },
+    });
+  });
+
+  test("an explicit target wins over host detection", async () => {
+    const { detectRuntime } = await import("../../src/binary/detect.ts");
+    const detected = await detectRuntime({
+      libc: "musl",
+      target: "aarch64-unknown-linux-gnu",
+      platform: "linux",
+      arch: "x64",
+    });
+
+    expect(detected.info?.target).toBe("aarch64-unknown-linux-gnu");
+  });
+
+  test("a Rosetta shell gets the native arm64 build", async () => {
+    const { detectRuntime } = await import("../../src/binary/detect.ts");
+    const detected = await detectRuntime({
+      libc: "gnu",
+      target: null,
+      platform: "darwin",
+      arch: "x64",
+      rosetta: true,
+    });
+
+    expect(detected.info?.target).toBe("aarch64-apple-darwin");
+  });
+
+  test("an unknown target returns no release info", async () => {
+    const { detectRuntime } = await import("../../src/binary/detect.ts");
+    const detected = await detectRuntime({
+      libc: "musl",
+      target: "not-a-triple",
+      platform: "linux",
+      arch: "x64",
+    });
+
+    expect(detected.info).toBeNull();
+  });
+});

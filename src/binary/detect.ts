@@ -28,15 +28,25 @@ export interface DetectOptions {
   readonly env?: Readonly<Record<string, string | undefined>>;
   /** Deadline for host detection commands; defaults to 2 seconds. */
   readonly timeoutMs?: number;
+  /** Override the host facts; tests use this instead of another machine. */
+  readonly platform?: NodeJS.Platform;
+  readonly arch?: string;
+  readonly rosetta?: boolean;
 }
 
 export async function detectRuntime(options: DetectOptions): Promise<RuntimeTarget> {
-  const platform = process.platform;
+  const platform = options.platform ?? process.platform;
   const rosetta =
-    platform === "darwin"
+    options.rosetta ??
+    (platform === "darwin"
       ? await detectRosetta(options.timeoutMs ?? SYSCTL_TIMEOUT_MS)
-      : false;
-  const arch = effectiveArch(platform, process.arch, options.env ?? process.env, rosetta);
+      : false);
+  const arch = effectiveArch(
+    platform,
+    options.arch ?? process.arch,
+    options.env ?? process.env,
+    rosetta,
+  );
 
   const info = options.target
     ? platformInfoForTarget(options.target, platform)

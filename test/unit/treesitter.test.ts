@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { cacheRoot, environmentFrom } from "../../src/paths.ts";
 import {
   TreeSitterService,
   languagesForFiles,
@@ -163,4 +165,36 @@ describe("tree-sitter analysis", () => {
       "analysis.treeSitter.enabled",
     );
   });
+});
+
+describe("tree-sitter with the real grammar pack", () => {
+  // The pack is downloaded on first use, not vendored, so CI may not have it.
+  // When the cache is present this runs the real web-tree-sitter path; when it
+  // is not, the injected-parser tests above still cover the service.
+  const grammarRoot = join(cacheRoot(environmentFrom(process.env)), "grammars");
+  const hasPack = existsSync(
+    join(grammarRoot, "0.1.13", "out", "tree-sitter-typescript.wasm"),
+  );
+
+  test.skipIf(!hasPack)("parses a TypeScript file", async () => {
+    const root = await tempDir();
+    await writeFile(
+      join(root, "a.ts"),
+      "export function build(a: number) { if (a > 0) return a; return 0; }\n",
+    );
+    const service = new TreeSitterService({
+      projectRoot: root,
+      grammarRoot,
+      config: {
+        ...DEFAULT_CONFIG.analysis.treeSitter,
+        enabled: true,
+        languages: [],
+      },
+      logger,
+    });
+
+    const report = await service.report({ path: "a.ts" });
+    expect(report.functions.length).toBeGreaterThan(0);
+    expect(report.functions[0]?.name).toBe("build");
+  }, 30_000);
 });
