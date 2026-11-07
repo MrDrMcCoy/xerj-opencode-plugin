@@ -162,6 +162,7 @@ describe("TelemetryStore", () => {
       promoted: 3,
       heuristic: 2,
       model: 1,
+      local: 0,
       recalled: 2,
       calls: 2,
       chars: 1_500,

@@ -126,7 +126,7 @@ function snapshot(overrides: Partial<StatusSnapshot> = {}): StatusSnapshot {
     process: null,
     storeBytes: 0,
     historyStart: null,
-    distill: { promoted: 0, heuristic: 0, model: 0, recalled: 0, calls: 0, chars: 0 },
+    distill: { promoted: 0, heuristic: 0, model: 0, local: 0, recalled: 0, calls: 0, chars: 0 },
     disabled: null,
   },
     corpora: [
@@ -784,6 +784,7 @@ describe("distillation in the panel", () => {
           promoted: 3,
           heuristic: 2,
           model: 1,
+          local: 0,
           recalled: 2,
           calls: 3,
           chars: 4_000,

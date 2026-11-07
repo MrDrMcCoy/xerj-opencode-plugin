@@ -639,8 +639,13 @@ function telemetryLines(snapshot: StatusSnapshot): string[] {
       ? []
       : [
           `distilled ${formatCount(telemetry.distill.promoted)} · ` +
-            `heuristic ${formatCount(telemetry.distill.heuristic)} · ` +
-            `model ${formatCount(telemetry.distill.model)}` +
+            `heuristic ${formatCount(telemetry.distill.heuristic)}` +
+            (telemetry.distill.model > 0
+              ? ` · model ${formatCount(telemetry.distill.model)}`
+              : "") +
+            (telemetry.distill.local > 0
+              ? ` · local ${formatCount(telemetry.distill.local)}`
+              : "") +
             (telemetry.distill.calls > 0
               ? ` · ${formatCount(telemetry.distill.calls)} calls`
               : "") +

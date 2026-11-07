@@ -121,7 +121,7 @@ setting, not a build flag: the same published package carries the capability.
 | `hub.network` | `false` | Allow `xerj ask` to reach the catalogue and download packs; when false only already-cached packs answer |
 | `cmd.enabled` | `true` | Register `xerj_run` and `xerj_out`, and maintain the command-output corpus. The one open gate; see its design section |
 | `memory.distill.enabled` | `false` | Turn finished turns into typed memories and retire distilled ones past their budget |
-| `memory.distill.judge` | `heuristic` | `heuristic` is the free local filter; `model` asks the current model per candidate |
+| `memory.distill.judge` | `heuristic` | `heuristic` is the free local filter; `model` asks the current model per candidate; `local` runs the downloaded jevos CPU model |
 
 Defaults are closed because each capability adds something a retrieval plugin
 should not impose on its own: 52 to 100 MB of grammars, a process holding
@@ -147,7 +147,7 @@ started, no port is opened, and no network call is made.
 | `analysis.lsp.enabled` | Detects the project's languages, then resolves a server for each: `servers[language]`, then the project's `node_modules/.bin`, then `PATH`, then the plugin's own cache. If none is found and `autoInstall` is true, it installs a pinned server into `<data root>/lsp/<language>/<version>/`, probes it with `--version`, and uses it. No toolchain check runs first; a language with no known server logs once and stays unanalysed |
 | `share.enabled` | Nothing until `xerj_share` is invoked. The tool then prints the address and expiry before it accepts a request |
 | `hub.enabled` | The cached catalogue only. `hub.network` adds downloads; until then, a missing pack reports which key would fetch it |
-| `memory.distill.enabled` | Nothing until a turn finishes. The turn's own prompt and answer are classified locally, the qualifying sentences are written to memory, and the hourly sweep retires the lowest-confidence distilled ones past the budget. No model call, no window read |
+| `memory.distill.enabled` | Nothing until a turn finishes. The turn's own prompt and answer are classified locally, the qualifying sentences are written to memory, and the hourly sweep retires the lowest-confidence distilled ones past the budget. No model call, no window read. `judge: "local"` additionally downloads the jevos binary and its 630 MB model once, checksum-verified, into `<data root>/jev/`, and keeps a loopback server until `local.idleMs` |
 | `cmd.enabled` (already on) | Nothing until a command runs. `xerj_run` then creates `<project>/.xerj/cmd/` on first use, writes the command and its output, and indexes the text without embedding it. Turning it off removes the tools, the suggestion, and the directory on the next start |
 
 Two rules follow from the table:
@@ -221,6 +221,7 @@ Four safety rules for an install:
 | `xerj_ask` | The hub catalogue | Tool not registered; with `hub.enabled` open and `hub.network` closed, only cached packs answer |
 | `xerj_run`, `xerj_out` | `cmd.enabled` (open by default) | Tools not registered, no `cmd/` directory is created, and no suggestion is injected |
 | Live context distillation | `memory.distill.enabled` | No judge runs, no distilled memory is written, no retirement sweep runs; recall and `xerj_remember` are unchanged |
+| The local judge | `memory.distill.judge` = `local` | Nothing is downloaded, no server is started, and the heuristic answers |
 | Retrieval, injection, memory, docs corpora | Nothing gated | Identical with every gate closed |
 
 Five rules make the gates trustworthy:
@@ -1065,7 +1066,7 @@ a decision from last month is true whether or not this turn needed it.
 
 #### Judges
 
-One write path, two judges, chosen by `memory.distill.judge`.
+One write path, three judges, chosen by `memory.distill.judge`.
 
 - **`heuristic`** (shipped): a local filter. It strips fenced code, splits the
   turn into sentences, rejects questions, hedges, plans, and internal markers,
@@ -1078,10 +1079,85 @@ One write path, two judges, chosen by `memory.distill.judge`.
   answers a JSON verdict (`keep`, `kind`, `score`). An unusable answer, a
   timeout, a missing host model, or a candidate past the call cap keeps the
   heuristic verdict, so a transient failure never loses a memory.
+- **`local`** (shipped): the downloaded jevos v5 OpenVINO INT8 model on the
+  CPU, with no endpoint and no network after the install. `src/jev/` owns the
+  whole lifetime: `release.ts` (asset names and `SHA256SUMS.txt`), `manager.ts`
+  (verified download of `bin/` and `model/`, staged and renamed), `supervisor.ts`
+  (one loopback server, attach, idle stop), and `judge.ts` (the request). The
+  install is shared by every project in the installation under
+  `<data root>/jev/`; the download starts in the background from `setup` so a
+  turn never waits for it, and the judge falls back to the heuristic until it
+  answers.
 
-Both write the same metadata: `source: distill:<judge>`, `confidence`, `origin`
+All three write the same metadata: `source: distill:<judge>`, `confidence`, `origin`
 (prompt or answer), `topic`, and the session id. The id is the text hash, so a
 repeated turn is idempotent.
+
+#### The local judge (jevos)
+
+The reason for a downloaded model is portability: `model` needs a host model,
+which not every install has, and a hosted endpoint costs money and sends the
+turn off the machine. jevos answers yes/no questions on the CPU, so the plugin
+can offer a third route that is local, free, and works offline after one
+install.
+
+**Install and lifetime.** `<data root>/jev/<version>-<target>/` holds `bin/`
+(the binary with its OpenVINO and TBB shared libraries) and `model/`
+(`model.json`, `openvino_model.xml`, `openvino_model.bin`, `tokenizer.gguf`).
+`JevosManager.ensure()` downloads the release binary (about 27 MB) and the
+OpenVINO INT8 model (about 630 MB), checks both against the tag's
+`SHA256SUMS.txt`, extracts into a `.partial-<pid>` sibling, probes the binary
+(running it prints usage and exits 2), and renames the tree into place. A
+failed install removes the partial, keeps the old tree, logs once, and leaves
+the heuristic running. The 630 MB hash streams rather than loading the file.
+
+`JevosSupervisor` starts one server per installation on `local.port` (8017 by
+default), falling back to the first free port in 8017-8099 when the configured
+one belongs to another program. A server already healthy on the port is
+attached to instead of a second one; two projects share it, and the first
+caller's `--threads` decides the worker count. The server stops after
+`local.idleMs` (10 min) with no judgement and restarts on the next one. It
+lives under `<data root>/jev/jev.log`, not in any project.
+
+**The judgement.** One `POST /v1/systemone` per candidate, with the sentence as
+the state and three questions:
+
+| Id | Type | Asks |
+|---|---|---|
+| `durable` | `noul` | Is the sentence a durable fact about the project that will remain true? |
+| `applies` | `noul` | Is this a project rule or decision that applies to all future work? |
+| `kind` | `choice` | decision, constraint, convention, preference, or fact |
+
+The larger of the two `noul` probabilities is the score, and the verdict keeps
+the candidate when it clears `local.threshold`. The kind replaces the
+heuristic class only when the choice confidence clears `local.kindConfidence`.
+
+Two questions are used because neither separates the labeled set alone:
+`durable` scores facts and constraints high but leaves preferences low, and
+`applies` scores rules high but facts low. Measured 2026-11-06 on jevos-v5:
+
+| State layout | Recall at 0.35 | False positives |
+|---|---|---|
+| sentence alone | 7/8 | 0/6 non-code noise |
+| sentence first, then the turn | 6/8 | 0/6 |
+| the turn, then the sentence | 3/8 | 0/6 |
+| labelled sentence only | 5/8 | 0/6 |
+
+So the state is the sentence alone; adding turn context consistently lowered
+every score. The one remaining miss is a preference sentence the heuristic
+already classifies, and the eval harness's one false positive is a fenced code
+block the heuristic never emits.
+
+**Cost.** Cold server start is about 4.5 s (model load), the first judgement
+adds about 1.6 s, and later judgements take about 190 ms on four threads. The
+resident set stays in the low hundreds of megabytes.
+
+**Failure modes.** An unsupported platform (anything but Linux x64, macOS
+arm64, Windows x64), a failed or offline install, a server that does not answer
+within `local.startupTimeoutMs`, and a judgement past `local.timeoutMs` all
+leave the heuristic result in place. The caller's `calls < modelMaxCalls` cap
+applies to the local judge too, so at most three candidates per turn pay for a
+request.
 
 #### Retirement
 
@@ -1104,10 +1180,9 @@ evidence.
 
 `xerj_telemetry op=memory.distill` and `op=memory.recall` report the counts and
 durations; the report adds one line, `distilled N memories (heuristic A, model
-B) · recalled R`, which is the effectiveness pair: promoted against recalled.
-A judge is worth keeping when its `promoted` is useful and its recall share is
-non-zero; the model route ships only with a measured delta against the
-heuristic on the same corpus.
+B, local C) · recalled R`, which is the effectiveness pair: promoted against
+recalled. A judge is worth keeping when its `promoted` is useful and its recall
+share is non-zero.
 
 #### Tests
 
@@ -1115,7 +1190,15 @@ Heuristic: decisions, constraints, conventions, preferences, and cited facts
 are accepted; questions, hedges, plans, and fenced code are rejected; priority
 runs decision before constraint; a sentence repeated across prompt and answer
 counts once; `maxPerTurn` and `minConfidence` bind. Model seam: an absent model
-falls back with the label it actually used; a supplied judge can reject. Capture:
+falls back with the label it actually used; a supplied judge can reject. Local
+judge: the larger of the two probabilities decides, a low-confidence choice
+keeps the heuristic kind, a missing probability or an HTTP failure rejects so
+the caller falls back, and the request carries the sentence alone with both
+questions. Manager: an incomplete install is not mistaken for one, a broken
+pre-installed path explains itself, and a failed install leaves no partial
+tree. Supervisor: a healthy port is attached to without an install, a failing
+install cools down instead of retrying on every turn, and `stop` clears the
+URL. Capture:
 a short turn still distills. Retirement: the lowest-confidence oldest go first
 and explicit memories are never in the set. Telemetry: the distill and recall
 records sum into the report block.
@@ -1251,7 +1334,7 @@ measured; they include tests and the commits that carry them. A status of
 | Fact mining from the compaction window | M | Not started | — | Deferred by the user. Two routes: a heuristic pass over the same window (patterns for decisions, constraints, config keys, commands that worked) at about 2 h, or one model call bounded by a token budget at about 3 to 4 h. Needs a precision measurement before it defaults on, a `derived` memory kind, and reuse of the stale flag; gated by `memory.extract`, off by default |
 | Post-compaction rehydration | M | Done | 2.0 h | `src/rehydrate.ts` builds the block from the three newest citations, re-reading a 24-line window inside the project root and capping the result at `context.rehydrateTokens` (600); `session.compaction.ended` snapshots the working set, the `model.request` hook suppresses the summariser's own call, and a fresh retrieval with hits supersedes the recall. Ten module tests and six hook tests |
 | History search | M | Done | 1.0 h | `archive/index.ts` bulk-loads one document per turn into `<prefix>-archive-docs`, idempotent by session and ordinal, with a manifest so a pruned turn leaves the index; the archive is now a search prefix and its own dataset row; five module tests |
-| Live context distillation | M | In progress | 4.5 h | `src/memory/distill.ts`: five classes, heuristic and model judges behind one write path, idempotent promotion with `source: distill:<judge>` and `confidence`, budget retirement, `memory.distill`/`memory.recall` telemetry with a report line and per-judge calls/chars. The model judge caps calls per turn, clips the turn, times out, and falls back. 16 distill tests, a capture test, config tests, and a report test. A golden set of 8 labeled memory sentences plus 7 sentences that must never be promoted: 8/8 recalled and classified, 0 false positives. The measurement harness is `bun run eval:distill` (heuristic always, model with an explicit OpenAI-compatible endpoint); the model delta is not yet recorded |
+| Live context distillation | M | Done | 10.0 h | `src/memory/distill.ts`: five classes, heuristic and model judges behind one write path, idempotent promotion with `source: distill:<judge>` and `confidence`, budget retirement, `memory.distill`/`memory.recall` telemetry with a report line and per-judge calls/chars. The model judge caps calls per turn, clips the turn, times out, and falls back. 16 distill tests, a capture test, config tests, and a report test. A golden set of 8 labeled memory sentences plus 7 sentences that must never be promoted: 8/8 recalled and classified, 0 false positives. The measurement harness is `bun run eval:distill` (heuristic always, local with `DISTILL_EVAL_JEVOS_URL`, model with an explicit OpenAI-compatible endpoint); the model delta is not yet recorded. The local jevos judge (`src/jev/`): checksum-verified install of the binary and the 630 MB model, one shared loopback server with attach and idle stop, two-question judgement at 7/8 recall and 0/6 non-code false positives on the labeled set, and a heuristic fallback on every failure path. 25 new unit tests across release, judge, manager, and supervisor |
 | Command output management | M | Done | 5.0 h | `src/cmd/{store,runner,corpus,service}.ts` plus `xerj_run` and `xerj_out`: two files per command under `.xerj/cmd/`, a manifest for exit codes, windowed plain-text index, debounced ingest, two caps (256 MiB files, 32 MiB index), host-result mirroring, the context block and the large-result hint. 21 unit tests across three suites and 2 integration tests; 1101 unit tests pass |
 | LSP pool | L | Not started | — | Gated by `analysis.lsp.enabled` |
 | Server installer | L | Not started | — | — |

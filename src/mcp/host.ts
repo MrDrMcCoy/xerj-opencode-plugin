@@ -514,7 +514,7 @@ export class McpHost {
         process: null,
         storeBytes: 0,
         historyStart: null,
-        distill: { promoted: 0, heuristic: 0, model: 0, recalled: 0, calls: 0, chars: 0 },
+        distill: { promoted: 0, heuristic: 0, model: 0, local: 0, recalled: 0, calls: 0, chars: 0 },
         disabled: "the MCP host does not run the telemetry store",
       },
       counters: {

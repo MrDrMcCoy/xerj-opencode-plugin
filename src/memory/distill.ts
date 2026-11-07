@@ -11,7 +11,7 @@ import type { Config } from "../config.ts";
 import type { Logger } from "../log.ts";
 import type { MemoryKind, MemoryStore } from "./store.ts";
 
-export type JudgeMode = "heuristic" | "model";
+export type JudgeMode = "heuristic" | "model" | "local";
 
 export interface Candidate {
   readonly text: string;
@@ -218,11 +218,11 @@ export async function distillTurn(input: DistillTurnInput): Promise<DistillSumma
   let calls = 0;
   let chars = 0;
 
-  if (judge === "model" && input.judgeModel === undefined) {
-    // The model route is not wired yet. Say so once per turn rather than
-    // silently spending nothing and claiming the label.
+  if (judge !== "heuristic" && input.judgeModel === undefined) {
+    // The configured judge is unavailable (no host model, no local install,
+    // an unsupported platform). Say so rather than claiming its label.
     input.logger.debug(
-      "memory.distill.judge is model, but the model judge is not wired; using heuristic",
+      `memory.distill.judge is ${judge}, but that judge is unavailable; using heuristic`,
     );
     used = "heuristic";
   }
@@ -233,9 +233,10 @@ export async function distillTurn(input: DistillTurnInput): Promise<DistillSumma
     let kept = candidate.score >= threshold;
     let score = candidate.score;
     let kind = candidate.kind;
+    let judged = false;
 
     if (
-      used === "model" &&
+      used !== "heuristic" &&
       input.judgeModel !== undefined &&
       calls < input.config.modelMaxCalls
     ) {
@@ -252,10 +253,13 @@ export async function distillTurn(input: DistillTurnInput): Promise<DistillSumma
         kept = verdict.keep;
         score = verdict.score ?? score;
         kind = verdict.kind ?? kind;
+        judged = true;
       }
     }
 
-    if (!kept || score < threshold) {
+    // A judge answers on its own scale, so its score only gates when the
+    // verdict fell back to the heuristic.
+    if (!kept || (!judged && score < threshold)) {
       rejected += 1;
       continue;
     }

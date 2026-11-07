@@ -201,9 +201,10 @@ export interface DistillOptions {
   readonly enabled: boolean;
   /**
    * `heuristic` is the cheap local filter; `model` asks the current model to
-   * judge a candidate. `model` needs a host model and is the expensive route.
+   * judge a candidate, which needs a host model; `local` runs the downloaded
+   * jevos CPU model.
    */
-  readonly judge: "heuristic" | "model";
+  readonly judge: "heuristic" | "model" | "local";
   /** Minimum score a candidate needs to become a memory, as a percentage. */
   readonly minConfidence: number;
   /** Candidates promoted from one turn. */
@@ -216,6 +217,30 @@ export interface DistillOptions {
   readonly modelContextChars: number;
   /** Deadline for one model judgement. */
   readonly modelTimeoutMs: number;
+  /** The local jevos decision model. */
+  readonly local: LocalJudgeOptions;
+}
+
+export interface LocalJudgeOptions {
+  /** Release tag, for example `jevos-v5`. */
+  readonly version: string;
+  /** A pre-installed directory holding `bin/jev` and `model/`. */
+  readonly path: string | null;
+  readonly port: number;
+  /** Worker threads; 0 uses every logical CPU. */
+  readonly threads: number;
+  /** Stop the server after this long without a judgement. */
+  readonly idleMs: number;
+  /** Deadline for one judgement request. */
+  readonly timeoutMs: number;
+  /** P(keep) floor, as a percentage. */
+  readonly threshold: number;
+  /** Choice confidence floor, as a percentage. */
+  readonly kindConfidence: number;
+  /** Deadline for the one-time 630 MB model download. */
+  readonly downloadTimeoutMs: number;
+  /** Deadline for the server to answer its first health probe. */
+  readonly startupTimeoutMs: number;
 }
 
 export interface StatsOptions {
@@ -392,6 +417,18 @@ export const DEFAULT_CONFIG: Config = {
       modelMaxCalls: 3,
       modelContextChars: 1_200,
       modelTimeoutMs: 4_000,
+      local: {
+        version: "jevos-v5",
+        path: null,
+        port: 8017,
+        threads: 0,
+        idleMs: 600_000,
+        timeoutMs: 5_000,
+        threshold: 35,
+        kindConfidence: 40,
+        downloadTimeoutMs: 900_000,
+        startupTimeoutMs: 120_000,
+      },
     },
   },
   stats: { enabled: true, bytesPerToken: 4, maxBaselineBytes: 128 * 1024 },
@@ -444,6 +481,7 @@ export function loadConfig(
   const memory = asObject(root.memory);
   const retain = asObject(memory.retain);
   const distill = asObject(memory.distill);
+  const local = asObject(distill.local);
   const stats = asObject(root.stats);
   const telemetry = asObject(root.telemetry);
   const cmd = asObject(root.cmd);
@@ -952,6 +990,78 @@ export function loadConfig(
           "memory.distill.modelTimeoutMs",
           warnings,
         ),
+        local: {
+          version:
+            readString(
+              local.version,
+              DEFAULT_CONFIG.memory.distill.local.version,
+            ) ?? "jevos-v5",
+          path: readString(local.path, null),
+          port: readInteger(
+            local.port,
+            DEFAULT_CONFIG.memory.distill.local.port,
+            1024,
+            65_535,
+            "memory.distill.local.port",
+            warnings,
+          ),
+          threads: readInteger(
+            local.threads,
+            DEFAULT_CONFIG.memory.distill.local.threads,
+            0,
+            256,
+            "memory.distill.local.threads",
+            warnings,
+          ),
+          idleMs: readInteger(
+            local.idleMs,
+            DEFAULT_CONFIG.memory.distill.local.idleMs,
+            0,
+            86_400_000,
+            "memory.distill.local.idleMs",
+            warnings,
+          ),
+          timeoutMs: readInteger(
+            local.timeoutMs,
+            DEFAULT_CONFIG.memory.distill.local.timeoutMs,
+            100,
+            120_000,
+            "memory.distill.local.timeoutMs",
+            warnings,
+          ),
+          threshold: readInteger(
+            local.threshold,
+            DEFAULT_CONFIG.memory.distill.local.threshold,
+            0,
+            100,
+            "memory.distill.local.threshold",
+            warnings,
+          ),
+          kindConfidence: readInteger(
+            local.kindConfidence,
+            DEFAULT_CONFIG.memory.distill.local.kindConfidence,
+            0,
+            100,
+            "memory.distill.local.kindConfidence",
+            warnings,
+          ),
+          downloadTimeoutMs: readInteger(
+            local.downloadTimeoutMs,
+            DEFAULT_CONFIG.memory.distill.local.downloadTimeoutMs,
+            60_000,
+            86_400_000,
+            "memory.distill.local.downloadTimeoutMs",
+            warnings,
+          ),
+          startupTimeoutMs: readInteger(
+            local.startupTimeoutMs,
+            DEFAULT_CONFIG.memory.distill.local.startupTimeoutMs,
+            1_000,
+            600_000,
+            "memory.distill.local.startupTimeoutMs",
+            warnings,
+          ),
+        },
       },
     },
     stats: {
@@ -1227,11 +1337,17 @@ function readBoolean(value: unknown, fallback: boolean, key: string, warnings: s
   return fallback;
 }
 
-function readJudge(value: unknown, warnings: string[]): "heuristic" | "model" {
+function readJudge(
+  value: unknown,
+  warnings: string[],
+): "heuristic" | "model" | "local" {
   if (value === undefined) return DEFAULT_CONFIG.memory.distill.judge;
-  if (value === "heuristic" || value === "model") return value;
+  if (value === "heuristic" || value === "model" || value === "local") {
+    return value;
+  }
   warnings.push(
-    `memory.distill.judge must be "heuristic" or "model"; using ${DEFAULT_CONFIG.memory.distill.judge}`,
+    `memory.distill.judge must be "heuristic", "model", or "local"; ` +
+      `using ${DEFAULT_CONFIG.memory.distill.judge}`,
   );
   return DEFAULT_CONFIG.memory.distill.judge;
 }

@@ -289,6 +289,20 @@ test/unit/*.test.ts    pure-function tests
 
 ## Work in progress
 
+The local distillation judge is implemented and needs a restart to load. With
+`memory.distill.judge: "local"`, setup starts a background install of the
+jevos binary and its 630 MB OpenVINO INT8 model under `<data root>/jev/`, then
+keeps one loopback server for the installation. Each candidate is one request
+with two yes/no questions and a five-way kind choice; the larger probability
+is the score and the sentence is the whole state. Live against the model:
+7/8 labeled memories accepted, no false positive among the non-code noise,
+cold start 4.5 s, first judgement 1.6 s, later ones about 190 ms on four
+threads. Every failure path (unsupported platform, offline install, a server
+that does not answer, a slow judgement) keeps the heuristic verdict. Next:
+restart OpenCode with `judge: "local"` set and confirm the install lands, the
+first turn falls back until it finishes, the log names the server port, and
+`xerj_telemetry op=memory.distill` reports `local` promotions.
+
 Local telemetry is implemented (Tier S, done). Every operation, boot phase,
 crash, restart, service-state transition, and CPU/RSS sample lands in bounded
 NDJSON files under `<data root>/telemetry`. The five-state model
@@ -364,6 +378,36 @@ publish, and live TUI verification remain.
   expected, z-score, and score. Warm-up buckets are not flagged.
 
 ## Log
+
+- 2026-11-06: The local distillation judge shipped behind
+  `memory.distill.judge: "local"` (still off by default). The plugin downloads
+  the jevos v5 binary and OpenVINO INT8 model (about 27 MB and 630 MB) into
+  `<data root>/jev/`, verifies both against the release `SHA256SUMS.txt`,
+  extracts into a partial tree, probes the binary with its own usage exit, and
+  renames the tree into place. The install is shared by every project in the
+  installation and runs in the background from setup, so no turn waits on it;
+  until it lands, and on every failure, distillation keeps the heuristic
+  verdict. One loopback server is started on `local.port` (8017) or the first
+  free port in 8017-8099, attaches to a healthy server instead of starting a
+  second, and stops after `local.idleMs` without a judgement.
+
+  Each candidate is one request with the sentence as the state: two `noul`
+  questions (durable fact; rule or decision for future work) and one five-way
+  `choice`. The larger probability is the score. Measured on the labeled set
+  (jevos-v5, 2026-11-06): 7/8 accepted with 0/6 non-code false positives at a
+  0.35 floor; the one miss is a preference the heuristic already classifies,
+  and the eval harness's only false positive is a fenced code block the
+  heuristic never emits. Neither question works alone, and putting the turn
+  around the sentence lowered every score (6/8 with the sentence first, 3/8
+  with it last), so the state is the sentence. Cold start is 4.5 s, the first
+  judgement 1.6 s, later ones about 190 ms on four threads.
+
+  `DISTILL_EVAL_JEVOS_URL` runs the local judge through the existing harness.
+  Telemetry gains a `local` count in the `distill` report block, and the panel
+  line only prints a judge's count while it is non-zero, so the common
+  heuristic-only install is unchanged. 25 new unit tests cover the release
+  metadata, the judge, the manager, and the supervisor; 1190 unit tests pass
+  and typecheck is clean. Nothing is pushed or released.
 
 - 2026-11-06: The memory-index reset no longer destroys a correctly-moded
   store. `recoverMemoryIndex` reads `embedding_execution.json` before acting:

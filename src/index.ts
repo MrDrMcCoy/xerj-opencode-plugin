@@ -91,7 +91,11 @@ import { curateMemories } from "./memory/curate.ts";
 import { verifyMemories } from "./memory/verify.ts";
 import { sampleProcess } from "./process-stats.ts";
 import { startRetention } from "./memory/retain.ts";
-import { makeModelJudge, startDistillRetention } from "./memory/distill.ts";
+import { makeModelJudge, startDistillRetention, type ModelJudge } from "./memory/distill.ts";
+import { JevosManager } from "./jev/manager.ts";
+import { JevosSupervisor } from "./jev/supervisor.ts";
+import { makeJevosJudge } from "./jev/judge.ts";
+import { jevosTarget, normaliseVersion } from "./jev/release.ts";
 import { migrateMemoryIndex, migrateProjectStorage } from "./memory/migrate.ts";
 import { RemoteSpool } from "./remote/spool.ts";
 import { BrainGraph } from "./search/brains.ts";
@@ -385,6 +389,7 @@ export default Plugin.define({
           promoted: 0,
           heuristic: 0,
           model: 0,
+          local: 0,
           recalled: 0,
           calls: 0,
           chars: 0,
@@ -1067,6 +1072,9 @@ export default Plugin.define({
     };
 
     const commandHints = new Map<string, { stem: string; lines: number }>();
+    // The local decision model is shared by every project in the installation;
+    // one supervisor per plugin instance attaches to the first one.
+    let jevos: JevosSupervisor | null = null;
 
     const tools = buildTools({
       config,
@@ -1870,6 +1878,63 @@ export default Plugin.define({
                 })
               : undefined;
 
+          const target = jevosTarget(process.platform, process.arch);
+          const local = config.memory.distill.local;
+          let localJudge: ModelJudge | undefined;
+          if (config.memory.distill.enabled && config.memory.distill.judge === "local") {
+            if (target === null) {
+              logger.warn(
+                "jevos publishes no build for this platform; memory.distill.judge falls back to the heuristic",
+              );
+            } else {
+              const manager = new JevosManager({
+                root: join(root, "jev"),
+                version: normaliseVersion(local.version),
+                target,
+                logger,
+                path: local.path,
+                downloadTimeoutMs: local.downloadTimeoutMs,
+                commandTimeoutMs: local.downloadTimeoutMs,
+              });
+              jevos = new JevosSupervisor({
+                install: () => manager.ensure(),
+                port: local.port,
+                threads: local.threads,
+                logger,
+                logPath: join(root, "jev", "jev.log"),
+                idleMs: local.idleMs,
+                startupTimeoutMs: local.startupTimeoutMs,
+                probeTimeoutMs: 1_000,
+                stopGraceMs: 5_000,
+              });
+              // The first install downloads about 630 MB; do it in the
+              // background so setup never waits on it.
+              void jevos.ensure();
+              localJudge = async (candidate, turn) => {
+                const supervisor = jevos!;
+                const base = await supervisor.ensure();
+                if (base === null) throw new Error("the jevos server is unavailable");
+                supervisor.touch();
+                try {
+                  return await makeJevosJudge({
+                    baseUrl: base,
+                    threshold: local.threshold / 100,
+                    kindConfidence: local.kindConfidence / 100,
+                    timeoutMs: local.timeoutMs,
+                    logger,
+                  })(candidate, turn);
+                } catch (error) {
+                  // A server that stopped answering is discarded so the next
+                  // judgement starts a new one instead of failing forever.
+                  await supervisor.invalidate();
+                  throw error;
+                }
+              };
+            }
+          }
+          const chosenJudge =
+            config.memory.distill.judge === "local" ? localJudge : judgeModel;
+
           startTurnCapture({
             events: ctx.event,
             memory: runtime.memory,
@@ -1879,7 +1944,7 @@ export default Plugin.define({
             captureSummary: config.memory.captureTurns,
             onAnswer: (sessionID, text) => void archive?.append(sessionID, "assistant", text),
             distill: config.memory.distill.enabled
-              ? { config: config.memory.distill, judgeModel }
+              ? { config: config.memory.distill, judgeModel: chosenJudge }
               : undefined,
             measure: (op, body, meta) => telemetry.span(op, body, meta),
           });
@@ -1978,6 +2043,7 @@ export default Plugin.define({
       void (async () => {
         try {
           runtime.cmd?.stop();
+          await jevos?.stop();
           await runtime.lifecycle?.stop();
           await stopIndexers();
           sampler.stop();
@@ -2097,7 +2163,9 @@ function formatReport(report: TelemetryReport): string {
       ? []
       : [
           `distilled ${report.distill.promoted} memories ` +
-            `(heuristic ${report.distill.heuristic}, model ${report.distill.model}` +
+            `(heuristic ${report.distill.heuristic}` +
+            (report.distill.model > 0 ? `, model ${report.distill.model}` : "") +
+            (report.distill.local > 0 ? `, local ${report.distill.local}` : "") +
             (report.distill.calls > 0
               ? `, ${report.distill.calls} calls / ${Math.round(report.distill.chars / 1000)}k chars`
               : "") +

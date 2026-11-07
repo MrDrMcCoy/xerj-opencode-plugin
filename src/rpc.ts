@@ -234,6 +234,7 @@ export interface TelemetryDistillStatus {
   readonly promoted: number;
   readonly heuristic: number;
   readonly model: number;
+  readonly local: number;
   readonly recalled: number;
   readonly calls: number;
   readonly chars: number;
@@ -537,6 +538,7 @@ const definition = {
             promoted: { type: "number" },
             heuristic: { type: "number" },
             model: { type: "number" },
+            local: { type: "number" },
             recalled: { type: "number" },
             calls: { type: "number" },
             chars: { type: "number" },

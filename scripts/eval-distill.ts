@@ -1,8 +1,13 @@
-// Measures the two distillation judges on the labeled set.
+// Measures the three distillation judges on the labeled set.
 //
-// The heuristic always runs. The model judge runs only when an
-// OpenAI-compatible chat endpoint and a key are supplied, because the plugin's
-// own model lives inside the host and a script cannot borrow it:
+// The heuristic always runs. The local judge runs against an already-started
+// jevos server, which the manager normally starts for the plugin:
+//
+//   DISTILL_EVAL_JEVOS_URL=http://127.0.0.1:8017 bun run eval:distill
+//
+// The model judge runs only when an OpenAI-compatible chat endpoint and a key
+// are supplied, because the plugin's own model lives inside the host and a
+// script cannot borrow it:
 //
 //   DISTILL_EVAL_URL=https://openrouter.ai/api/v1/chat/completions \
 //   DISTILL_EVAL_MODEL=anthropic/claude-haiku-5.5 \
@@ -14,6 +19,7 @@
 // heuristic, for the calls it costs?
 
 import { DEFAULT_CONFIG } from "../src/config.ts";
+import { makeJevosJudge } from "../src/jev/judge.ts";
 import {
   extractCandidates,
   makeModelJudge,
@@ -126,6 +132,27 @@ function report(name: string, tally: Tally): void {
 
 async function main(): Promise<void> {
   report("heuristic", runHeuristic());
+
+  const jevosUrl = process.env.DISTILL_EVAL_JEVOS_URL?.trim();
+  if (jevosUrl) {
+    const local = DEFAULT_CONFIG.memory.distill.local;
+    report(
+      "local",
+      await runModel(
+        makeJevosJudge({
+          baseUrl: jevosUrl,
+          threshold: local.threshold / 100,
+          kindConfidence: local.kindConfidence / 100,
+          timeoutMs: 30_000,
+          logger,
+        }),
+      ),
+    );
+  } else {
+    console.log(
+      "\nlocal judge skipped: set DISTILL_EVAL_JEVOS_URL to a running jevos server",
+    );
+  }
 
   const url = process.env.DISTILL_EVAL_URL?.trim();
   const model = process.env.DISTILL_EVAL_MODEL?.trim();

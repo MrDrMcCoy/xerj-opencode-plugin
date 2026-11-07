@@ -316,7 +316,19 @@ This is the complete set with its defaults, in
             "maxPerProject": 200,        // distilled memories kept
             "modelMaxCalls": 3,          // model calls one turn may spend
             "modelContextChars": 1200,   // turn text shown to the model
-            "modelTimeoutMs": 4000       // deadline for one judgement
+            "modelTimeoutMs": 4000,      // deadline for one judgement
+            "local": {                   // the jevos CPU decision model
+              "version": "jevos-v5",     // release tag; changing it re-downloads
+              "path": null,              // pre-installed dir; skips download
+              "port": 8017,              // loopback port for the server
+              "threads": 0,              // 0 uses every logical CPU
+              "idleMs": 600000,          // stop after this long unused
+              "timeoutMs": 5000,         // one judgement request
+              "threshold": 35,           // P(keep) floor, percent
+              "kindConfidence": 40,      // kind choice floor, percent
+              "downloadTimeoutMs": 900000, // 630 MB model download
+              "startupTimeoutMs": 120000 // model load + first health
+            }
           }
         },
         "stats": {
@@ -417,6 +429,16 @@ The same entry works with a checkout path instead of the package name; see
 | `memory.distill.modelMaxCalls` | Model calls one turn may spend when `judge` is `model`. Candidates past the cap keep the heuristic verdict. |
 | `memory.distill.modelContextChars` | Characters of the turn shown to the model judge. |
 | `memory.distill.modelTimeoutMs` | Deadline for one model judgement; a timeout falls back to the heuristic. |
+| `memory.distill.local.version` | jevos release tag; `jevos-v5` is the known good one. Changing it downloads that release. |
+| `memory.distill.local.path` | A pre-installed directory holding `bin/jev` and `model/`; skips the download. |
+| `memory.distill.local.port` | Loopback port for the jevos server; a healthy server there is attached instead of a second one. |
+| `memory.distill.local.threads` | Worker threads; 0 uses every logical CPU. |
+| `memory.distill.local.idleMs` | Stop the server after this long without a judgement. |
+| `memory.distill.local.timeoutMs` | Deadline for one judgement request. |
+| `memory.distill.local.threshold` | P(keep) floor as a percentage; the larger of the two questions must clear it. Calibrated on the labeled set. |
+| `memory.distill.local.kindConfidence` | Minimum choice confidence before the model's kind replaces the heuristic class. |
+| `memory.distill.local.downloadTimeoutMs` | Deadline for the one-time 630 MB model download. |
+| `memory.distill.local.startupTimeoutMs` | Deadline for the server to answer its first health probe. |
 | `index.graph` | Index the project as one graph corpus (a "super brain"): sections, symbols, `path:line`, and edges. On by default; `false` restores the flat `--no-graph` corpus with the engine's own watcher. A change rebuilds the project corpus once. |
 | `index.semantic` | Include the semantic retrieval leg. |
 | `index.neural` | Embed passages with the node's neural model (`--embed-mode neural`). Set `false` for lexical embeddings. Changing it rebuilds the project index once; neural indexing is roughly ten times slower than lexical. |
@@ -677,35 +699,65 @@ SQLite" counts even when it is too short for turn capture. Distillation does not
 require `memory.captureTurns`: a caller can keep typed memories without keeping
 a Q/A summary of every turn, and turn capture can stay on with distillation off.
 
-Two judges share the same write path. `heuristic` is the local filter above and
-costs nothing. `model` asks the host's model about each candidate, one call up
-to `modelMaxCalls` per turn, with the turn clipped to `modelContextChars` and a
-`modelTimeoutMs` deadline. The model answers a JSON verdict (keep, kind, score);
-an unusable answer, a timeout, or a missing host model keeps the heuristic
-verdict for that candidate instead of dropping it. The judge is stored on every
-memory as `source: distill:<judge>`, so a later comparison can tell which
-produced what.
+Three judges share the same write path. `heuristic` is the local filter above
+and costs nothing. `model` asks the host's model about each candidate, one call
+up to `modelMaxCalls` per turn, with the turn clipped to `modelContextChars`
+and a `modelTimeoutMs` deadline. The model answers a JSON verdict (keep, kind,
+score); an unusable answer, a timeout, or a missing host model keeps the
+heuristic verdict for that candidate instead of dropping it. `local` runs the
+jevos CPU model described below. The judge is stored on every memory as
+`source: distill:<judge>`, so a later comparison can tell which produced what.
+
+#### The local judge
+
+`judge: "local"` needs no endpoint and no network after the first run. The
+plugin downloads the jevos v5 OpenVINO INT8 model (about 630 MB) and its
+binary once into `<data root>/jev/`, checks both against the release
+`SHA256SUMS.txt`, and starts a loopback server. The download runs in the
+background from `setup`, so a turn never waits for it; until it finishes, or
+on a platform jevos does not publish for, distillation keeps the heuristic
+verdict. The server stops after `local.idleMs` without a judgement and starts
+again on the next one.
+
+A judgement is one request with the sentence as the state and two yes/no
+questions: whether it is a durable fact, and whether it is a rule or decision
+for future work. The larger of the two probabilities is the score, and the
+same request asks for the five-way kind. Neither question works alone: "durable
+fact" scores facts and constraints high but leaves preferences low, and "rule
+or decision" does the reverse. On the labeled set the pair accepts 7 of 8 with
+no false positive among the non-code noise at the default 35 percent floor; the
+one miss is a preference the heuristic already classifies, and the one false
+positive is a fenced code block the heuristic never emits. Sending the turn
+around the sentence lowered every score, so the state is the sentence alone.
+
+The model is small on purpose. It runs on the CPU, the first call after a
+start takes about 1.5 s and later calls about 200 ms on four threads, and the
+server uses a few hundred megabytes. `local.path` points at a pre-installed
+directory holding `bin/jev` and `model/` when the machine already has one;
+`local.port` is the loopback port the plugin attaches to or starts on;
+`local.threads` sets the OpenVINO worker count, and 0 uses every logical CPU.
 
 Retirement is by evidence, not by relevance. A decision stays true whether or
 not this turn needed it, so distilled memories are retired by budget (keep the
 highest confidence, then the newest) and by the usual verification and curation
 passes, never because a retrieval did not select them.
 
-Both judges report to telemetry as `memory.distill`, with the judge name and
+Every judge reports to telemetry as `memory.distill`, with the judge name and
 the candidate, promoted, duplicate, and rejected counts, and the recall pass
 records how many of its hits were distilled. Together those are the cost side
 (duration and count per judge) and the effectiveness side (promoted memories
 that are actually recalled), readable through `xerj_telemetry op=memory.distill`
 and `xerj_telemetry op=memory.recall`. The panel's Telemetry section shows the
-same line: `distilled N · heuristic A · model B · calls C · recalled R`.
+same line: `distilled N · heuristic A · model B · local C · calls D · recalled
+E`, with a judge's count omitted while it is zero.
 
 The measurement harness is `bun run eval:distill`. It prints the heuristic's
 recall, false positives, and class accuracy on a labeled set of fifteen
-sentences. With `DISTILL_EVAL_URL`, `DISTILL_EVAL_MODEL`, and
-`DISTILL_EVAL_KEY` set to an OpenAI-compatible chat endpoint, it runs the model
-judge over the same set and prints the same figures with its call count. A
-script cannot borrow the host's model, which is why the endpoint is explicit;
-the plugin's own judge uses the host model when `judge` is `model`.
+sentences. `DISTILL_EVAL_JEVOS_URL` points it at a running jevos server and
+prints the local judge's figures; `DISTILL_EVAL_URL`, `DISTILL_EVAL_MODEL`, and
+`DISTILL_EVAL_KEY` do the same for an OpenAI-compatible chat endpoint. A script
+cannot borrow the host's model, which is why that endpoint is explicit; the
+plugin's own judge uses the host model when `judge` is `model`.
 
 [Back to top](#table-of-contents)
 

@@ -341,6 +341,18 @@ describe("memory distillation", () => {
       modelMaxCalls: 3,
       modelContextChars: 1200,
       modelTimeoutMs: 4000,
+      local: {
+        version: "jevos-v5",
+        path: null,
+        port: 8017,
+        threads: 0,
+        idleMs: 600000,
+        timeoutMs: 5000,
+        threshold: 35,
+        kindConfidence: 40,
+        downloadTimeoutMs: 900000,
+        startupTimeoutMs: 120000,
+      },
     });
   });
 
@@ -363,6 +375,25 @@ describe("memory distillation", () => {
     expect(config.memory.distill.maxPerTurn).toBe(1);
     expect(config.memory.distill.maxPerProject).toBe(10);
     expect(warnings.every((warning) => warning.includes("memory.distill"))).toBe(true);
+  });
+
+  test("takes the local judge and clamps its thresholds", () => {
+    const { config, warnings } = loadConfig({
+      memory: {
+        distill: {
+          enabled: true,
+          judge: "local",
+          local: { port: 1, threads: 999, timeoutMs: 10, threshold: 200 },
+        },
+      },
+    });
+
+    expect(config.memory.distill.judge).toBe("local");
+    expect(config.memory.distill.local.port).toBe(1024);
+    expect(config.memory.distill.local.threads).toBe(256);
+    expect(config.memory.distill.local.timeoutMs).toBe(100);
+    expect(config.memory.distill.local.threshold).toBe(100);
+    expect(warnings.every((warning) => warning.includes("memory.distill.local"))).toBe(true);
   });
 
   test("an unknown judge warns and keeps the heuristic", () => {
