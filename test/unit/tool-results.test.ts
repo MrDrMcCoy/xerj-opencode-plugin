@@ -62,6 +62,8 @@ function targets(
       projectRoot,
       logger,
       spool,
+      cmd: null,
+      cmdTruncated: () => false,
       invalidate: () => {
         recorded.invalidations += 1;
       },

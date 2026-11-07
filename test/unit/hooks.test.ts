@@ -461,7 +461,10 @@ describe("context hook", () => {
 
     const first = contextEvent("s1");
     await hooks.ctx.handlers.context(first);
-    expect(systemTexts(first)).toEqual([]);
+    // The command-output instruction is added on the first call regardless.
+    expect(
+      systemTexts(first).filter((text) => !text.includes("<xerj-command-output>")),
+    ).toEqual([]);
 
     fail = false;
     const second = contextEvent("s2");
@@ -535,8 +538,15 @@ describe("cost accounting", () => {
 
     const block = systemTexts(event).find((part) => part.includes("<xerj-context>"))!;
     const summary = systemTexts(event).find((part) => part.includes("<xerj-corpus>"))!;
+    const command = systemTexts(event).find((part) =>
+      part.includes("<xerj-command-output>"),
+    )!;
     const overhead = Buffer.byteLength(block) - Buffer.byteLength(text);
-    expect(hooks.costs).toEqual([Buffer.byteLength(summary), overhead]);
+    expect(hooks.costs).toEqual([
+      Buffer.byteLength(summary),
+      Buffer.byteLength(command),
+      overhead,
+    ]);
   });
 });
 

@@ -255,6 +255,21 @@ This is the complete set with its defaults, in
           "bytesPerToken": 4,
           "maxBaselineBytes": 131072     // 128 KiB
         },
+        "cmd": {                        // command output kept under .xerj/cmd/
+          "enabled": true,              // registers xerj_run and xerj_out
+          "suggest": true,              // teach the tools in the context block
+          "mirrorHostResults": true,    // record host shell results too
+          "inject": false,              // include the corpus in prompt injection
+          "maxBytes": 268435456,        // 256 MiB for the pair files
+          "maxIndexBytes": 33554432,    // 32 MiB of indexed text
+          "maxCommandBytes": 67108864,  // captured per command before truncation
+          "maxFileBytes": 33554432,     // one file past this is stored, not parsed
+          "windowLines": 200,           // index window, lines
+          "windowBytes": 16384,         // index window, bytes
+          "showTokens": 1200,           // cap for one xerj_out show
+          "timeoutMs": 600000,          // deadline for one xerj_run
+          "hintLines": 40               // a mirrored result past this queues a hint
+        },
         "telemetry": {
           "anomaly": false,             // reserved; on-demand tool only
           "enabled": true,              // local files only; never sent
@@ -346,6 +361,18 @@ The same entry works with a checkout path instead of the package name; see
 | `telemetry.flushMs` | How often the in-memory queue drains to disk. |
 | `telemetry.sampleMs` | CPU and RSS sample period; `0` disables sampling. |
 | `telemetry.maxText` | Characters of caller text kept in a record; `0` records none. |
+| `cmd.enabled` | Register `xerj_run` and `xerj_out` and keep command output under `.xerj/cmd/`. On by default. |
+| `cmd.suggest` | Add the command-output instruction to the first model call of a session and hint after a large result. |
+| `cmd.mirrorHostResults` | Record results from the host's `bash`/`shell` tool too, so history covers commands `xerj_run` did not run. |
+| `cmd.inject` | Include the command corpus in prompt-time injection. Off by default; `xerj_search` and `xerj_out` still reach it. |
+| `cmd.maxBytes` | Cap for the `<stem>-cmd.txt` and `<stem>-out.txt` pairs together. |
+| `cmd.maxIndexBytes` | Cap for the indexed text of the command corpus. |
+| `cmd.maxCommandBytes` | Captured bytes per command before truncation. |
+| `cmd.maxFileBytes` | One output file past this is stored but not parsed or indexed. |
+| `cmd.windowLines`, `cmd.windowBytes` | Index window size, whichever binds first. |
+| `cmd.showTokens` | Output budget for one `xerj_out show`. |
+| `cmd.timeoutMs` | Deadline for one `xerj_run` command. |
+| `cmd.hintLines` | A mirrored command result past this many lines queues one hint for the next turn. |
 
 ### Local telemetry
 
@@ -368,6 +395,8 @@ The plugin measures its own cost. Every operation, boot phase, crash, restart, s
 | `xerj_sysdocs` | — | Index this machine's man and info pages; unchanged pages are skipped and vanished ones pruned. |
 | `xerj_prjdocs` | `eager?` | Index official docs for the project's languages, frameworks, and cloud APIs at the versions it uses. |
 | `xerj_expand` | `sessionID`, `start?`, `end?` | Return the raw text of earlier turns, including the window a compaction replaced. |
+| `xerj_run` | `command`, `timeout_ms?` | Run one command with its output kept under `.xerj/cmd/`. Returns the exit code, sizes, and a stem; never the output. |
+| `xerj_out` | `action` (`list`, `show`, `search`, `ingest`), `stem?`, `start?`, `end?`, `query?`, `k?`, `limit?`, `path?`, `command?` | List recent commands, read an exact line range, search the corpus, or ingest a file a command wrote. |
 
 The turn archive is one file per session under the project's node directory,
 capped by `context.archiveMaxBytes`. Before the host compacts, the plugin

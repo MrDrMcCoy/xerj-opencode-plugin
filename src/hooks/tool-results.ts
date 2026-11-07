@@ -29,6 +29,19 @@ export interface ToolResultTargets {
       options?: { skipUnchanged?: boolean },
     ): Promise<unknown>;
   } | null;
+  /**
+   * Command output sink; null when `cmd.enabled` is off. A host shell result is
+   * mirrored so the log covers commands the plugin did not run itself.
+   */
+  readonly cmd: {
+    mirror(
+      command: string,
+      text: string,
+      options: { truncated: boolean },
+    ): Promise<{ stem: string; lines: number } | null>;
+  } | null;
+  /** False when the host clipped the result before the plugin saw it. */
+  readonly cmdTruncated: (event: ToolResultEvent) => boolean;
   /** Invalidates the mapping cache after a document lands. */
   readonly invalidate: (() => void) | null;
   /** Records activity so the node's idle timer is accurate. */
@@ -48,6 +61,7 @@ export async function handleToolResult(
   if (event.status !== "completed") return;
   targets.touch?.(event.sessionID);
 
+  mirrorCommandOutput(event, targets);
   if (spoolFetchedUrl(event, targets)) return;
   if (indexShellReads(event, targets)) return;
   await indexExternalRead(event, targets);
@@ -70,6 +84,25 @@ function spoolFetchedUrl(event: ToolResultEvent, targets: ToolResultTargets): bo
       targets.logger.debug("could not spool a fetched document", String(error));
     });
   return true;
+}
+
+/**
+ * Every host shell result is written to the command log so history covers the
+ * commands the plugin did not run. `xerj_run` already recorded its own output.
+ */
+function mirrorCommandOutput(event: ToolResultEvent, targets: ToolResultTargets): void {
+  if (event.tool !== "bash" && event.tool !== "shell") return;
+  if (targets.cmd === null) return;
+
+  const command = commandOf(event.input);
+  const text = textOf(event.result.content);
+  if (command === null || text === null || text.trim().length === 0) return;
+
+  void targets.cmd
+    .mirror(command, text, { truncated: targets.cmdTruncated(event) })
+    .catch((error: unknown) => {
+      targets.logger.debug("could not record a command result", String(error));
+    });
 }
 
 /**

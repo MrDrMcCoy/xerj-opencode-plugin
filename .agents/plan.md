@@ -573,6 +573,8 @@ If retrieval missed the `timeoutMs` deadline, inject nothing. Tools remain.
 | `xerj_forget` | `id` | retraction |
 | `xerj_status` | — | node, index, freshness, counters |
 | `xerj_index` | `path?` / `url?`, `force?` | explicit ingest |
+| `xerj_run` | `command`, `timeout_ms?` | runs one command into `.xerj/cmd/`; returns a receipt, not the output |
+| `xerj_out` | `action`, `stem?`, `start?`, `end?`, `query?`, `path?` | lists, shows a range, searches, or ingests command output |
 
 Namespaced as `xerj` with a one-line description that says when to use it
 ("search the indexed project instead of reading files"). Tool results carry

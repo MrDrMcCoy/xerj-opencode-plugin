@@ -34,6 +34,7 @@ import {
   environmentFrom,
   externalPrefix,
   archivePrefix,
+  cmdPrefix,
   gitPrefix,
   indexPrefix,
   isOverbroadRoot,
@@ -81,6 +82,8 @@ import {
 import { CommitIndex, type CommitSummary } from "./index/commits.ts";
 import { ArchiveIndex } from "./archive/index.ts";
 import { TurnArchive } from "./archive/turns.ts";
+import { CmdService } from "./cmd/service.ts";
+import { cmdTools } from "./tools/cmd.ts";
 import { registerCompactionArchive } from "./archive/window.ts";
 import { memoryIndexMissing, recoverMemoryIndex } from "./memory/health.ts";
 import { curateMemories } from "./memory/curate.ts";
@@ -133,6 +136,8 @@ interface Runtime {
   hidden: HiddenIndex | null;
   hiddenRoots: ReadonlyArray<DocumentRoot>;
   anomaly: AnomalyService | null;
+  /** Command output: the directory, the runner, and its corpus. */
+  cmd: CmdService | null;
   error: string | null;
   warnings: string[];
 }
@@ -249,6 +254,7 @@ export default Plugin.define({
       hidden: null,
       hiddenRoots,
       anomaly: null,
+      cmd: null,
       error: null,
       warnings: indexWarnings,
     };
@@ -589,6 +595,7 @@ export default Plugin.define({
           webPrefix(projectRoot),
           externalPrefix(projectRoot),
           sysdocsPrefix(hostname()),
+          cmdPrefix(projectRoot),
           memoryNs,
           runtime.brains,
         );
@@ -1021,6 +1028,8 @@ export default Plugin.define({
       ].join(" ");
     };
 
+    const commandHints = new Map<string, { stem: string; lines: number }>();
+
     const tools = buildTools({
       config,
       projectRoot,
@@ -1163,7 +1172,10 @@ export default Plugin.define({
 
     // Every tool is timed at registration, so a tool added later needs no
     // instrumentation of its own and a slow one shows up in the report.
-    const measured = measuredTools([...tools, ...docsTools], telemetry);
+    const commandTools = config.cmd.enabled
+      ? cmdTools({ config, getCmd: () => runtime.cmd, logger })
+      : [];
+    const measured = measuredTools([...tools, ...docsTools, ...commandTools], telemetry);
 
     await ctx.tool.transform((editor) => {
       editor.namespace({
@@ -1179,6 +1191,28 @@ export default Plugin.define({
           projectRoot,
           logger,
           spool: runtime.spool,
+          cmd:
+            runtime.cmd === null
+              ? null
+              : {
+                  mirror: async (command, text, options) => {
+                    const entry = await runtime.cmd!.mirror(command, text, options);
+                    if (entry === null) return null;
+                    if (entry.lines >= config.cmd.hintLines) {
+                      commandHints.set(event.sessionID, {
+                        stem: entry.stem,
+                        lines: entry.lines,
+                      });
+                    }
+                    return { stem: entry.stem, lines: entry.lines };
+                  },
+                },
+          cmdTruncated: (event) => {
+            const result = (event as {
+              result?: { truncated?: unknown; metadata?: { truncated?: unknown } };
+            }).result;
+            return result?.truncated === true || result?.metadata?.truncated === true;
+          },
           invalidate: () => runtime.search?.invalidate(),
           touch: (sessionID) => runtime.lifecycle?.touch(sessionID),
           recordRead: (sessionID, path, bytes) =>
@@ -1197,6 +1231,12 @@ export default Plugin.define({
       logger,
       getSearch: () => runtime.search,
       getMemory: () => runtime.memory,
+      takeCommandHint: (sessionID) => {
+        const hint = commandHints.get(sessionID);
+        if (hint === undefined) return null;
+        commandHints.delete(sessionID);
+        return hint;
+      },
       summarize,
       onActivity: (sessionID) => runtime.lifecycle?.touch(sessionID),
       measure: (op, body) => telemetry.span(op, body),
@@ -1790,6 +1830,28 @@ export default Plugin.define({
         endSpawn();
       }
       await repairMemory(client);
+      if (config.cmd.enabled) {
+        if (runtime.cmd === null) {
+          runtime.cmd = new CmdService({
+            config: config.cmd,
+            storageRoot,
+            projectRoot,
+            indexName: `${cmdPrefix(projectRoot)}-docs`,
+            getClient: () =>
+              runtime.node === null
+                ? null
+                : new XerjClient(runtime.node.baseUrl, clientTimeouts),
+            logger,
+            onBusy: busyHook(JobKind.Cmd, "command log"),
+            signal: shutdown.signal,
+          });
+        }
+        runtime.cmd.setClient(
+          new XerjClient(runtime.node.baseUrl, clientTimeouts),
+        );
+        await runtime.cmd.start();
+        void runtime.cmd.reindex();
+      }
       await startIndexers(runtime.node);
 
       runtime.phase = "ready";
@@ -1830,6 +1892,7 @@ export default Plugin.define({
 
       void (async () => {
         try {
+          runtime.cmd?.stop();
           await runtime.lifecycle?.stop();
           await stopIndexers();
           sampler.stop();
@@ -2091,6 +2154,7 @@ function datasetRows(
   web: string,
   external: string,
   sysdocs: string,
+  cmd: string,
   memoryNs: string,
   brains: ReadonlyArray<BrainSpec>,
 ): DatasetStatus[] {
@@ -2102,12 +2166,17 @@ function datasetRows(
         !index.startsWith(`${project}-hidden-`) &&
         !index.startsWith(`${project}-prjdocs-`) &&
         !index.startsWith(`${project}-archive-`) &&
+        !index.startsWith(`${cmd}-`) &&
         !index.startsWith(`${git}-`),
     },
     { name: "git", matches: (index: string) => index.startsWith(`${git}-`) },
     {
       name: "archive",
       matches: (index: string) => index.startsWith(`${project}-archive-`),
+    },
+    {
+      name: "cmd",
+      matches: (index: string) => index.startsWith(`${cmd}-`),
     },
     {
       name: "hidden",

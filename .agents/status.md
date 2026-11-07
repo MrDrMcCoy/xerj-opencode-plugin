@@ -364,6 +364,38 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: Command output management shipped, on by default. `xerj_run`
+  keeps every command's text as `<stem>-cmd.txt` and `<stem>-out.txt` under
+  `<project>/.xerj/cmd/`, and `xerj_out` lists, shows an exact range, searches,
+  or ingests a file the agent wrote. The corpus is `<prefix>-cmd-docs`, plain
+  `text`, split into 200-line / 16 KiB windows with no embedding; only the
+  indexed text is redacted, the raw pair keeps what the command printed.
+
+  The manifest carries what the files cannot: exit code, duration, line count,
+  redacted command, and the window starts, so a re-index is incremental and a
+  pruned stem can delete its documents. Two caps: `cmd.maxBytes` (256 MiB for
+  the pairs) and `cmd.maxIndexBytes` (32 MiB for the index); the hourly and
+  post-ingest sweep deletes the oldest complete stem, files and documents
+  together. `cmd.maxFileBytes` (32 MiB) stops one runaway command from being
+  parsed.
+
+  The model gets the instruction on its first call, and again after
+  `session.compaction.ended`, plus one `<xerj-cmd-hint>` line after a mirrored
+  result past `cmd.hintLines` (40). Host `bash`/`shell` results are mirrored so
+  history covers commands the wrapper did not run. A failed write or a full
+  disk logs once and leaves retrieval untouched.
+
+  Two findings while building it: the runner must use `bash -c`, not `bash
+  -lc`, because a login profile printed the working directory into the capture;
+  and the store's first boot must recover a `-out.txt.part` into a completed
+  pair rather than skipping it, or a killed command leaves no entry.
+
+  Verified live in this session: `xerj_run` returned
+  `ran · exit 4 · 0.0s · 3 lines · 24 B` with a stem, `xerj_out list` showed
+  the exit code, `show` returned `cmd/<stem>-out.txt:1-3 of 3`, and `search`
+  found the marker at line 2 with `[exit 4]`. 1129 unit tests and 14
+  integration tests pass, typecheck clean.
+
 - 2026-11-06: The sidebar header carries only the fold arrow and the label.
   The state badge and the plugin version moved to their own lines at the top
   of the open block, so the top line no longer changes width as the service

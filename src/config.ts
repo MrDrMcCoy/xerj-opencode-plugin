@@ -196,6 +196,33 @@ export interface StatsOptions {
   readonly maxBaselineBytes: number;
 }
 
+/** Command output kept under `<storage root>/cmd/` and indexed cheaply. */
+export interface CmdOptions {
+  readonly enabled: boolean;
+  /** Teach the model about `xerj_run` and `xerj_out` in the context block. */
+  readonly suggest: boolean;
+  /** Record host bash/shell results, not only commands run through the tool. */
+  readonly mirrorHostResults: boolean;
+  /** Include the command corpus in prompt-time injection. */
+  readonly inject: boolean;
+  /** Cap for the two files of every command together. */
+  readonly maxBytes: number;
+  /** Cap for the indexed text across the corpus. */
+  readonly maxIndexBytes: number;
+  /** Captured per command before the runner truncates. */
+  readonly maxCommandBytes: number;
+  /** One file past this is stored but not parsed. */
+  readonly maxFileBytes: number;
+  readonly windowLines: number;
+  readonly windowBytes: number;
+  /** Approximate output budget for one `show`. */
+  readonly showTokens: number;
+  /** Deadline for one `xerj_run` command. */
+  readonly timeoutMs: number;
+  /** A mirrored result past this many lines queues a hint for the next turn. */
+  readonly hintLines: number;
+}
+
 export interface TelemetryOptions {
   readonly anomaly: boolean;
   /** Local operation records; nothing is ever sent anywhere. */
@@ -233,6 +260,7 @@ export interface Config {
   readonly memory: MemoryOptions;
   readonly stats: StatsOptions;
   readonly telemetry: TelemetryOptions;
+  readonly cmd: CmdOptions;
 }
 
 export interface LoadedConfig {
@@ -324,6 +352,21 @@ export const DEFAULT_CONFIG: Config = {
     retain: { days: 0, maxCount: 0, maxBytes: 2 * 1024 ** 3 },
   },
   stats: { enabled: true, bytesPerToken: 4, maxBaselineBytes: 128 * 1024 },
+  cmd: {
+    enabled: true,
+    suggest: true,
+    mirrorHostResults: true,
+    inject: false,
+    maxBytes: 256 * 1024 ** 2,
+    maxIndexBytes: 32 * 1024 ** 2,
+    maxCommandBytes: 64 * 1024 ** 2,
+    maxFileBytes: 32 * 1024 ** 2,
+    windowLines: 200,
+    windowBytes: 16 * 1024,
+    showTokens: 1200,
+    timeoutMs: 600_000,
+    hintLines: 40,
+  },
   telemetry: {
     anomaly: false,
     enabled: true,
@@ -359,6 +402,7 @@ export function loadConfig(
   const retain = asObject(memory.retain);
   const stats = asObject(root.stats);
   const telemetry = asObject(root.telemetry);
+  const cmd = asObject(root.cmd);
 
   const envUrl = env.XERJ_URL?.trim();
 
@@ -805,6 +849,89 @@ export function loadConfig(
         0,
         Number.MAX_SAFE_INTEGER,
         "stats.maxBaselineBytes",
+        warnings,
+      ),
+    },
+    cmd: {
+      enabled: readBoolean(cmd.enabled, DEFAULT_CONFIG.cmd.enabled, "cmd.enabled", warnings),
+      suggest: readBoolean(cmd.suggest, DEFAULT_CONFIG.cmd.suggest, "cmd.suggest", warnings),
+      mirrorHostResults: readBoolean(
+        cmd.mirrorHostResults,
+        DEFAULT_CONFIG.cmd.mirrorHostResults,
+        "cmd.mirrorHostResults",
+        warnings,
+      ),
+      inject: readBoolean(cmd.inject, DEFAULT_CONFIG.cmd.inject, "cmd.inject", warnings),
+      maxBytes: readInteger(
+        cmd.maxBytes,
+        DEFAULT_CONFIG.cmd.maxBytes,
+        1_048_576,
+        10_000_000_000,
+        "cmd.maxBytes",
+        warnings,
+      ),
+      maxIndexBytes: readInteger(
+        cmd.maxIndexBytes,
+        DEFAULT_CONFIG.cmd.maxIndexBytes,
+        0,
+        10_000_000_000,
+        "cmd.maxIndexBytes",
+        warnings,
+      ),
+      maxCommandBytes: readInteger(
+        cmd.maxCommandBytes,
+        DEFAULT_CONFIG.cmd.maxCommandBytes,
+        65_536,
+        10_000_000_000,
+        "cmd.maxCommandBytes",
+        warnings,
+      ),
+      maxFileBytes: readInteger(
+        cmd.maxFileBytes,
+        DEFAULT_CONFIG.cmd.maxFileBytes,
+        4_096,
+        10_000_000_000,
+        "cmd.maxFileBytes",
+        warnings,
+      ),
+      windowLines: readInteger(
+        cmd.windowLines,
+        DEFAULT_CONFIG.cmd.windowLines,
+        20,
+        5_000,
+        "cmd.windowLines",
+        warnings,
+      ),
+      windowBytes: readInteger(
+        cmd.windowBytes,
+        DEFAULT_CONFIG.cmd.windowBytes,
+        1_024,
+        1_048_576,
+        "cmd.windowBytes",
+        warnings,
+      ),
+      showTokens: readInteger(
+        cmd.showTokens,
+        DEFAULT_CONFIG.cmd.showTokens,
+        100,
+        20_000,
+        "cmd.showTokens",
+        warnings,
+      ),
+      timeoutMs: readInteger(
+        cmd.timeoutMs,
+        DEFAULT_CONFIG.cmd.timeoutMs,
+        1_000,
+        3_600_000,
+        "cmd.timeoutMs",
+        warnings,
+      ),
+      hintLines: readInteger(
+        cmd.hintLines,
+        DEFAULT_CONFIG.cmd.hintLines,
+        1,
+        1_000,
+        "cmd.hintLines",
         warnings,
       ),
     },

@@ -45,6 +45,8 @@ export interface SessionHookOptions {
   readonly onNoiseSkip?: () => void;
   /** Resets the idle deadline; called for every prompt and model call. */
   readonly onActivity?: (sessionID?: string) => void;
+  /** One command stems hint waiting for the next model call of a session. */
+  readonly takeCommandHint?: (sessionID: string) => { stem: string; lines: number } | null;
   /** Stops the compaction watch when the plugin shuts down. */
   readonly signal?: AbortSignal;
   /** Project root used to re-read cited files after a compaction. */
@@ -139,6 +141,33 @@ export function formatCorpusBlock(summary: string): string {
   return `<xerj-corpus>\n${summary}\n</xerj-corpus>`;
 }
 
+/**
+ * The command-output instruction. Static, so it can sit in the first call's
+ * system prompt and stay in the transcript until a compaction drops it.
+ */
+export function formatCommandBlock(): string {
+  return [
+    "<xerj-command-output>",
+    "Long command output belongs in the XERJ log directory, not in this window.",
+    "Run such a command with `xerj_run` (it writes cmd/<stem>-cmd.txt and",
+    "cmd/<stem>-out.txt and returns only the exit code and sizes), then read what",
+    "you need with `xerj_out show stem=<stem> start=120 end=160` or",
+    "`xerj_out search query=\"...\"`. Before repeating a command, `xerj_out list`",
+    "shows what already ran and how it ended.",
+    "</xerj-command-output>",
+  ].join("\n");
+}
+
+export function formatCommandHint(stem: string, lines: number): string {
+  return [
+    "<xerj-cmd-hint>",
+    `That command wrote ${lines} lines to cmd/${stem}-out.txt.`,
+    `Read a range with xerj_out show stem=${stem} start=1 end=120, or search it`,
+    `with xerj_out search stem=${stem} query="...". Do not re-run it to see another part.`,
+    "</xerj-cmd-hint>",
+  ].join("\n");
+}
+
 export async function registerSessionHooks(
   ctx: Plugin.Context,
   options: SessionHookOptions,
@@ -160,6 +189,7 @@ export async function registerSessionHooks(
   // budget on text the model can already see.
   const seen = new Map<string, Set<string>>();
   const summarized = new Map<string, true>();
+  const commandShown = new Map<string, true>();
   // The passages the session is currently working from, and the snapshot taken
   // when the host compacted, waiting for the next model call.
   const working = new Map<string, ReadonlyArray<CitedLocation>>();
@@ -248,6 +278,17 @@ export async function registerSessionHooks(
       }
     }
 
+    if (
+      options.config.cmd.enabled &&
+      options.config.cmd.suggest &&
+      !commandShown.has(event.sessionID)
+    ) {
+      forgetOldest(commandShown, event.sessionID, true);
+      const block = formatCommandBlock();
+      event.system.push({ type: "text", text: block });
+      options.onCost?.(event.sessionID, Buffer.byteLength(block, "utf8"));
+    }
+
     const entry = prepared.get(event.sessionID);
     const duplicate =
       entry !== undefined &&
@@ -312,6 +353,16 @@ export async function registerSessionHooks(
       }
     }
 
+    // A long command result this session produced gets one line naming its
+    // stem, so the model reads it instead of running the command again.
+    const hint = options.takeCommandHint?.(event.sessionID);
+    if (hint !== null && hint !== undefined) {
+      const block = formatCommandHint(hint.stem, hint.lines);
+      event.system.push({ type: "text", text: block });
+      overhead += Buffer.byteLength(block, "utf8");
+      injected = true;
+    }
+
     if (!injected) return;
     options.onInject?.();
     if (overhead > 0) options.onCost?.(event.sessionID, overhead);
@@ -336,6 +387,7 @@ export async function registerSessionHooks(
     prepared,
     working,
     recallable,
+    commandShown,
   });
 }
 
@@ -417,6 +469,7 @@ async function watchCompaction(
     readonly prepared: Map<string, Prepared>;
     readonly working: Map<string, ReadonlyArray<CitedLocation>>;
     readonly recallable: Map<string, ReadonlyArray<CitedLocation>>;
+    readonly commandShown: Map<string, true>;
   },
 ): Promise<void> {
   const events = (ctx as { event?: EventStream }).event;
@@ -440,6 +493,7 @@ async function watchCompaction(
       state.working.delete(sessionID);
       state.prepared.delete(sessionID);
       state.seen.delete(sessionID);
+      state.commandShown.delete(sessionID);
       state.memoriesShown.delete(sessionID);
       options.logger.debug("cleared injection dedupe after a compaction", sessionID);
     }

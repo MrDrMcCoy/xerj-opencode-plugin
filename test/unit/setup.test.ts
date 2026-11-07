@@ -142,19 +142,21 @@ describe("server setup wiring", () => {
         "forget",
         "imports",
         "index",
+        "out",
         "outline",
         "prjdocs",
         "recall",
         "refs",
         "reindex",
         "remember",
+        "run",
         "search",
         "status",
         "sysdocs",
         "telemetry",
         "zoom",
       ]);
-      expect(host.tools.length).toBe(20);
+      expect(host.tools.length).toBe(22);
       expect(host.toolHooks).toContain("execute.after");
       expect(host.sessionHooks).toContain("prompt");
       expect(host.sessionHooks).toContain("context");

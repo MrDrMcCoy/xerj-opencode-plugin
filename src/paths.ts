@@ -307,6 +307,11 @@ export function gitPrefix(projectRoot: string): string {
   return `${indexPrefix(projectRoot)}-git`;
 }
 
+/** Command output kept under `<storage root>/cmd/`, indexed per project. */
+export function cmdPrefix(projectRoot: string): string {
+  return `${indexPrefix(projectRoot)}-cmd`;
+}
+
 export function prjdocsPrefix(projectRoot: string): string {
   return `${indexPrefix(projectRoot)}-prjdocs`;
 }
