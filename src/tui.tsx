@@ -87,17 +87,18 @@ export default Plugin.define({
       if (uiLog.length > UI_LOG_LIMIT) uiLog.shift();
     };
     const flushUi = async (): Promise<void> => {
-      while (uiLog.length > 0) {
-        const entry = uiLog[0];
-        try {
-          await rpc().uiLog(entry, at());
-        } catch {
-          // The server is gone or the RPC is not loaded; keep the buffer for
-          // the next attempt instead of spinning on it.
-          return;
-        }
-        uiLog.shift();
+      if (uiLog.length === 0) return;
+      // One call per flush: a verbose render log must not become one timed RPC
+      // per line. The buffer is cleared only after the batch is accepted.
+      const batch = uiLog.slice(0, UI_LOG_LIMIT);
+      try {
+        await rpc().uiLog({ entries: batch }, at());
+      } catch {
+        // The server is gone or the RPC is not loaded; keep the buffer for the
+        // next attempt instead of spinning on it.
+        return;
       }
+      uiLog.splice(0, batch.length);
     };
 
     noteUi("info", "tui setup started", `version ${PLUGIN_VERSION}`);

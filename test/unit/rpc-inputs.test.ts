@@ -21,8 +21,16 @@ const TUI_PAYLOADS: ReadonlyArray<[keyof typeof XerjRpc.methods, unknown]> = [
   ["sysdocs", {}],
   ["remember", { text: "a fact" }],
   ["search", { query: "why is the pump loud" }],
-  ["uiLog", { level: "debug", message: "sidebar render", detail: "collapsed=false" }],
-  ["uiLog", { level: "error", message: "sidebar render failed" }],
+  ["uiLog", { entries: [] }],
+  [
+    "uiLog",
+    {
+      entries: [
+        { level: "debug", message: "sidebar render", detail: "collapsed=false" },
+        { level: "error", message: "sidebar render failed" },
+      ],
+    },
+  ],
 ];
 
 describe("RPC input schemas", () => {

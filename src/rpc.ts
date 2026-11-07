@@ -562,16 +562,23 @@ const definition = {
       }),
     },
     // The TUI half never writes files. It reports what it did and what broke
-    // here, and the server half appends it to `rings/ui.sidebar`.
+    // here, in one batch per flush, and the server half appends it to
+    // `rings/ui.sidebar`. A batch keeps a verbose render log from turning into
+    // one timed RPC per line.
     uiLog: {
-      input: valueSchema(
-        {
-          level: { type: "string", enum: ["debug", "info", "warn", "error"] },
-          message: { type: "string" },
-          detail: { type: "string" },
+      input: valueSchema({
+        entries: {
+          type: "array",
+          items: object(
+            {
+              level: { type: "string", enum: ["debug", "info", "warn", "error"] },
+              message: { type: "string" },
+              detail: { type: "string" },
+            },
+            ["detail"],
+          ),
         },
-        ["level", "detail"],
-      ),
+      }),
       output: valueSchema({}),
     },
   },

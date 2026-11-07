@@ -169,8 +169,10 @@ function makeHost(options: HostOptions = {}): unknown {
       return {
         rpc: () => ({
           status: async () => status(),
-          uiLog: async (input: { level: string; message: string; detail?: string }) => {
-            uiLogs.push(input);
+          uiLog: async (input: {
+            entries: Array<{ level: string; message: string; detail?: string }>;
+          }) => {
+            uiLogs.push(...input.entries);
             return {};
           },
           reindex: async () => ({ queued: true, records: 42 }),

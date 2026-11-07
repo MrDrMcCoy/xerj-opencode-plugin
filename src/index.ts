@@ -961,12 +961,13 @@ export default Plugin.define({
       uiLog: async (input: unknown) => {
         counters.noteRpc();
         runtime.lifecycle?.touch();
-        const args = (typeof input === "object" && input !== null ? input : {}) as {
-          level?: unknown;
-          message?: unknown;
-          detail?: unknown;
-        };
-        telemetry.noteUi(args);
+        const entries =
+          typeof input === "object" && input !== null && "entries" in input
+            ? (input as { entries?: unknown }).entries
+            : [];
+        for (const entry of Array.isArray(entries) ? entries.slice(0, UI_BATCH) : []) {
+          if (typeof entry === "object" && entry !== null) telemetry.noteUi(entry);
+        }
         return {};
       },
       // Compaction belongs to the host; this only asks for it now instead of
@@ -1980,6 +1981,9 @@ function formatReport(report: TelemetryReport): string {
 
 /** How long a status snapshot reuses its telemetry block. */
 const TELEMETRY_STATUS_CACHE_MS = 5_000;
+
+/** UI log lines accepted from one batch; the TUI buffer is smaller. */
+const UI_BATCH = 100;
 
 /** One line of an error, for the log ring. */
 function errorText(error: unknown): string {
