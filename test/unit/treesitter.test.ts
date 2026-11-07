@@ -121,6 +121,8 @@ describe("tree-sitter analysis", () => {
       getSpool: () => null,
       getAnomaly: () => null,
       hub: {} as never,
+      code: {} as never,
+      share: {} as never,
       treeSitter: {
         report: async () => ({
           files: 1,

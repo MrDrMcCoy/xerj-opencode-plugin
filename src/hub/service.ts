@@ -5,8 +5,8 @@
 // privacy flags, runs the managed binary, and formats the JSON answer. The
 // plugin never handles a signing key or a pack archive.
 
-import { spawn } from "node:child_process";
 import type { Config } from "../config.ts";
+import { runEngine, type EngineRunResult } from "../engine/run.ts";
 import type { Logger } from "../log.ts";
 
 export interface HubOptions {
@@ -29,6 +29,8 @@ export interface HubAskInput {
   readonly maxTokens?: number;
 }
 
+export type RunResult = EngineRunResult;
+
 export interface HubResult {
   readonly ok: boolean;
   readonly text: string;
@@ -37,14 +39,6 @@ export interface HubResult {
   readonly cached?: boolean;
 }
 
-export interface RunResult {
-  readonly code: number | null;
-  readonly stdout: string;
-  readonly stderr: string;
-  readonly timedOut: boolean;
-}
-
-const MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 const STATUS_ANSWERED = 0;
 const NO_MATCH = 1;
 const USAGE = 2;
@@ -146,7 +140,7 @@ export class HubService {
       XERJ_HUB_URL: this.options.config.url,
     };
     if (this.options.run !== undefined) return this.options.run(args, env);
-    return runBinary(binary, args, env, this.options.config.timeoutMs);
+    return runEngine(binary, args, env, this.options.config.timeoutMs);
   }
 
   private explain(result: RunResult): string {
@@ -284,41 +278,4 @@ export class HubService {
 
 function failure(text: string): HubResult {
   return { ok: false, text };
-}
-
-function runBinary(
-  binary: string,
-  args: ReadonlyArray<string>,
-  env: NodeJS.ProcessEnv,
-  timeoutMs: number,
-): Promise<RunResult> {
-  return new Promise((resolve) => {
-    const child = spawn(binary, [...args], {
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-      env,
-    });
-    let stdout = "";
-    let stderr = "";
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGKILL");
-    }, timeoutMs);
-    timer.unref?.();
-    child.stdout.on("data", (chunk: Buffer) => {
-      if (stdout.length < MAX_OUTPUT_BYTES) stdout += chunk.toString("utf8");
-    });
-    child.stderr.on("data", (chunk: Buffer) => {
-      if (stderr.length < 64 * 1024) stderr += chunk.toString("utf8");
-    });
-    child.once("error", (error) => {
-      clearTimeout(timer);
-      resolve({ code: null, stdout, stderr: String(error), timedOut });
-    });
-    child.once("close", (code) => {
-      clearTimeout(timer);
-      resolve({ code, stdout, stderr, timedOut });
-    });
-  });
 }

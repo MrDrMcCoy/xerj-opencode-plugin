@@ -3,6 +3,17 @@ import { DEFAULT_CONFIG } from "../../src/config.ts";
 import { HubService, type RunResult } from "../../src/hub/service.ts";
 import { buildTools } from "../../src/tools/search.ts";
 
+const CODE_STUB = {
+  list: async () => ({ ok: false, text: "code disabled" }),
+  add: async () => ({ ok: false, text: "code disabled" }),
+  index: async () => ({ ok: false, text: "code disabled" }),
+  query: async () => ({ ok: false, text: "code disabled" }),
+} as never;
+const SHARE_STUB = {
+  create: async () => ({ ok: false, text: "share disabled" }),
+  list: async () => ({ ok: false, text: "share disabled" }),
+  revoke: async () => ({ ok: false, text: "share disabled" }),
+} as never;
 const TREE_STUB = {
   report: async () => ({ files: 0, functions: [], duplicates: [] }),
 } as never;
@@ -80,6 +91,8 @@ describe("hub tools", () => {
       getAnomaly: () => null,
       hub,
       treeSitter: TREE_STUB,
+      code: CODE_STUB,
+      share: SHARE_STUB,
       snapshot: async () => ({}) as never,
     }).map((tool) => tool.name);
   }

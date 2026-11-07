@@ -381,6 +381,15 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-07: `xerj_code` and `xerj_share` are implemented behind their gates
+  (both off). `xerj_code` wraps the engine's `xerj code` and `xerj corpus
+  list/add/index`; `code.network` gates cloning, `XERJ_CODE_HOME` is
+  `<data root>/code`, and the query passes corpus, mode, `-k`, `--full`, and
+  `--lang` with `--url` to the plugin node. `xerj_share` wraps `xerj share`
+  create/list/revoke with expiry, claims, optional passcode and label; no
+  tunnel is offered. Eight service/tool tests and two config tests; 1244 unit
+  tests pass and typecheck is clean. Nothing is pushed or released.
+
 - 2026-11-07: The tree-sitter layer and `xerj_complexity` are implemented
   behind `analysis.treeSitter.enabled` (off). The first call downloads the
   pinned `tree-sitter-wasms` 0.1.13 tarball (4.4 MB compressed, about 50 MB

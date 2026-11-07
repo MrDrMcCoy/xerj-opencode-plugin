@@ -330,6 +330,37 @@ describe("git history indexing", () => {
   });
 });
 
+describe("reference corpora and share", () => {
+  test("both are off by default", () => {
+    expect(DEFAULT_CONFIG.code).toEqual({
+      enabled: false,
+      network: false,
+      timeoutMs: 600000,
+      maxResults: 8,
+      maxPassageChars: 1200,
+    });
+    expect(DEFAULT_CONFIG.share).toEqual({
+      enabled: false,
+      expires: "24h",
+      maxClaims: 1,
+      timeoutMs: 30000,
+    });
+  });
+
+  test("clamps their numbers", () => {
+    const { config, warnings } = loadConfig({
+      code: { maxResults: 0, maxPassageChars: 99999, timeoutMs: 1 },
+      share: { maxClaims: 99, timeoutMs: 1 },
+    });
+    expect(config.code.maxResults).toBe(1);
+    expect(config.code.maxPassageChars).toBe(20000);
+    expect(config.code.timeoutMs).toBe(5000);
+    expect(config.share.maxClaims).toBe(50);
+    expect(config.share.timeoutMs).toBe(5000);
+    expect(warnings.filter((w) => w.includes("code.") || w.includes("share."))).toHaveLength(5);
+  });
+});
+
 describe("hub", () => {
   test("off by default, cached only, hosted off", () => {
     expect(DEFAULT_CONFIG.hub).toEqual({

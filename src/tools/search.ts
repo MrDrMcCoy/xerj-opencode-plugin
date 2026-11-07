@@ -20,6 +20,8 @@ import type { SearchService } from "../search/service.ts";
 import type { StatusSnapshot } from "../rpc.ts";
 import type { HubService } from "../hub/service.ts";
 import type { TreeSitterService } from "../analysis/treesitter.ts";
+import type { CodeService } from "../code/service.ts";
+import type { ShareService } from "../share/service.ts";
 
 export interface ToolOptions {
   readonly config: Config;
@@ -37,6 +39,8 @@ export interface ToolOptions {
   readonly getArchive: () => TurnArchive | null;
   readonly hub: HubService;
   readonly treeSitter: TreeSitterService;
+  readonly code: CodeService;
+  readonly share: ShareService;
   readonly snapshot: () => Promise<StatusSnapshot>;
 }
 
@@ -889,6 +893,8 @@ export function buildTools(options: ToolOptions): ReadonlyArray<{
     },
     ...(options.config.hub.enabled ? hubTools(options) : []),
     ...(options.config.analysis.treeSitter.enabled ? [complexityTool(options)] : []),
+    ...(options.config.code.enabled ? [codeTool(options)] : []),
+    ...(options.config.share.enabled ? [shareTool(options)] : []),
   ];
 }
 
@@ -957,6 +963,151 @@ const COMPLEXITY_INPUT = {
   },
   additionalProperties: false,
 } as const;
+
+const CODE_INPUT = {
+  type: "object",
+  properties: {
+    action: {
+      type: "string",
+      enum: ["list", "add", "index", "query"],
+      description: "List corpora, add one, index one, or query one.",
+    },
+    corpus: { type: "string", description: "Corpus name." },
+    query: { type: "string", description: "What to look for when action=query." },
+    urls: {
+      type: "array",
+      items: { type: "string" },
+      description: "Git URLs when action=add; requires code.network.",
+    },
+    k: { type: "number", description: "Passages for a query (1-50, default 8)." },
+    mode: {
+      type: "string",
+      enum: ["bm25", "semantic", "hybrid"],
+      description: "Retrieval mode; default bm25.",
+    },
+    lang: { type: "string", description: "Restrict a query to one language." },
+    full: { type: "number", description: "Max chars per passage." },
+  },
+  required: ["action"],
+  additionalProperties: false,
+} as const;
+
+/** Reference corpora; registered with `code.enabled`. */
+function codeTool(options: ToolOptions): {
+  name: string;
+  description: string;
+  input: unknown;
+  options: { namespace: string };
+  execute: (input: unknown) => Promise<unknown>;
+} {
+  return {
+    name: "code",
+    description:
+      "Query or manage XERJ reference corpora: peer projects indexed once and reused across sessions. action=list shows them, add clones git URLs (needs code.network), index builds one, query returns cited passages with the licence. Use it for how another project solved a problem.",
+    input: CODE_INPUT,
+    options: { namespace: "xerj" },
+    execute: async (input) => {
+      const args = input as {
+        action: "list" | "add" | "index" | "query";
+        corpus?: string;
+        query?: string;
+        urls?: string[];
+        k?: number;
+        mode?: "bm25" | "semantic" | "hybrid";
+        lang?: string;
+        full?: number;
+      };
+      const result =
+        args.action === "list"
+          ? await options.code.list()
+          : args.action === "add"
+            ? await options.code.add(args.corpus ?? "", args.urls ?? [])
+            : args.action === "index"
+              ? await options.code.index(args.corpus ?? "")
+              : await options.code.query({
+                  corpus: args.corpus ?? "",
+                  query: args.query ?? "",
+                  k: args.k,
+                  mode: args.mode,
+                  lang: args.lang,
+                  full: args.full,
+                });
+      return {
+        content: result.text,
+        metadata: { xerj: { code: { ok: result.ok, action: args.action } } },
+      };
+    },
+  };
+}
+
+const SHARE_INPUT = {
+  type: "object",
+  properties: {
+    action: {
+      type: "string",
+      enum: ["create", "list", "revoke"],
+      description: "Create a read-only share, list shares, or revoke one.",
+    },
+    target: { type: "string", description: "Index name or folder for create." },
+    handle: { type: "string", description: "Share handle for revoke." },
+    expires: { type: "string", description: "Lifetime, for example 24h or 7d." },
+    max_claims: {
+      type: "number",
+      description: "How many times the link can be opened (1-50).",
+    },
+    passcode: {
+      type: "string",
+      description: "Optional 6-128 character passcode; generated when omitted.",
+    },
+    label: { type: "string", description: "Title the guest sees." },
+  },
+  required: ["action"],
+  additionalProperties: false,
+} as const;
+
+/** Read-only share links; registered with `share.enabled`. */
+function shareTool(options: ToolOptions): {
+  name: string;
+  description: string;
+  input: unknown;
+  options: { namespace: string };
+  execute: (input: unknown) => Promise<unknown>;
+} {
+  return {
+    name: "share",
+    description:
+      "Create, list, or revoke a read-only XERJ share over one index. The engine prints the link, passcode, and expiry before anyone can open it; nothing is tunneled or uploaded. Use it to hand a reviewer exactly one corpus.",
+    input: SHARE_INPUT,
+    options: { namespace: "xerj" },
+    execute: async (input) => {
+      const args = input as {
+        action: "create" | "list" | "revoke";
+        target?: string;
+        handle?: string;
+        expires?: string;
+        max_claims?: number;
+        passcode?: string;
+        label?: string;
+      };
+      const result =
+        args.action === "list"
+          ? await options.share.list()
+          : args.action === "revoke"
+            ? await options.share.revoke(args.handle ?? "")
+            : await options.share.create({
+                target: args.target ?? "",
+                expires: args.expires,
+                maxClaims: args.max_claims,
+                passcode: args.passcode,
+                label: args.label,
+              });
+      return {
+        content: result.text,
+        metadata: { xerj: { share: { ok: result.ok, action: args.action } } },
+      };
+    },
+  };
+}
 
 /** Structural complexity and duplicates; registered with the tree-sitter gate. */
 function complexityTool(options: ToolOptions): {

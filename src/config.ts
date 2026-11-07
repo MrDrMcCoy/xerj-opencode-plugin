@@ -341,6 +341,26 @@ export interface Config {
   readonly cmd: CmdOptions;
   readonly hub: HubOptions;
   readonly analysis: AnalysisOptions;
+  readonly code: CodeOptions;
+  readonly share: ShareOptions;
+}
+
+export interface CodeOptions {
+  /** Register xerj_code. Off by default. */
+  readonly enabled: boolean;
+  /** Allow `corpus add` to clone git URLs. */
+  readonly network: boolean;
+  readonly timeoutMs: number;
+  readonly maxResults: number;
+  readonly maxPassageChars: number;
+}
+
+export interface ShareOptions {
+  /** Register xerj_share. Off by default. */
+  readonly enabled: boolean;
+  readonly expires: string;
+  readonly maxClaims: number;
+  readonly timeoutMs: number;
 }
 
 export interface AnalysisOptions {
@@ -505,6 +525,19 @@ export const DEFAULT_CONFIG: Config = {
       maxParseBytes: 1_048_576,
     },
   },
+  code: {
+    enabled: false,
+    network: false,
+    timeoutMs: 600_000,
+    maxResults: 8,
+    maxPassageChars: 1_200,
+  },
+  share: {
+    enabled: false,
+    expires: "24h",
+    maxClaims: 1,
+    timeoutMs: 30_000,
+  },
   hub: {
     enabled: false,
     network: false,
@@ -571,6 +604,8 @@ export function loadConfig(
   const hub = asObject(root.hub);
   const analysis = asObject(root.analysis);
   const treeSitter = asObject(analysis.treeSitter);
+  const code = asObject(root.code);
+  const share = asObject(root.share);
 
   const envUrl = env.XERJ_URL?.trim();
 
@@ -1230,6 +1265,71 @@ export function loadConfig(
         0,
         Number.MAX_SAFE_INTEGER,
         "stats.maxBaselineBytes",
+        warnings,
+      ),
+    },
+    code: {
+      enabled: readBoolean(
+        code.enabled,
+        DEFAULT_CONFIG.code.enabled,
+        "code.enabled",
+        warnings,
+      ),
+      network: readBoolean(
+        code.network,
+        DEFAULT_CONFIG.code.network,
+        "code.network",
+        warnings,
+      ),
+      timeoutMs: readInteger(
+        code.timeoutMs,
+        DEFAULT_CONFIG.code.timeoutMs,
+        5_000,
+        3_600_000,
+        "code.timeoutMs",
+        warnings,
+      ),
+      maxResults: readInteger(
+        code.maxResults,
+        DEFAULT_CONFIG.code.maxResults,
+        1,
+        50,
+        "code.maxResults",
+        warnings,
+      ),
+      maxPassageChars: readInteger(
+        code.maxPassageChars,
+        DEFAULT_CONFIG.code.maxPassageChars,
+        0,
+        20_000,
+        "code.maxPassageChars",
+        warnings,
+      ),
+    },
+    share: {
+      enabled: readBoolean(
+        share.enabled,
+        DEFAULT_CONFIG.share.enabled,
+        "share.enabled",
+        warnings,
+      ),
+      expires:
+        readString(share.expires, DEFAULT_CONFIG.share.expires)?.trim() ??
+        DEFAULT_CONFIG.share.expires,
+      maxClaims: readInteger(
+        share.maxClaims,
+        DEFAULT_CONFIG.share.maxClaims,
+        1,
+        50,
+        "share.maxClaims",
+        warnings,
+      ),
+      timeoutMs: readInteger(
+        share.timeoutMs,
+        DEFAULT_CONFIG.share.timeoutMs,
+        5_000,
+        300_000,
+        "share.timeoutMs",
         warnings,
       ),
     },

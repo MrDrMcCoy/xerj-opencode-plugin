@@ -26,6 +26,10 @@ cited passages instead of whole files. Nothing leaves the machine.
 - [Fetched pages and external files](#fetched-pages-and-external-files)
 - [Tools](#tools)
 - [Analysis tools](#analysis-tools)
+- [Structural analysis](#structural-analysis)
+- [Reference corpora](#reference-corpora)
+- [Share links](#share-links)
+- [Hub corpora](#hub-corpora)
 - [TUI](#tui)
   - [Completion notices](#completion-notices)
 - [Project documentation](#project-documentation)
@@ -371,6 +375,19 @@ This is the complete set with its defaults, in
             "maxParseBytes": 1048576    // files above this are skipped
           }
         },
+        "code": {                       // reference corpora
+          "enabled": false,             // registers xerj_code
+          "network": false,             // corpus add may clone git URLs
+          "timeoutMs": 600000,          // one corpus command
+          "maxResults": 8,              // passages per query
+          "maxPassageChars": 1200       // chars per passage
+        },
+        "share": {                      // read-only share links
+          "enabled": false,             // registers xerj_share
+          "expires": "24h",             // default lifetime
+          "maxClaims": 1,               // link opens
+          "timeoutMs": 30000
+        },
         "hub": {                        // signed pre-indexed corpora
           "enabled": false,             // registers xerj_ask and xerj_hub
           "network": false,             // cached packs only until true
@@ -513,6 +530,15 @@ The same entry works with a checkout path instead of the package name; see
 | `cmd.hintLines` | A mirrored command result past this many lines queues one hint for the next turn. |
 | `analysis.treeSitter.enabled` | Register `xerj_complexity`, download the grammar pack, and parse project files. Off by default. |
 | `analysis.treeSitter.languages` | Grammar ids to parse. Empty detects from file extensions. |
+| `code.enabled` | Register `xerj_code` for reference corpora. Off by default. |
+| `code.network` | Allow `corpus add` to clone its git URLs. Off by default. |
+| `code.timeoutMs` | Deadline for one corpus command, including an index build. |
+| `code.maxResults` | Passages returned by a reference query. |
+| `code.maxPassageChars` | Maximum characters per reference passage. |
+| `share.enabled` | Register `xerj_share` for read-only links. Off by default. |
+| `share.expires` | Default link lifetime, for example `24h` or `7d`. |
+| `share.maxClaims` | Default number of times a link can be opened. |
+| `share.timeoutMs` | Deadline for one share command. |
 | `analysis.treeSitter.maxParseBytes` | Files above this are skipped. |
 | `hub.enabled` | Register `xerj_ask` and `xerj_hub`. Off by default. |
 | `hub.network` | Allow pack and catalogue downloads. When false, only cached packs answer. |
@@ -964,6 +990,8 @@ index can answer, and none writes a project file.
 | `xerj_ask` | `question`, `corpus?`, `mode?`, `symbol?`, `max_tokens?` | Ask a signed, pre-indexed hub corpus. Registered when `hub.enabled` is on. |
 | `xerj_hub` | `action`, `query?`, `k?` | Sync the catalogue, find corpora, or show cache status. Registered with `hub.enabled`. |
 | `xerj_complexity` | `path?`, `top?`, `min_nodes?` | Function sizes and structural duplicates through tree-sitter. Registered with `analysis.treeSitter.enabled`. |
+| `xerj_code` | `action`, `corpus?`, `query?`, `urls?`, `k?`, `mode?`, `lang?`, `full?` | Query or manage reference corpora. Registered with `code.enabled`. |
+| `xerj_share` | `action`, `target?`, `handle?`, `expires?`, `max_claims?`, `passcode?`, `label?` | Create, list, or revoke a read-only share. Registered with `share.enabled`. |
 
 The turn archive is one file per session under the project's node directory,
 capped by `context.archiveMaxBytes`. Before the host compacts, the plugin
@@ -991,6 +1019,33 @@ leaves every other tool working.
 The pack is cached outside the project, shared by every project in the
 installation, and is never bundled in the npm package. Turning the gate off
 registers no tool and downloads nothing.
+
+[Back to top](#table-of-contents)
+
+## Reference corpora
+
+`code.enabled` (off) adds `xerj_code`, which wraps `xerj code` and the
+`xerj corpus` lifecycle. A reference corpus is a peer project, cloned once,
+licence-detected, and indexed under `<data root>/code` (the engine's
+`XERJ_CODE_HOME`). `action=list` shows them, `add` takes a name and git URLs,
+`index` builds or refreshes one, and `query` returns cited passages with the
+licence and a do-not-copy warning where the licence requires it.
+
+`code.network` is off by default because `add` clones. `list`, `index`, and
+`query` are local. The engine owns the checkout and the build; the plugin only
+builds arguments and returns the output. A query names the corpus, the passage
+`file:line`, the mode (`bm25`, `semantic`, or `hybrid`), and the licence.
+
+[Back to top](#table-of-contents)
+
+## Share links
+
+`share.enabled` (off) adds `xerj_share`, which wraps `xerj share`. `create`
+prints a link, a passcode, and an expiry for one index, before any guest can
+open it. `list` shows the shares, `revoke` kills one. The link is read-only and
+served by this machine; no tunnel is offered, because that would route the
+traffic through a third party. The engine generates the passcode when you omit
+one.
 
 [Back to top](#table-of-contents)
 

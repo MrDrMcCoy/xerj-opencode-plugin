@@ -5,6 +5,17 @@ import { join } from "node:path";
 import { DEFAULT_CONFIG } from "../../src/config.ts";
 import { buildTools } from "../../src/tools/search.ts";
 
+const CODE_STUB = {
+  list: async () => ({ ok: false, text: "code disabled" }),
+  add: async () => ({ ok: false, text: "code disabled" }),
+  index: async () => ({ ok: false, text: "code disabled" }),
+  query: async () => ({ ok: false, text: "code disabled" }),
+} as never;
+const SHARE_STUB = {
+  create: async () => ({ ok: false, text: "share disabled" }),
+  list: async () => ({ ok: false, text: "share disabled" }),
+  revoke: async () => ({ ok: false, text: "share disabled" }),
+} as never;
 const TREE_STUB = {
   report: async () => ({ files: 0, functions: [], duplicates: [] }),
 } as never;
@@ -65,6 +76,8 @@ function toolFor(
     getAnomaly: () => (overrides.anomaly ?? null) as never,
     hub: HUB_STUB,
     treeSitter: TREE_STUB,
+    code: CODE_STUB,
+    share: SHARE_STUB,
     snapshot: async () => status,
     ledger: {
       recordQuery: async (_session: string, paths: string[], bytes: number, hits: number) => {
@@ -158,6 +171,8 @@ describe("the rest of the tool surface", () => {
       getAnomaly: () => (overrides.anomaly ?? null) as never,
       hub: HUB_STUB,
       treeSitter: TREE_STUB,
+      code: CODE_STUB,
+      share: SHARE_STUB,
 
       snapshot: async () => snapshot(),
       ledger: { recordQuery: async () => {} } as never,
@@ -488,6 +503,8 @@ describe("dataset tool", () => {
       getAnomaly: () => null,
       hub: HUB_STUB,
       treeSitter: TREE_STUB,
+      code: CODE_STUB,
+      share: SHARE_STUB,
 
       snapshot: async () => ({}) as never,
     }) as never;
@@ -603,6 +620,8 @@ describe("dataset tool export and import", () => {
       getAnomaly: () => null,
       hub: HUB_STUB,
       treeSitter: TREE_STUB,
+      code: CODE_STUB,
+      share: SHARE_STUB,
       snapshot: async () => ({}) as never,
     });
     const tool = tools.find((candidate) => candidate.name === "dataset");
@@ -653,6 +672,8 @@ describe("dataset tool export and import", () => {
       getAnomaly: () => null,
       hub: HUB_STUB,
       treeSitter: TREE_STUB,
+      code: CODE_STUB,
+      share: SHARE_STUB,
       snapshot: async () => ({}) as never,
     });
     const tool = tools.find((candidate) => candidate.name === "dataset");

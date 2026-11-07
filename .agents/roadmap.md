@@ -116,9 +116,11 @@ setting, not a build flag: the same published package carries the capability.
 | `analysis.lsp.idleMs` | 5 min | Stop a server that answered nothing for this long |
 | `analysis.lsp.maxServers` | 2 | Cap concurrent servers, so one project cannot fill memory |
 | `analysis.lsp.timeoutMs` | 2 s | Per-request deadline; a miss returns no result rather than delaying a turn |
-| `share.enabled` | `false` | Register `xerj_share`, which opens a read-only listener for one index |
+| `share.enabled` | `false` | Register `xerj_share`, which wraps `xerj share` for a read-only link over one index |
 | `hub.enabled` | `false` | Register `xerj_ask` and the hub commands |
 | `hub.network` | `false` | Allow `xerj ask` to reach the catalogue and download packs; when false only already-cached packs answer |
+| `code.enabled` | `false` | Register `xerj_code` for reference corpora |
+| `code.network` | `false` | Allow `xerj corpus add` to clone its git URLs |
 | `cmd.enabled` | `true` | Register `xerj_run` and `xerj_out`, and maintain the command-output corpus. The one open gate; see its design section |
 | `memory.distill.enabled` | `true` | Turn finished turns into typed memories and retire distilled ones past their budget. The local judge is the default, so the first run downloads the jevos model |
 | `memory.distill.judge` | `local` | `local` runs the downloaded jevos CPU model; `heuristic` is the free local filter; `model` asks the current model per candidate |
@@ -1397,7 +1399,7 @@ measured; they include tests and the commits that carry them. A status of
 | Structural search (`ast-grep`, read only) | M | Done | 1.0 h | `analysis/ast.ts` plus `xerj_ast`: probes the binary, passes the pattern and glob as arguments, parses `--json=stream`, never rewrites; seven module tests and one tool test |
 | tree-sitter layer, one language | M | Done (gated off) | 4.0 h | `analysis/grammar.ts` downloads the pinned `tree-sitter-wasms` 0.1.13 tarball (4.4 MB, sha512 verified) into `<data root>/grammars/0.1.13/out`; `analysis/treesitter.ts` lazily loads `web-tree-sitter`, maps extensions to grammars, parses project files under a size cap, and extracts function ranges, named-node counts, and structural hashes. TypeScript/TSX are the tested pair; JavaScript, Python, Rust, Go, Java, C/C++, Ruby, PHP, Kotlin, Lua, and shell are mapped. Gate stays closed |
 | Complexity and duplicates | M | Done (gated off) | 1.0 h | `xerj_complexity` lists the largest functions by named-node count and groups structurally identical functions above `min_nodes`; `formatStructure` cites `path:line`. Four module tests and one tool test; the parser was verified against a real TypeScript tree and the real pack |
-| `xerj_code` | M | Not started | — | The engine has `corpus add/own/build/index/list`; `add` clones a git URL, so this needs network consent and belongs behind a gate like `hub` rather than in an always-on tool |
+| `xerj_code` | M | Done (gated off) | 1.5 h | `src/code/service.ts` wraps `xerj code` and `xerj corpus list/add/index`: `code.enabled` registers the tool, `code.network` gates cloning, `XERJ_CODE_HOME` is `<data root>/code`, and `--url` points at the plugin node. Query passes corpus, mode, `-k`, `--full`, and `--lang`; add/list/index return the engine output. Eight service and tool tests. |
 | `xerj_ask` and hub packs | M | Done (gated off) | 2.0 h | `src/hub/service.ts` wraps `xerj ask`/`xerj hub`: `--offline` and `--hosted off` when the network is off, `--url` to the plugin node, JSON answer formatting with corpus/pin/licence, exit-code mapping, and `find`/`sync`/`status`. Defaults: `hub.enabled` false, `hub.network` false, `hub.hosted` off, `https://hub.xerj.org`, 1200 tokens, 120 s. Packs, signatures, catalogue, and cache stay in the engine. Seven service/tool tests plus a live cached-pack answer. |
 | Turn archive | M | Done | 1.5 h | `archive/turns.ts`: one NDJSON file per session under `<node dir>/archive`, 4 KB per turn, oldest half dropped past `context.archive.maxBytes`; prompts and answers both archived; eight module tests |
 | `xerj_expand` | M | Done | 0.5 h | Prints `[n] U:`/`[n] A:` for a turn range, or says the archive is off; wired for the plugin and the MCP server |
@@ -1411,7 +1413,7 @@ measured; they include tests and the commits that carry them. A status of
 | Server installer | L | Not started | — | — |
 | `xerj_callers`, `xerj_impact` | L | Not started | — | Needs the pool |
 | `xerj_inspect` | L | Not started | — | Needs LSP and tree-sitter |
-| `xerj_share` | L | Not started | — | Gated by `share.enabled` |
+| `xerj_share` | L | Done (gated off) | 0.5 h | `src/share/service.ts` wraps `xerj share` create/list/revoke with `--expires`, `--max-claims`, optional passcode and label, and `--url` to the plugin node. No tunnel is offered. `share.enabled` is false. Three service tests and a registration test. |
 | Dreamer child sessions | XL | Not started | — | — |
 | Notes and smart notes | XL | Not started | — | — |
 
@@ -1427,10 +1429,10 @@ hint, where the dedupe test had to distinguish the hint pass from the retrieval
 pass.
 
 Tier M so far: **18.0 h** across eleven items this pass, twelve of fourteen
-with the graph overview that predates it. Remaining, all gated: `xerj_code`
-(needs a network gate, since `corpus add` clones), the LSP pool, and `share`.
-Tree-sitter, complexity, `xerj_ask`, and window extraction are shipped behind
-their closed gates.
+with the graph overview that predates it. Remaining: the LSP pool and the
+callers/impact/inspect tools it enables, plus the two XL design items.
+Tree-sitter, complexity, `xerj_ask`, `xerj_code`, `xerj_share`, and window
+extraction are shipped behind their closed gates.
 
 ## Settled decisions
 

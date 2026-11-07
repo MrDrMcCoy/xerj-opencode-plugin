@@ -99,6 +99,8 @@ import { makeJevosJudge } from "./jev/judge.ts";
 import { Autotuner, type TuningView } from "./jev/autotune.ts";
 import { HubService } from "./hub/service.ts";
 import { TreeSitterService } from "./analysis/treesitter.ts";
+import { CodeService } from "./code/service.ts";
+import { ShareService } from "./share/service.ts";
 import { jevosTarget, normaliseVersion } from "./jev/release.ts";
 import { migrateMemoryIndex, migrateProjectStorage } from "./memory/migrate.ts";
 import { RemoteSpool } from "./remote/spool.ts";
@@ -1095,6 +1097,19 @@ export default Plugin.define({
       config: config.analysis.treeSitter,
       logger,
     });
+    const codeService = new CodeService({
+      config: config.code,
+      binary: () => runtime.binary?.path ?? null,
+      nodeUrl: () => runtime.node?.baseUrl ?? null,
+      codeRoot: join(root, "code"),
+      logger,
+    });
+    const shareService = new ShareService({
+      config: config.share,
+      binary: () => runtime.binary?.path ?? null,
+      nodeUrl: () => runtime.node?.baseUrl ?? null,
+      logger,
+    });
     const hub = new HubService({
       config: config.hub,
       binary: () => runtime.binary?.path ?? null,
@@ -1117,6 +1132,8 @@ export default Plugin.define({
       getAnomaly: () => runtime.anomaly,
       hub,
       treeSitter,
+      code: codeService,
+      share: shareService,
       snapshot,
     });
 
