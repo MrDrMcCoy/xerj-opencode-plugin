@@ -417,19 +417,29 @@ export class XerjClient {
 }
 
 /** `fetch` rejects with a TypeError whose cause is the socket error. */
+const TRANSPORT_CODES = [
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+] as const;
+
 function isTransportError(error: unknown): boolean {
   if (!(error instanceof TypeError)) return false;
+
   const cause = (error as { cause?: unknown }).cause;
   const code =
     typeof cause === "object" && cause !== null
       ? (cause as { code?: unknown }).code
       : undefined;
-  return (
-    code === "ECONNREFUSED" ||
-    code === "ECONNRESET" ||
-    code === "EHOSTUNREACH" ||
-    code === "ENETUNREACH"
-  );
+  if (typeof code === "string" && TRANSPORT_CODES.includes(code as never)) {
+    return true;
+  }
+
+  // Bun's fetch rejects with a TypeError that carries no `cause` and no
+  // `code`; the syscall error is only in the message. Without this the retry
+  // never fires and a dead node strands every request.
+  return TRANSPORT_CODES.some((name) => error.message.includes(name));
 }
 
 /** Parses human byte sizes from `_cat/indices` (`1.2mb`, `42.7kb`, `0b`). */

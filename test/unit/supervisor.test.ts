@@ -589,6 +589,45 @@ describe("NodeRuntime", () => {
     await rm(nodeDir, { recursive: true, force: true });
   });
 
+  // A detached node dies without an exit event. Trusting the cached handle
+  // kept `ensure()` returning a dead URL, so every request failed on the
+  // socket until the plugin was reloaded.
+  test("reaps a dead handle and starts a new node", async () => {
+    const nodeDir = await mkdtemp(join(root, "runtime-"));
+    const fake = await writeFakeNode();
+    const runtime = new NodeRuntime({
+      nodeDir,
+      projectRoot: nodeDir,
+      preferredPort: 9704,
+      dataDir: join(nodeDir, "data"),
+      portLockPath: join(nodeDir, "lock"),
+      explicitUrl: null,
+      embedMode: EmbedMode.Lexical,
+      logger,
+      binary: () => ({
+        version: "1.0.0-rc.102",
+        path: fake,
+        upgraded: false,
+      }),
+    });
+
+    try {
+      const first = await runtime.ensure();
+      expect(first.pid).not.toBeNull();
+      process.kill(first.pid!, "SIGKILL");
+      // Let the kernel deliver the signal before the liveness check.
+      await Bun.sleep(100);
+
+      const second = await runtime.ensure();
+      expect(second.pid).not.toBeNull();
+      expect(second.pid).not.toBe(first.pid);
+      expect(runtime.snapshot.state).toBe("running");
+    } finally {
+      await runtime.stop("test");
+      await rm(nodeDir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   test("an explicit url is never killed on stop", async () => {
     const nodeDir = await mkdtemp(join(root, "runtime-"));
     const runtime = new NodeRuntime({

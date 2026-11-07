@@ -67,11 +67,13 @@ export class NodeRuntime {
     readonly state: RuntimeNodeState;
     readonly lastError: string | null;
   } {
+    this.reapDead();
     return { state: this.state, lastError: this.lastError };
   }
 
   /** Cheap when the node is up: no probe, no filesystem work. */
   async ensure(): Promise<NodeHandle> {
+    this.reapDead();
     if (this.handle) return this.handle;
     if (this.pending) return this.pending;
 
@@ -79,6 +81,26 @@ export class NodeRuntime {
       this.pending = null;
     });
     return this.pending;
+  }
+
+  /**
+   * Clears the cached handle when its process is gone. A detached node dies
+   * without an exit event, so the pid is the only evidence. Trusting the
+   * handle would make `ensure()` return a dead URL and every request would
+   * fail on the socket until the plugin was reloaded.
+   */
+  private reapDead(): void {
+    const handle = this.handle;
+    if (handle === null || handle.pid === null || this.options.explicitUrl) return;
+
+    try {
+      process.kill(handle.pid, 0);
+    } catch (error) {
+      // EPERM means the process exists but belongs to another user.
+      if ((error as { code?: unknown }).code === "EPERM") return;
+      this.invalidate();
+      this.lastError = "the xerj node exited";
+    }
   }
 
   /** Drops the cached handle after a transport failure so the next call probes. */
@@ -89,6 +111,7 @@ export class NodeRuntime {
 
   /** Probes this project's recorded node without starting one. */
   async detect(): Promise<NodeDetection> {
+    this.reapDead();
     if (this.handle) {
       return {
         running: true,

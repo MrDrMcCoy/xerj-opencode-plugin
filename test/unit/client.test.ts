@@ -323,6 +323,31 @@ describe("transport retry", () => {
     expect(calls[1]!.url).toBe("http://127.0.0.1:9300/");
   });
 
+  // Bun's fetch rejects with a TypeError that has no `cause` and no `code`;
+  // the syscall name is only in the message. The retry used to read `cause`,
+  // find nothing, and leave a dead node stranded.
+  test("retries a Bun-shaped transport error with no cause", async () => {
+    stubFetch();
+    let attempts = 0;
+    const resolver: ClientResolver = {
+      ensure: async () => "http://127.0.0.1:9300",
+      invalidate: () => {},
+    };
+    behave = async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw new TypeError(
+          "ECONNREFUSED: Unable to connect. Is the computer able to access the url?",
+        );
+      }
+      return response(200, { cluster_name: "xerj" });
+    };
+
+    const info = await client({ resolver }).info();
+    expect(info?.clusterName).toBe("xerj");
+    expect(attempts).toBe(2);
+  });
+
   test("does not retry without a resolver, or on HTTP errors", async () => {
     stubFetch();
     behave = async () => {

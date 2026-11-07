@@ -388,6 +388,31 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-07: The degraded badge had three causes, all fixed, and the
+  dreamer is verified live. (1) Bun's `fetch` rejects a refused connection with
+  a `TypeError` that has no `cause` and no `code`; `isTransportError` only read
+  `cause`, so the retry that re-ensures a stopped node never fired and every
+  request failed on the dead socket. It now also checks the message for the
+  syscall error name. (2) `NodeRuntime.ensure()` and `detect()` returned a
+  cached handle without checking its pid; a detached node that died without an
+  exit event kept answering with a dead URL. The handle is now reaped when the
+  pid is gone, and the status snapshot drops the stale handle. (3) The plugin
+  teardown stopped the node even with `shutdownOnIdle: false`, so a reload
+  killed a node another instance was using; it now stops only when the key is
+  on and no peer holds a session. Binary installs also serialize on one lock
+  under the cache root, and a failed bootstrap is retried on the next status
+  call instead of leaving the plugin degraded for the life of the process.
+
+  Live: the neural node was restarted in the right mode, the project corpus and
+  71 memories came back, and the badge settled on `ready` (9,131 docs, 9
+  datasets). The dreamer child session
+  `ses_e48199287ffeiqN5x07yb0GLjC` checked 70 memories, flagged 5 stale, used
+  exactly three tool calls, and stored one primer as `813525f95cbabb33`; the
+  denied `edit`/`write`/`bash`/`shell`/`webfetch` permissions held. One
+  `xerj_remember` hit a node restart mid-run and the child retried with a
+  shorter text, which is the transient failure the retry fix removes. 1,276
+  unit tests pass and typecheck is clean.
+
 - 2026-11-07: Global state moved to the OpenCode cache root. `cacheRoot` is
   `$XDG_CACHE_HOME/opencode/xerj` on Linux, `~/Library/Caches/opencode/xerj`
   on macOS, and `%LOCALAPPDATA%\opencode\cache\xerj` on Windows. The managed

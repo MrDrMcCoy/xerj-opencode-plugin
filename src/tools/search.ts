@@ -24,6 +24,7 @@ import type { CodeService } from "../code/service.ts";
 import type { ShareService } from "../share/service.ts";
 import type { LspPool } from "../analysis/lsp/pool.ts";
 import type { NoteStore } from "../notes/store.ts";
+import type { Dreamer } from "../memory/dreamer.ts";
 import { listProjectFiles } from "../analysis/walk.ts";
 import { unusedExports } from "../analysis/exports.ts";
 
@@ -47,6 +48,8 @@ export interface ToolOptions {
   readonly share: ShareService;
   readonly lsp: LspPool;
   readonly notes: NoteStore;
+  /** Present only in the plugin server part; the MCP host has no dreamer. */
+  readonly getDreamer?: () => Dreamer | null;
   readonly snapshot: () => Promise<StatusSnapshot>;
 }
 
@@ -904,6 +907,9 @@ export function buildTools(options: ToolOptions): ReadonlyArray<{
     ...(options.config.analysis.lsp.enabled ? lspTools(options) : []),
     inspectTool(options),
     ...(options.config.context.notes.enabled ? [notesTool(options)] : []),
+    ...(options.config.memory.dreamer.enabled && options.getDreamer !== undefined
+      ? [dreamerTool(options)]
+      : []),
   ];
 }
 
@@ -1206,6 +1212,60 @@ function notesTool(options: ToolOptions): {
           metadata: { xerj: { notes: 0 } },
         };
       }
+    },
+  };
+}
+
+/** Manual dreamer run; the command and this tool share one path. */
+function dreamerTool(options: ToolOptions): {
+  name: string;
+  description: string;
+  input: unknown;
+  options: { namespace: string };
+  execute: (input: unknown, context: unknown) => Promise<unknown>;
+} {
+  return {
+    name: "dreamer",
+    description:
+      "Run the XERJ dreamer now: verify and curate memory, then start a child session for one short primer. The same run is on /xerj-dreamer. A manual run bypasses the interval and never edits project files.",
+    input: { type: "object", properties: {}, additionalProperties: false },
+    options: { namespace: "xerj" },
+    execute: async (_input, context) => {
+      const dreamer = options.getDreamer?.() ?? null;
+      if (dreamer === null) {
+        return {
+          content: "The dreamer is disabled.",
+          metadata: { xerj: { dreamer: { started: false } } },
+        };
+      }
+      const tool = context as { sessionID?: string };
+      const sessionID = tool.sessionID ?? "";
+      if (sessionID.length === 0) {
+        return {
+          content: "The dreamer needs an active session.",
+          metadata: { xerj: { dreamer: { started: false } } },
+        };
+      }
+      const result = await dreamer.runNow(sessionID, true);
+      return {
+        content: result.ran
+          ? `Dreamer started (${result.child ?? "child"}): ` +
+            `${result.checked} checked · ${result.stale} stale · ` +
+            `${result.merged} merged`
+          : `Dreamer did not start: ${result.reason ?? "unknown reason"}`,
+        metadata: {
+          xerj: {
+            dreamer: {
+              started: result.ran,
+              child: result.child,
+              checked: result.checked,
+              stale: result.stale,
+              merged: result.merged,
+              flagged: result.flagged,
+            },
+          },
+        },
+      };
     },
   };
 }

@@ -106,7 +106,13 @@ export async function ensureBinary(options: EnsureBinaryOptions): Promise<Instal
     if (installed && installed.version === version) {
       return { ...installed, upgraded: false };
     }
-    const path = await install(root, version, info, logger, timeouts);
+    const path = await installWithLock(
+      root,
+      version,
+      info,
+      logger,
+      timeouts,
+    );
     return { version, path, upgraded: false };
   }
 
@@ -121,7 +127,13 @@ export async function ensureBinary(options: EnsureBinaryOptions): Promise<Instal
   }
 
   try {
-    const path = await install(root, latest, info, logger, timeouts);
+    const path = await installWithLock(
+      root,
+      latest,
+      info,
+      logger,
+      timeouts,
+    );
     logger.info(`installed xerj ${latest}`, { path });
     return { version: latest, path, upgraded: installed !== null };
   } catch (error) {
@@ -161,6 +173,51 @@ export async function externalBinary(
 
   logger.info("using the configured xerj binary", { path, version });
   return { version, path, upgraded: false };
+}
+
+/**
+ * Serializes installs into one cache root. Two plugin locations can start at
+ * the same time; without this, both download and extract the same archive.
+ */
+async function installWithLock(
+  root: string,
+  version: string,
+  info: PlatformInfo,
+  logger: Logger,
+  timeouts: ResolvedBinaryTimeouts,
+): Promise<string> {
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  const lock = join(root, ".install.lock");
+  const deadline = Date.now() + 5 * 60_000;
+  while (true) {
+    try {
+      await mkdir(lock, { recursive: false, mode: 0o700 });
+      break;
+    } catch {
+      const infoStat = await stat(lock).catch(() => null);
+      if (infoStat !== null && Date.now() - infoStat.mtimeMs > 10 * 60_000) {
+        await rm(lock, { recursive: true, force: true }).catch(() => {});
+        continue;
+      }
+      if (Date.now() > deadline) {
+        throw new BinaryError("another xerj install is still running");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+    }
+  }
+
+  try {
+    const existing = await findInstalled(
+      root,
+      process.platform,
+      info.target,
+      timeouts.commandMs,
+    );
+    if (existing !== null && existing.version === version) return existing.path;
+    return await install(root, version, info, logger, timeouts);
+  } finally {
+    await rm(lock, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 async function findInstalled(

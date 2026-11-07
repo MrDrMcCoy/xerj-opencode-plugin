@@ -145,6 +145,7 @@ describe("server setup wiring", () => {
         "complexity",
         "dataset",
         "def",
+        "dreamer",
         "expand",
         "find",
         "forget",
@@ -168,7 +169,7 @@ describe("server setup wiring", () => {
         "telemetry",
         "zoom",
       ]);
-      expect(host.tools.length).toBe(30);
+      expect(host.tools.length).toBe(31);
       expect(host.toolHooks).toContain("execute.after");
       expect(host.sessionHooks).toContain("prompt");
       expect(host.sessionHooks).toContain("context");

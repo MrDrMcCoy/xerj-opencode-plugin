@@ -500,11 +500,17 @@ export default Plugin.define({
 
     const snapshot = async (): Promise<StatusSnapshot> => {
       const usage = ledger.snapshot();
-      // Only probe the node directory when no live handle exists: a healthy
+      const runtimeState = runtime.nodes?.snapshot.state ?? "stopped";
+      // A detached node dies without an exit event. `snapshot` reaps a dead
+      // pid; drop the cached handle too so the panel never reports a dead
+      // process as ready.
+      if (runtime.node !== null && runtimeState === "stopped") {
+        runtime.node = null;
+      }
+      // Probe the node directory only when no live handle exists: a healthy
       // process never pays for detection, and an idle-stopped one reports
       // whether another OpenCode process has since started the node.
       const detection = runtime.node === null ? await runtime.nodes?.detect() : null;
-      const runtimeState = runtime.nodes?.snapshot.state ?? "stopped";
       const nodeState =
         runtimeState === "stopped" && detection?.running
           ? "running"
@@ -1173,10 +1179,9 @@ export default Plugin.define({
       getArchive: () => archive,
       ledger,
       logger,
-      getClient: () =>
-        runtime.node === null
-          ? null
-          : new XerjClient(runtime.node.baseUrl, clientTimeouts),
+      // The shared client carries the node resolver, so a tool call after an
+      // idle stop re-ensures the node instead of failing on a dead socket.
+      getClient: () => client,
       getSearch: () => runtime.search,
       getMemory: () => runtime.memory,
       getSpool: () => runtime.spool,
@@ -1187,6 +1192,7 @@ export default Plugin.define({
       share: shareService,
       lsp,
       notes,
+      getDreamer: () => dreamer,
       snapshot,
     });
 
@@ -2269,23 +2275,41 @@ export default Plugin.define({
       });
     };
 
-    const bootstrap = async (): Promise<void> => {
-      try {
-        if (!info && !config.binary.path) return;
+    let bootstrapAttempt: Promise<void> | null = null;
+    let lastBootstrapAt = 0;
 
-        // Project state is created before the first tool call so a read-only
-        // workspace surfaces here, not mid-session.
-        await ensureProjectState(projectRoot);
-        await bootstrapRuntime();
-      } catch (error) {
-        runtime.phase = "error";
-        runtime.error = error instanceof Error ? error.message : String(error);
-        logger.error("xerj failed to start", runtime.error);
-      } finally {
-        if (!shutdown.signal.aborted) {
-          await registration.events.emit("updated", { updatedAt: Date.now() }).catch(() => {});
+    const ensureBootstrap = async (): Promise<void> => {
+      if (runtime.binary !== null || runtime.phase === "ready") return;
+      if (bootstrapAttempt !== null) return bootstrapAttempt;
+      if (Date.now() - lastBootstrapAt < 60_000) return;
+
+      lastBootstrapAt = Date.now();
+      bootstrapAttempt = (async () => {
+        try {
+          if (!info && !config.binary.path) return;
+
+          // Project state is created before the first tool call so a read-only
+          // workspace surfaces here, not mid-session.
+          await ensureProjectState(projectRoot);
+          await bootstrapRuntime();
+          runtime.error = null;
+        } catch (error) {
+          runtime.phase = "error";
+          const cause =
+            error instanceof Error && error.cause !== undefined
+              ? `: ${String(error.cause)}`
+              : "";
+          runtime.error =
+            (error instanceof Error ? error.message : String(error)) + cause;
+          logger.error("xerj failed to start", runtime.error);
+        } finally {
+          bootstrapAttempt = null;
+          if (!shutdown.signal.aborted) {
+            await registration.events.emit("updated", { updatedAt: Date.now() }).catch(() => {});
+          }
         }
-      }
+      })();
+      return bootstrapAttempt;
     };
 
     // Record this boot after tools, hooks, and RPC exist, so a failure here
@@ -2293,7 +2317,7 @@ export default Plugin.define({
     void boot.start({ phase: "setup", bootAt: BOOT_AT });
     sampler.start();
 
-    void bootstrap();
+    void ensureBootstrap();
 
     return () => {
       shutdown.abort();
@@ -2309,11 +2333,15 @@ export default Plugin.define({
           await stopIndexers();
           sampler.stop();
 
-          // This process's sessions are over. Stop the node only when no peer
-          // process is still serving the project; otherwise its own idle timer
-          // decides, and stopping here would break its next request.
+          // This process's sessions are over. With `shutdownOnIdle: false` the
+          // node is meant to survive a reload, so teardown must not stop it;
+          // otherwise every plugin restart kills a node another instance is
+          // using. When the key is on, stop only when no peer is serving the
+          // project, or the peer's next request would fail.
           const peers = (await runtime.lifecycle?.peers()) ?? 0;
-          if (peers === 0) await runtime.nodes?.stop("shutdown");
+          if (config.node.shutdownOnIdle && !config.node.url && peers === 0) {
+            await runtime.nodes?.stop("shutdown");
+          }
 
           await ledger.flush();
           await boot.shutdown();
