@@ -902,6 +902,15 @@ export default Plugin.define({
     };
 
     const runReindex = async () => {
+      // A bootstrap that failed after the node was up can leave the services
+      // null; a reindex is the natural moment to build them again.
+      if (runtime.node !== null && runtime.corpus === null) {
+        await startIndexers(runtime.node).catch((error: unknown) => {
+          logger.warn("could not start the indexers for a reindex", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      }
       await Promise.all([
         runtime.corpus?.reindex(),
         runtime.web?.reindex(),
@@ -1666,7 +1675,13 @@ export default Plugin.define({
         // on another port, recreating the indexers is the only way their
         // `autoindex --url` points at the live node.
         if (previousUrl !== null && previousUrl !== handle.baseUrl) {
-          void stopIndexers().then(() => startIndexers(handle));
+          void stopIndexers()
+            .then(() => startIndexers(handle))
+            .catch((error: unknown) => {
+              logger.warn("could not restart the indexers after a port change", {
+                error: error instanceof Error ? error.message : String(error),
+              });
+            });
           return;
         }
         void startIndexers(handle);
