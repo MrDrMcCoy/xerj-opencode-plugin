@@ -364,6 +364,29 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: The sidebar now reports what it does. The TUI half has no
+  filesystem access and the host logs no slot render failures, so a sidebar
+  that fails on the host left nothing behind. A new `uiLog` RPC carries the
+  TUI's own lines, in batches, to the server half, which appends them to
+  `rings/ui.sidebar.ndjson` in the same telemetry store as the operation
+  rings: clipped, redacted, capped by `samplesPerType`, and tagged with the
+  project prefix and the instance id.
+
+  The sidebar records setup, the loaded preferences, each status read, the
+  parsed view (badge and row counts), and each render. Both slot bodies catch
+  their own failures, log the message and stack, and return one plain line, so
+  a fault inside the view leaves a record and a readable block. A failed send
+  keeps the buffer for the next attempt, so lines written before the first
+  status read are not lost. The ticker reads a plain counter rather than the
+  reactive state, since it runs outside render.
+
+  A verbose render log would otherwise cost one timed RPC per line and appear
+  in the operation ring and the rollup, so a flush sends one batch and the
+  handler caps it at 100 entries. 1100 unit tests pass, typecheck clean.
+
+  Next: restart the CLI, because the TUI bundle is loaded at CLI start, then
+  read `~/.local/share/opencode/xerj/telemetry/rings/ui.sidebar.ndjson`.
+
 - 2026-11-06: The missing memory index was a false positive, and the store is
   restored. On boot the plugin logged `memory index was unreadable and has been
   reset`, backed `.xerj-memory-proj-…` up to `embed-backup/unreadable/` and
