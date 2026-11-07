@@ -377,6 +377,11 @@ const definition = {
         memory: object({
           namespace: { type: "string" },
           count: { type: "number" },
+          // The host builds the response from this schema, so a field the type
+          // declares but the schema does not is dropped before the TUI reads
+          // it. That is what a sidebar reading `exists` off nothing looks like.
+          exists: { type: "boolean" },
+          stale: { type: "number" },
         }),
         brains: {
           type: "array",
@@ -397,6 +402,24 @@ const definition = {
           type: "array",
           items: object({ kind: { type: "string" }, docs: { type: "number" } }),
         },
+        frameworks: {
+          type: "array",
+          items: object({
+            tech: { type: "string" },
+            docs: { type: "number" },
+            bytes: { type: "number" },
+          }),
+        },
+        process: {
+          type: ["object", "null"],
+          properties: {
+            cpuPercent: { type: "number" },
+            memoryBytes: { type: "number" },
+          },
+          required: ["cpuPercent", "memoryBytes"],
+          additionalProperties: false,
+        },
+        embeddings: { type: "boolean" },
         corpora: {
           type: "array",
           items: object({

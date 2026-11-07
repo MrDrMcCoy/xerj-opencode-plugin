@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { StatusSnapshot } from "../../src/rpc.ts";
+import { XerjRpc, type StatusSnapshot } from "../../src/rpc.ts";
 import {
   formatAge,
   formatBytes,
@@ -12,6 +12,30 @@ import {
 } from "../../src/ui/format.ts";
 
 const NOW = 1_120_000;
+
+type SchemaNode = {
+  readonly properties?: Record<string, unknown>;
+  readonly items?: unknown;
+};
+
+/**
+ * What the host hands the TUI: the response rebuilt from the declared output
+ * schema, so a field the type declares but the schema omits never arrives.
+ */
+function toSchema(value: unknown, schema: unknown): unknown {
+  const node = (schema ?? {}) as SchemaNode;
+  if (Array.isArray(value)) return value.map((entry) => toSchema(entry, node.items));
+  if (value === null || typeof value !== "object" || node.properties === undefined) {
+    return value;
+  }
+
+  const out: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(node.properties)) {
+    if (!(key in value)) continue;
+    out[key] = toSchema((value as Record<string, unknown>)[key], child);
+  }
+  return out;
+}
 
 function snapshot(overrides: Partial<StatusSnapshot> = {}): StatusSnapshot {
   const base: StatusSnapshot = {
@@ -605,6 +629,32 @@ describe("data map and keywords", () => {
       .join("\n");
 
     expect(body).not.toContain("prjdocs keywords");
+  });
+});
+
+describe("status output schema", () => {
+  // The host rebuilds the status response from this schema. A field that the
+  // type declares but the schema forgets is dropped before the TUI sees it,
+  // and `snapshot.process` reading as undefined is what took the sidebar down.
+  test("every field the panels read survives the schema", () => {
+    const delivered = toSchema(
+      snapshot(),
+      XerjRpc.methods.status.output,
+    ) as StatusSnapshot;
+
+    expect(delivered.process).not.toBeUndefined();
+    expect(delivered.frameworks).not.toBeUndefined();
+    expect(delivered.memory.exists).not.toBeUndefined();
+    expect(delivered.memory.stale).not.toBeUndefined();
+    expect(delivered.embeddings).not.toBeUndefined();
+    expect(() => sidebarView(delivered, NOW, {
+      corpora: true,
+      session: true,
+      savings: true,
+      runtime: true,
+      health: true,
+    })).not.toThrow();
+    expect(() => panelSections(delivered, NOW)).not.toThrow();
   });
 });
 
