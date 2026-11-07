@@ -364,6 +364,23 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: The sidebar crash is found and fixed. The new fallback and ring
+  reported `undefined is not an object (evaluating 'e.process.cpuPercent')`, so
+  the failure was upstream of the render: the host rebuilds the `status`
+  response from the declared output schema, and that schema omitted `process`,
+  `frameworks`, `embeddings`, and the memory index's `exists` and `stale`. The
+  TUI received `process: undefined`, took the branch that formats counters, and
+  threw. `src/rpc.ts` now declares all of them.
+
+  The same omission made the memory row read `missing` for a healthy store,
+  because `exists` never arrived. Any field added to `StatusSnapshot` without a
+  schema line would disappear the same way.
+
+  `test/unit/ui.test.ts` gained a guard: it rebuilds the status fixture from
+  the declared output schema — the same properties the host keeps — asserts the
+  fields the panels read survive, and asserts both views render. It fails
+  against the old schema with the sidebar's own error. 1101 unit tests pass.
+
 - 2026-11-06: The sidebar now reports what it does. The TUI half has no
   filesystem access and the host logs no slot render failures, so a sidebar
   that fails on the host left nothing behind. A new `uiLog` RPC carries the
