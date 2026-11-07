@@ -499,6 +499,12 @@ export default Plugin.define({
     };
 
     const snapshot = async (): Promise<StatusSnapshot> => {
+      // A failed install or node start used to leave the plugin degraded for
+      // the life of the process. A status call is a cheap retry trigger; the
+      // bootstrap is single-flight and rate-limited to once a minute.
+      if (runtime.phase === "error" && !shutdown.signal.aborted) {
+        void ensureBootstrap();
+      }
       const usage = ledger.snapshot();
       const runtimeState = runtime.nodes?.snapshot.state ?? "stopped";
       // A detached node dies without an exit event. `snapshot` reaps a dead
@@ -2279,7 +2285,10 @@ export default Plugin.define({
     let lastBootstrapAt = 0;
 
     const ensureBootstrap = async (): Promise<void> => {
-      if (runtime.binary !== null || runtime.phase === "ready") return;
+      // A binary already installed is not a reason to skip the retry: the
+      // failure may have been the node start, which the next attempt fixes
+      // without downloading anything.
+      if (runtime.phase === "ready") return;
       if (bootstrapAttempt !== null) return bootstrapAttempt;
       if (Date.now() - lastBootstrapAt < 60_000) return;
 

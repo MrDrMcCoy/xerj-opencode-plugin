@@ -300,6 +300,33 @@ describe("line resolution", () => {
     expect(result.hits[0]!.line).toBe(1);
   });
 
+  // The line cache used to outlive an edit, so a citation kept the line
+  // number from the text the first search saw. Every corpus run invalidates
+  // the service, and that has to drop the file bodies too.
+  test("invalidate drops stale file text so a moved line resolves again", async () => {
+    const path = "src/line-cache.txt";
+    const file = join(root, "src", "line-cache.txt");
+    await writeFile(file, "one\nterm here\n");
+
+    const client = fakeClient({
+      searchResults: [
+        { hits: { hits: [hit({ path, text: "term here", startOffset: 4, startLine: 1 })] } },
+      ],
+    });
+    const instance = service(client);
+    const first = await instance.search("term");
+    expect(first.hits[0]!.line).toBe(2);
+
+    // A new line above the passage: the cached text would still say line 2.
+    await writeFile(file, "zero\none\nterm here\n");
+    client.searchResults.push({
+      hits: { hits: [hit({ path, text: "term here", startOffset: 9, startLine: 1 })] },
+    });
+    instance.invalidate();
+    const second = await instance.search("term");
+    expect(second.hits[0]!.line).toBe(3);
+  });
+
   test("clamps a trailing offset to the end of the file", async () => {
     const client = fakeClient({
       searchResults: [

@@ -10,6 +10,7 @@ import {
   sidebarLines,
   sidebarRowLayout,
   sidebarView,
+  statusSummary,
 } from "../../src/ui/format.ts";
 
 const NOW = 1_120_000;
@@ -702,6 +703,28 @@ describe("sidebar row guards", () => {
     expect(
       sidebarRowLayout({ label: "Corpora", value: "error · " + "x".repeat(80) }),
     ).toBe("stacked");
+  });
+});
+
+describe("statusSummary", () => {
+  test("is small and reports the state, index, memory, and corpora", () => {
+    const text = statusSummary(snapshot(), Date.now());
+    expect(text).toContain("XERJ");
+    expect(text).toContain("437 docs");
+    expect(text).toContain("corpora");
+    expect(text.length).toBeLessThan(600);
+  });
+
+  test("adds the failing corpus reason only when degraded", () => {
+    const base = snapshot();
+    const failed = snapshot({
+      state: { ...base.state, name: "degraded", detail: "autoindex exited" },
+      index: { ...base.index, lastError: "autoindex exited 1" },
+    });
+    expect(statusSummary(failed, Date.now())).toContain(
+      "trouble autoindex exited 1",
+    );
+    expect(statusSummary(base, Date.now())).not.toContain("trouble");
   });
 });
 

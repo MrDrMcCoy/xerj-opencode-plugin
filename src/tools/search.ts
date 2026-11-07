@@ -18,6 +18,7 @@ import { DatasetService } from "../datasets/service.ts";
 import type { Logger } from "../log.ts";
 import type { SearchService } from "../search/service.ts";
 import type { StatusSnapshot } from "../rpc.ts";
+import { statusSummary } from "../ui/format.ts";
 import type { HubService } from "../hub/service.ts";
 import type { TreeSitterService } from "../analysis/treesitter.ts";
 import type { CodeService } from "../code/service.ts";
@@ -166,7 +167,12 @@ const IMPORTS_INPUT = {
 
 const STATUS_INPUT = {
   type: "object",
-  properties: {},
+  properties: {
+    full: {
+      type: "boolean",
+      description: "Return the complete status snapshot instead of the short summary.",
+    },
+  },
   additionalProperties: false,
 } as const;
 
@@ -650,10 +656,22 @@ export function buildTools(options: ToolOptions): ReadonlyArray<{
         "Report the XERJ search node, project index, and retrieval counters. Use it to check whether local search is available before falling back to reading files.",
       input: STATUS_INPUT,
       options: { namespace: "xerj" },
-      execute: async () => ({
-        content: JSON.stringify(await options.snapshot(), null, 2),
-        metadata: { xerj: { kind: "status" } },
-      }),
+      execute: async (input) => {
+        const snapshot = await options.snapshot();
+        const full = (input as { full?: boolean } | undefined)?.full === true;
+        return {
+          content: full
+            ? JSON.stringify(snapshot, null, 2)
+            : statusSummary(snapshot),
+          metadata: {
+            xerj: {
+              kind: "status",
+              state: snapshot.state?.name ?? "unknown",
+              docs: snapshot.index.docs,
+            },
+          },
+        };
+      },
     },
     {
       name: "remember",

@@ -351,6 +351,54 @@ function jobsSummary(
   return rest > 0 ? `${shown.join(" · ")} · +${rest}` : shown.join(" · ");
 }
 
+/**
+ * Compact status for the model. The full snapshot is about 10 KB (roughly
+ * 2.5k tokens), and a tool that exists to answer "is search available"
+ * should not spend that much context doing it. `xerj_status` returns this
+ * unless the caller asks for the full record.
+ */
+export function statusSummary(
+  snapshot: StatusSnapshot,
+  now: number = Date.now(),
+): string {
+  // Optional chaining against a server half older than this field, and
+  // against tests that build a partial snapshot. The RPC contract normally
+  // carries all of it.
+  const index = snapshot.index;
+  const node = snapshot.node;
+  const memory = snapshot.memory;
+  const stateName = snapshot.state?.name ?? "unknown";
+  const stateDetail = snapshot.state?.detail ?? null;
+  const corpora = (snapshot.corpora ?? []).map(
+    (corpus) => `${corpus.name} ${corpus.state}`,
+  );
+  const lastRun =
+    index.lastRunAt === null ? "no runs" : formatAge(now, index.lastRunAt);
+  const lines = [
+    `XERJ ${stateName}${stateDetail === null ? "" : ` · ${stateDetail}`}`,
+    `node ${node?.phase ?? "unknown"}` +
+      (node?.serverVersion == null ? "" : ` · ${node.serverVersion}`) +
+      (node?.baseUrl == null ? "" : ` · ${node.baseUrl}`),
+    `index ${index.state} · ${formatCount(index.docs)} docs · ` +
+      `${index.datasets.length} datasets · last run ${lastRun}`,
+    `memory ${formatCount(memory?.count ?? 0)}` +
+      ((memory?.stale ?? 0) > 0
+        ? ` · ${formatCount(memory?.stale ?? 0)} stale`
+        : "") +
+      (memory === undefined || memory.exists ? "" : " · missing"),
+    `corpora ${corpora.length === 0 ? "none" : corpora.join(" · ")}`,
+    `usage ${formatCount(snapshot.usage?.queries ?? 0)} queries · ` +
+      `${formatPercent(snapshot.usage?.hitRate ?? 0)} hit · ` +
+      `${formatTokens(snapshot.usage?.tokensSaved ?? 0)} tok saved`,
+  ];
+  const trouble =
+    stateName === "degraded"
+      ? index.lastError ?? snapshot.warnings?.[0] ?? null
+      : null;
+  if (trouble !== null) lines.push(`trouble ${trouble}`);
+  return lines.join("\n");
+}
+
 export function sidebarLines(snapshot: StatusSnapshot, now: number): string[] {
   const index = snapshot.index;
   const usage = snapshot.usage;

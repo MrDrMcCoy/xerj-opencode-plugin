@@ -96,6 +96,9 @@ const TRUST_FLOOR = 0.5;
 /** How many sections one file may contribute to an injected block. */
 const MAX_HITS_PER_FILE = 1;
 const MAX_RESOLVED_FILE_BYTES = 512 * 1024;
+// At most 128 file bodies are kept for line resolution. Past that the oldest
+// entry is dropped; a citation to it re-reads the file, which is cheap.
+const MAX_CACHED_FILES = 128;
 const SOURCE_FIELDS = [
   "ax_path",
   "path",
@@ -124,6 +127,11 @@ export class SearchService {
     at: number;
     indices: Record<string, Record<string, string>>;
   } | null = null;
+  /**
+   * File bodies used to turn a passage byte offset into a line. Bounded: a
+   * long session cites many files and an unbounded cache would hold every one
+   * of them until the plugin unloads.
+   */
   private readonly files = new Map<string, string | null>();
 
   constructor(
@@ -269,6 +277,10 @@ export class SearchService {
   /** Drops the mapping cache; call when a corpus run may have created indices. */
   invalidate(): void {
     this.mappingCache = null;
+    // The line cache holds file text, and an edited file keeps its old line
+    // numbers until it is re-read. Every corpus run calls this, so the next
+    // citation resolves against the text the index just saw.
+    this.files.clear();
   }
 
   async definition(symbol: string, options: SearchOptions = {}): Promise<SearchResult> {
@@ -502,12 +514,21 @@ export class SearchService {
 
     const content = await readFile(absolute, "utf8").catch(() => null);
     if (content === null || Buffer.byteLength(content, "utf8") > MAX_RESOLVED_FILE_BYTES) {
-      this.files.set(path, null);
+      this.cacheFile(path, null);
       return null;
     }
 
-    this.files.set(path, content);
+    this.cacheFile(path, content);
     return content;
+  }
+
+  /** Insertion-ordered cache: a re-read moves to the end, oldest is evicted. */
+  private cacheFile(path: string, content: string | null): void {
+    this.files.delete(path);
+    this.files.set(path, content);
+    if (this.files.size <= MAX_CACHED_FILES) return;
+    const oldest = this.files.keys().next().value;
+    if (oldest !== undefined) this.files.delete(oldest);
   }
 
   private absolute(path: string): string | null {

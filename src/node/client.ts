@@ -432,7 +432,10 @@ function isTransportError(error: unknown): boolean {
     typeof cause === "object" && cause !== null
       ? (cause as { code?: unknown }).code
       : undefined;
-  if (typeof code === "string" && TRANSPORT_CODES.includes(code as never)) {
+  if (
+    typeof code === "string" &&
+    (TRANSPORT_CODES as ReadonlyArray<string>).includes(code)
+  ) {
     return true;
   }
 

@@ -451,12 +451,20 @@ describe("the rest of the tool surface", () => {
     expect(result.content).toContain("96");
   });
 
-  test("status answers with the snapshot", async () => {
+  test("status answers with a compact summary by default", async () => {
     const run = allTools();
     const result = await run("status", {});
 
+    expect(result.content).toContain("XERJ");
+    expect(result.content).toContain("891 docs");
+    expect(result.metadata.xerj).toMatchObject({ kind: "status", docs: 891 });
+  });
+
+  test("status full=true returns the complete snapshot", async () => {
+    const run = allTools();
+    const result = await run("status", { full: true });
+
     expect(JSON.parse(result.content).index.docs).toBe(891);
-    expect(result.metadata.xerj).toMatchObject({ kind: "status" });
   });
 
   test("every tool reports not-ready rather than throwing", async () => {
@@ -712,5 +720,77 @@ describe("dataset tool export and import", () => {
     expect(created).toContain("/fresh");
 
     await rm(dir, { recursive: true, force: true });
+  });
+});
+
+describe("xerj_dreamer tool", () => {
+  const build = (dreamer: unknown) =>
+    buildTools({
+      config: DEFAULT_CONFIG,
+      projectRoot: process.cwd(),
+      getArchive: () => null,
+      ledger: {} as never,
+      logger: {
+        debug() {},
+        info() {},
+        warn() {},
+        error() {},
+        entries: async () => [],
+        flush: async () => {},
+      },
+      getClient: () => null,
+      getSearch: () => null,
+      getMemory: () => null,
+      getSpool: () => null,
+      getAnomaly: () => null,
+      hub: HUB_STUB,
+      treeSitter: TREE_STUB,
+      code: CODE_STUB,
+      share: SHARE_STUB,
+      lsp: LSP_STUB,
+      notes: NOTES_STUB,
+      getDreamer: () => dreamer as never,
+      snapshot: async () => snapshot(),
+    }).find((candidate) => candidate.name === "dreamer");
+
+  test("starts a run and reports what it checked", async () => {
+    const dreamer = {
+      runNow: async () => ({
+        ran: true,
+        child: "ses_child",
+        checked: 70,
+        stale: 5,
+        merged: 2,
+        flagged: 1,
+      }),
+    };
+    const result = (await build(dreamer)?.execute({}, { sessionID: "s1" })) as {
+      content: string;
+      metadata: { xerj: { dreamer: Record<string, unknown> } };
+    };
+
+    expect(result.content).toContain("ses_child");
+    expect(result.content).toContain("70 checked");
+    expect(result.content).toContain("5 stale");
+    expect(result.metadata.xerj.dreamer).toMatchObject({ started: true, child: "ses_child" });
+  });
+
+  test("reports why a run did not start", async () => {
+    const dreamer = { runNow: async () => ({ ran: false, reason: "already running" }) };
+    const result = (await build(dreamer)?.execute({}, { sessionID: "s1" })) as {
+      content: string;
+    };
+    expect(result.content).toContain("already running");
+  });
+
+  test("needs a session and a dreamer", async () => {
+    const dreamer = { runNow: async () => ({ ran: true, child: "x" }) };
+    const noSession = (await build(dreamer)?.execute({}, {})) as { content: string };
+    expect(noSession.content).toContain("active session");
+
+    const disabled = (await build(null)?.execute({}, { sessionID: "s1" })) as {
+      content: string;
+    };
+    expect(disabled.content).toContain("disabled");
   });
 });

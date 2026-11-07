@@ -121,11 +121,6 @@ const LOCAL_WATCH_SKIP = new Set([
 ]);
 
 /**
- * Lists directories worth watching under `root`, or null when the tree is too
- * large for one watch each. Hidden and generated directories are skipped for
- * the same reason the corpus skips them: their contents never reach it.
- */
-/**
  * Both contention phrasings the engine emits: a resident `--watch` refused with
  * "already owns", or a one-shot flock refused with "already in use".
  */
@@ -138,6 +133,11 @@ function isJournalRebind(stderr: string): boolean {
   return stderr.includes("journal at") && stderr.includes(JOURNAL_REBIND_MARKER);
 }
 
+/**
+ * Lists directories worth watching under `root`, or null when the tree is too
+ * large for one watch each. Hidden and generated directories are skipped for
+ * the same reason the corpus skips them: their contents never reach it.
+ */
 export function listWatchableDirectories(
   root: string,
   max = MAX_LOCAL_WATCH_DIRS,

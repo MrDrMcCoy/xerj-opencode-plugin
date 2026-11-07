@@ -167,7 +167,7 @@ describe("McpHost boot against an existing node", () => {
     expect(status).toBeDefined();
 
     const result = (await status?.execute({})) as { content: string };
-    expect(result.content).toContain("xerj");
+    expect(result.content).toContain("XERJ");
 
     // The dataset tool runs against the same client, so listing answers from
     // the node rather than failing on a missing service.

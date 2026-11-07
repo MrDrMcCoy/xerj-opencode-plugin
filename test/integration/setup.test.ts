@@ -251,7 +251,7 @@ describe("plugin setup end to end", () => {
 
       // The status tool answers through the same wiring.
       const statusTool = await host.runTool("status", {});
-      expect(statusTool).toContain("pluginVersion");
+      expect(statusTool).toContain("XERJ");
       expect(statusTool).toContain("corpora");
 
       // The tool surface reaches the same index through the real client.
