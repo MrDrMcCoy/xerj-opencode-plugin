@@ -147,7 +147,12 @@ describe("TelemetryStore", () => {
       candidates: 3,
       promoted: 2,
     });
-    built.record("memory.distill", 7, true, { judge: "model", promoted: 1 });
+    built.record("memory.distill", 7, true, {
+      judge: "model",
+      promoted: 1,
+      calls: 2,
+      chars: 1_500,
+    });
     built.record("memory.recall", 1, true, { hits: 3, distilled: 2 });
     built.record("memory.distill", 0, true, { phase: "retire", retired: 4 });
     await built.flush();
@@ -158,6 +163,8 @@ describe("TelemetryStore", () => {
       heuristic: 2,
       model: 1,
       recalled: 2,
+      calls: 2,
+      chars: 1_500,
     });
     await built.close();
   });

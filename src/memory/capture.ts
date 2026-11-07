@@ -232,6 +232,8 @@ async function maybeDistill(
             promoted: result.promoted,
             duplicates: result.duplicates,
             rejected: result.rejected,
+            calls: result.calls,
+            chars: result.chars,
           }));
     if (summary.promoted > 0) {
       options.logger.debug("distilled memories from a turn", {

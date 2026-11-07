@@ -25,6 +25,8 @@ export interface JudgeVerdict {
   readonly keep: boolean;
   readonly score?: number;
   readonly kind?: MemoryKind;
+  /** Characters of prompt the judgement cost, for telemetry. */
+  readonly promptChars?: number;
 }
 
 /** Added later: one model call per candidate, bounded by the caller. */
@@ -50,6 +52,9 @@ export interface DistillSummary {
   readonly promoted: number;
   readonly duplicates: number;
   readonly rejected: number;
+  /** Model calls spent, and the prompt characters they carried. */
+  readonly calls: number;
+  readonly chars: number;
 }
 
 export interface RetireInput {
@@ -152,6 +157,55 @@ export function extractCandidates(
   return candidates.sort((left, right) => right.score - left.score);
 }
 
+export interface ModelJudgeOptions {
+  readonly generate: (prompt: string) => Promise<string>;
+  readonly logger: Logger;
+  /** Characters of the turn shown to the model. */
+  readonly contextChars: number;
+  /** Deadline for one judgement. */
+  readonly timeoutMs: number;
+}
+
+const MODEL_KINDS: ReadonlySet<string> = new Set([
+  "decision",
+  "constraint",
+  "convention",
+  "preference",
+  "fact",
+]);
+
+/**
+ * Asks the current model about one candidate. The answer must be a JSON
+ * object; anything else is a failed judgement, and the caller keeps the
+ * heuristic verdict rather than losing the candidate.
+ */
+export function makeModelJudge(options: ModelJudgeOptions): ModelJudge {
+  return async (candidate, turn) => {
+    const prompt = [
+      "You decide whether one sentence belongs in durable project memory.",
+      `Sentence: ${candidate.text}`,
+      `Session prompt: ${clip(turn.prompt, Math.floor(options.contextChars * 0.4))}`,
+      `Session answer: ${clip(turn.answer, Math.floor(options.contextChars * 0.6))}`,
+      "",
+      "Keep it only if it is a durable statement that stays true in a later",
+      "session: a decision, constraint, convention, preference, or fact.",
+      "Reject plans, questions, hypotheses, and observations of tool output.",
+      'Answer with JSON only: {"keep":true|false,"kind":"decision|constraint|convention|preference|fact","score":0.0}',
+    ].join("\n");
+
+    const answer = await withDeadline(
+      options.generate(prompt),
+      options.timeoutMs,
+    );
+    const verdict = parseVerdict(answer);
+    if (verdict === null) {
+      options.logger.debug("model judge answered nothing usable", clip(answer, 120));
+      throw new Error("model judge returned no verdict");
+    }
+    return { ...verdict, promptChars: prompt.length };
+  };
+}
+
 /** Promotes the candidates that clear the threshold; never throws at a turn. */
 export async function distillTurn(input: DistillTurnInput): Promise<DistillSummary> {
   const threshold = input.config.minConfidence / 100;
@@ -161,6 +215,8 @@ export async function distillTurn(input: DistillTurnInput): Promise<DistillSumma
   let duplicates = 0;
   let rejected = 0;
   let used = judge;
+  let calls = 0;
+  let chars = 0;
 
   if (judge === "model" && input.judgeModel === undefined) {
     // The model route is not wired yet. Say so once per turn rather than
@@ -178,7 +234,12 @@ export async function distillTurn(input: DistillTurnInput): Promise<DistillSumma
     let score = candidate.score;
     let kind = candidate.kind;
 
-    if (used === "model" && input.judgeModel !== undefined) {
+    if (
+      used === "model" &&
+      input.judgeModel !== undefined &&
+      calls < input.config.modelMaxCalls
+    ) {
+      calls += 1;
       const verdict = await input.judgeModel(candidate, {
         prompt: input.prompt,
         answer: input.answer,
@@ -187,6 +248,7 @@ export async function distillTurn(input: DistillTurnInput): Promise<DistillSumma
         return null;
       });
       if (verdict !== null) {
+        chars += verdict.promptChars ?? 0;
         kept = verdict.keep;
         score = verdict.score ?? score;
         kind = verdict.kind ?? kind;
@@ -229,6 +291,8 @@ export async function distillTurn(input: DistillTurnInput): Promise<DistillSumma
     promoted,
     duplicates,
     rejected,
+    calls,
+    chars,
   };
 }
 
@@ -312,6 +376,49 @@ export function extractSentences(text: string): string[] {
 function clip(text: string, max: number): string {
   const flat = text.replace(/\s+/g, " ").trim();
   return flat.length <= max ? flat : `${flat.slice(0, max - 1)}…`;
+}
+
+function parseVerdict(text: string): JudgeVerdict | null {
+  const match = /\{[\s\S]*\}/.exec(text);
+  if (match === null) return null;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(match[0]);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null) return null;
+
+  const record = parsed as { keep?: unknown; score?: unknown; kind?: unknown };
+  if (typeof record.keep !== "boolean") return null;
+
+  const score =
+    typeof record.score === "number" && Number.isFinite(record.score)
+      ? Math.min(1, Math.max(0, record.score))
+      : undefined;
+  const kind =
+    typeof record.kind === "string" && MODEL_KINDS.has(record.kind)
+      ? (record.kind as MemoryKind)
+      : undefined;
+  return { keep: record.keep, score, kind };
+}
+
+function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("model judge timed out")), ms);
+    timer.unref?.();
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
 }
 
 function numberOr(value: unknown, fallback: number): number {

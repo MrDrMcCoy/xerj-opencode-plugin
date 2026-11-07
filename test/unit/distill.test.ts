@@ -4,6 +4,7 @@ import {
   distillTurn,
   extractCandidates,
   extractSentences,
+  makeModelJudge,
   retireDistilled,
 } from "../../src/memory/distill.ts";
 import type { MemoryStore } from "../../src/memory/store.ts";
@@ -210,5 +211,102 @@ describe("retirement", () => {
 
     expect(retired).toBe(2);
     expect(forgotten).toEqual(["b", "c"]);
+  });
+});
+
+describe("model judge", () => {
+  const config = {
+    ...DEFAULT_CONFIG.memory.distill,
+    enabled: true,
+    judge: "model" as const,
+  };
+
+  test("parses a JSON verdict wrapped in prose", async () => {
+    const judge = makeModelJudge({
+      generate: async () => 'Sure.\n{"keep":true,"kind":"decision","score":0.82}',
+      logger,
+      contextChars: 500,
+      timeoutMs: 1_000,
+    });
+    const verdict = await judge(
+      { text: "We decided to use SQLite.", kind: "decision", score: 0.7, origin: "answer", reason: "cue" },
+      { prompt: "which store", answer: "We decided to use SQLite." },
+    );
+
+    expect(verdict.keep).toBe(true);
+    expect(verdict.kind).toBe("decision");
+    expect(verdict.score).toBeCloseTo(0.82);
+    expect(verdict.promptChars).toBeGreaterThan(0);
+  });
+
+  test("an unusable answer rejects so the caller keeps the heuristic", async () => {
+    const judge = makeModelJudge({
+      generate: async () => "I am not sure.",
+      logger,
+      contextChars: 500,
+      timeoutMs: 1_000,
+    });
+    await expect(
+      judge(
+        { text: "We decided to use SQLite.", kind: "decision", score: 0.7, origin: "answer", reason: "cue" },
+        { prompt: "which store", answer: "We decided." },
+      ),
+    ).rejects.toBeDefined();
+  });
+
+  test("a slow model times out", async () => {
+    const judge = makeModelJudge({
+      generate: () => new Promise(() => {}),
+      logger,
+      contextChars: 500,
+      timeoutMs: 20,
+    });
+    await expect(
+      judge(
+        { text: "We decided to use SQLite.", kind: "decision", score: 0.7, origin: "answer", reason: "cue" },
+        { prompt: "which store", answer: "We decided." },
+      ),
+    ).rejects.toThrow("timed out");
+  });
+
+  test("a failed model call falls back to the heuristic verdict", async () => {
+    const { memory } = fakeStore();
+    const summary = await distillTurn({
+      memory,
+      prompt: "",
+      answer: "We decided to use SQLite.",
+      sessionID: "s1",
+      config,
+      logger,
+      judgeModel: async () => {
+        throw new Error("offline");
+      },
+    });
+
+    expect(summary.judge).toBe("model");
+    expect(summary.calls).toBe(1);
+    expect(summary.promoted).toBe(1);
+  });
+
+  test("modelMaxCalls bounds the calls, not the promotions", async () => {
+    const { memory } = fakeStore();
+    let calls = 0;
+    const summary = await distillTurn({
+      memory,
+      prompt: "",
+      answer: "We decided to use SQLite for the store. We decided to use WAL for the journal.",
+      sessionID: "s1",
+      config: { ...config, modelMaxCalls: 1 },
+      logger,
+      judgeModel: async () => {
+        calls += 1;
+        return { keep: true, score: 0.9, promptChars: 100 };
+      },
+    });
+
+    expect(calls).toBe(1);
+    expect(summary.calls).toBe(1);
+    expect(summary.chars).toBe(100);
+    expect(summary.promoted).toBe(2);
   });
 });

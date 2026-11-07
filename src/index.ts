@@ -91,7 +91,7 @@ import { curateMemories } from "./memory/curate.ts";
 import { verifyMemories } from "./memory/verify.ts";
 import { sampleProcess } from "./process-stats.ts";
 import { startRetention } from "./memory/retain.ts";
-import { startDistillRetention } from "./memory/distill.ts";
+import { makeModelJudge, startDistillRetention } from "./memory/distill.ts";
 import { migrateMemoryIndex, migrateProjectStorage } from "./memory/migrate.ts";
 import { RemoteSpool } from "./remote/spool.ts";
 import { BrainGraph } from "./search/brains.ts";
@@ -1832,6 +1832,28 @@ export default Plugin.define({
           owns: (sessionID) => prompts.knows(sessionID),
         });
         if (config.memory.captureTurns) {
+          const canGenerate =
+            typeof ctx.experimental?.generate?.text === "function";
+          if (config.memory.distill.enabled && config.memory.distill.judge === "model" && !canGenerate) {
+            logger.warn(
+              "memory.distill.judge is model but the host exposes no model; using the heuristic",
+            );
+          }
+          const judgeModel =
+            config.memory.distill.enabled &&
+            config.memory.distill.judge === "model" &&
+            canGenerate
+              ? makeModelJudge({
+                  generate: (prompt) =>
+                    ctx.experimental.generate
+                      .text({ prompt })
+                      .then((answer) => answer.text),
+                  logger,
+                  contextChars: config.memory.distill.modelContextChars,
+                  timeoutMs: config.memory.distill.modelTimeoutMs,
+                })
+              : undefined;
+
           startTurnCapture({
             events: ctx.event,
             memory: runtime.memory,
@@ -1840,7 +1862,7 @@ export default Plugin.define({
             prompts,
             onAnswer: (sessionID, text) => void archive?.append(sessionID, "assistant", text),
             distill: config.memory.distill.enabled
-              ? { config: config.memory.distill }
+              ? { config: config.memory.distill, judgeModel }
               : undefined,
             measure: (op, body, meta) => telemetry.span(op, body, meta),
           });
@@ -2058,8 +2080,11 @@ function formatReport(report: TelemetryReport): string {
       ? []
       : [
           `distilled ${report.distill.promoted} memories ` +
-            `(heuristic ${report.distill.heuristic}, model ${report.distill.model}) · ` +
-            `recalled ${report.distill.recalled}`,
+            `(heuristic ${report.distill.heuristic}, model ${report.distill.model}` +
+            (report.distill.calls > 0
+              ? `, ${report.distill.calls} calls / ${Math.round(report.distill.chars / 1000)}k chars`
+              : "") +
+            `) · recalled ${report.distill.recalled}`,
         ]),
     ...report.rows.map(
       (row) =>

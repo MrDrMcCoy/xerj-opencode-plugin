@@ -1072,10 +1072,12 @@ One write path, two judges, chosen by `memory.distill.judge`.
   and matches one cue set per class. A `path:line`, a config key, or a version
   adds 0.08 to the score; `memory.distill.minConfidence` (55) is the floor and
   `memory.distill.maxPerTurn` (3) the cap. No network, no model, no cost.
-- **`model`** (seam shipped, call pending): the same candidates go to the
-  current model, one bounded call each, which answers keep/reject and may
-  refine the class and score. Selecting it before the call is wired falls back
-  to the heuristic and says so at debug level once per turn.
+- **`model`** (shipped): the same candidates go to the host's model, one call
+  each up to `memory.distill.modelMaxCalls` (3), with the turn clipped to
+  `modelContextChars` (1200) and a `modelTimeoutMs` (4 s) deadline. The model
+  answers a JSON verdict (`keep`, `kind`, `score`). An unusable answer, a
+  timeout, a missing host model, or a candidate past the call cap keeps the
+  heuristic verdict, so a transient failure never loses a memory.
 
 Both write the same metadata: `source: distill:<judge>`, `confidence`, `origin`
 (prompt or answer), `topic`, and the session id. The id is the text hash, so a
@@ -1096,7 +1098,7 @@ evidence.
 
 | Record | Carries | Answers |
 |---|---|---|
-| `memory.distill` (`phase: extract`) | `judge`, `candidates`, `promoted`, `duplicates`, `rejected`, duration | What did the judge cost, and how many memories did it produce |
+| `memory.distill` (`phase: extract`) | `judge`, `candidates`, `promoted`, `duplicates`, `rejected`, `calls`, `chars`, duration | What did the judge cost, and how many memories did it produce |
 | `memory.distill` (`phase: retire`) | `retired`, duration | What did the sweep remove |
 | `memory.recall` | `hits`, `distilled` | How many recalled memories came from distillation |
 
@@ -1121,8 +1123,10 @@ records sum into the report block.
 #### Effort
 
 Heuristic, retirement, telemetry, and tests: about four hours, shipped. The
-model judge is a further half day plus a precision measurement before it is
-recommended.
+model judge adds about half a day and is shipped with a per-turn call cap, a
+turn clip, and a timeout; the precision measurement against the heuristic on a
+labeled set is still pending, which is what would justify making it the
+default.
 
 ## Tier L: three to six weeks, high to medium suitability
 
@@ -1247,7 +1251,7 @@ measured; they include tests and the commits that carry them. A status of
 | Fact mining from the compaction window | M | Not started | — | Deferred by the user. Two routes: a heuristic pass over the same window (patterns for decisions, constraints, config keys, commands that worked) at about 2 h, or one model call bounded by a token budget at about 3 to 4 h. Needs a precision measurement before it defaults on, a `derived` memory kind, and reuse of the stale flag; gated by `memory.extract`, off by default |
 | Post-compaction rehydration | M | Done | 2.0 h | `src/rehydrate.ts` builds the block from the three newest citations, re-reading a 24-line window inside the project root and capping the result at `context.rehydrateTokens` (600); `session.compaction.ended` snapshots the working set, the `model.request` hook suppresses the summariser's own call, and a fresh retrieval with hits supersedes the recall. Ten module tests and six hook tests |
 | History search | M | Done | 1.0 h | `archive/index.ts` bulk-loads one document per turn into `<prefix>-archive-docs`, idempotent by session and ordinal, with a manifest so a pruned turn leaves the index; the archive is now a search prefix and its own dataset row; five module tests |
-| Live context distillation | M | In progress | 4.0 h | `src/memory/distill.ts`: five classes, heuristic judge, idempotent promotion with `source: distill:heuristic` and `confidence`, budget retirement, `memory.distill` and `memory.recall` telemetry with a report line. Model judge is a seam that falls back until wired; 11 distill tests, one capture test, one config test, one report test |
+| Live context distillation | M | In progress | 4.5 h | `src/memory/distill.ts`: five classes, heuristic and model judges behind one write path, idempotent promotion with `source: distill:<judge>` and `confidence`, budget retirement, `memory.distill`/`memory.recall` telemetry with a report line and per-judge calls/chars. The model judge caps calls per turn, clips the turn, times out, and falls back. 16 distill tests, a capture test, config tests, and a report test. Pending: a precision measurement of model against heuristic on a labeled set |
 | Command output management | M | Done | 5.0 h | `src/cmd/{store,runner,corpus,service}.ts` plus `xerj_run` and `xerj_out`: two files per command under `.xerj/cmd/`, a manifest for exit codes, windowed plain-text index, debounced ingest, two caps (256 MiB files, 32 MiB index), host-result mirroring, the context block and the large-result hint. 21 unit tests across three suites and 2 integration tests; 1101 unit tests pass |
 | LSP pool | L | Not started | — | Gated by `analysis.lsp.enabled` |
 | Server installer | L | Not started | — | — |

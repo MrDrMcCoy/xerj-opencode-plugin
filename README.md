@@ -313,7 +313,10 @@ This is the complete set with its defaults, in
             "judge": "heuristic",        // or "model", the expensive route
             "minConfidence": 55,         // percentage a candidate needs
             "maxPerTurn": 3,             // memories promoted per turn
-            "maxPerProject": 200         // distilled memories kept
+            "maxPerProject": 200,        // distilled memories kept
+            "modelMaxCalls": 3,          // model calls one turn may spend
+            "modelContextChars": 1200,   // turn text shown to the model
+            "modelTimeoutMs": 4000       // deadline for one judgement
           }
         },
         "stats": {
@@ -407,10 +410,13 @@ The same entry works with a checkout path instead of the package name; see
 | `memory.retain.maxCount` | Summaries kept regardless of age; `0` disables the count cap. |
 | `memory.retain.maxBytes` | Bytes of summary text kept; `0` disables the size cap. |
 | `memory.distill.enabled` | Turn live turns into typed memories and retire what stops being true. Off by default. |
-| `memory.distill.judge` | `heuristic` (the local filter) or `model` (a model call per candidate; the model judge is not wired yet, so it falls back to the heuristic). |
+| `memory.distill.judge` | `heuristic` (the local filter) or `model` (one bounded call per candidate, using the host's model). |
 | `memory.distill.minConfidence` | Percentage a candidate needs to become a memory. |
 | `memory.distill.maxPerTurn` | Memories promoted from one turn. |
 | `memory.distill.maxPerProject` | Distilled memories kept; the lowest-confidence, oldest go first. |
+| `memory.distill.modelMaxCalls` | Model calls one turn may spend when `judge` is `model`. Candidates past the cap keep the heuristic verdict. |
+| `memory.distill.modelContextChars` | Characters of the turn shown to the model judge. |
+| `memory.distill.modelTimeoutMs` | Deadline for one model judgement; a timeout falls back to the heuristic. |
 | `index.graph` | Index the project as one graph corpus (a "super brain"): sections, symbols, `path:line`, and edges. On by default; `false` restores the flat `--no-graph` corpus with the engine's own watcher. A change rebuilds the project corpus once. |
 | `index.semantic` | Include the semantic retrieval leg. |
 | `index.neural` | Embed passages with the node's neural model (`--embed-mode neural`). Set `false` for lexical embeddings. Changing it rebuilds the project index once; neural indexing is roughly ten times slower than lexical. |
@@ -664,10 +670,13 @@ a plan ("let me check"), or fenced code is never a candidate. It runs after
 SQLite" counts even when it is too short for turn capture.
 
 Two judges share the same write path. `heuristic` is the local filter above and
-costs nothing. `model` asks the current model about a candidate; the model route
-is not wired yet, so selecting it falls back to the heuristic and says so at
-debug level. The judge is stored on every memory as `source: distill:<judge>`,
-so a later comparison can tell which produced what.
+costs nothing. `model` asks the host's model about each candidate, one call up
+to `modelMaxCalls` per turn, with the turn clipped to `modelContextChars` and a
+`modelTimeoutMs` deadline. The model answers a JSON verdict (keep, kind, score);
+an unusable answer, a timeout, or a missing host model keeps the heuristic
+verdict for that candidate instead of dropping it. The judge is stored on every
+memory as `source: distill:<judge>`, so a later comparison can tell which
+produced what.
 
 Retirement is by evidence, not by relevance. A decision stays true whether or
 not this turn needed it, so distilled memories are retired by budget (keep the

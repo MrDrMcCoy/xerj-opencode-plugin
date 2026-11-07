@@ -364,6 +364,25 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: The model judge for live-context distillation is implemented.
+  `judge: "model"` now sends each cue-bearing candidate through the host's
+  model with the turn clipped to 1,200 characters and a 4 s deadline, one call
+  per candidate up to `modelMaxCalls` (3) per turn. It asks for a JSON verdict
+  (`keep`, `kind`, `score`); prose around the object is tolerated. A missing
+  host model, an unusable answer, a timeout, or a candidate past the call cap
+  keeps the heuristic verdict, so a transient failure never drops a memory.
+
+  Cost is measured per judge: the `memory.distill` span now carries `calls` and
+  `chars`, the report sums them, and the line reads
+  `distilled N memories (heuristic A, model B, 3 calls / 4k chars) · recalled R`.
+  That is enough to compare the two routes on the same corpus; the precision
+  measurement on a labeled set is still pending, which is the remaining gate
+  before recommending the model route.
+
+  16 distill tests pass (parse, invalid answer, timeout, fallback, call cap),
+  plus the capture, config, and report tests; the full unit suite is green and
+  typecheck is clean.
+
 - 2026-11-06: Live context distillation shipped behind `memory.distill.enabled`
   (off). After each turn the plugin classifies sentences from that turn's own
   prompt and answer as decision, constraint, convention, preference, or fact,

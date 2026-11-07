@@ -210,6 +210,12 @@ export interface DistillOptions {
   readonly maxPerTurn: number;
   /** Distilled memories kept in the project before the oldest go. */
   readonly maxPerProject: number;
+  /** Model calls one turn may spend; only with `judge: "model"`. */
+  readonly modelMaxCalls: number;
+  /** Characters of the turn shown to the model judge. */
+  readonly modelContextChars: number;
+  /** Deadline for one model judgement. */
+  readonly modelTimeoutMs: number;
 }
 
 export interface StatsOptions {
@@ -383,6 +389,9 @@ export const DEFAULT_CONFIG: Config = {
       minConfidence: 55,
       maxPerTurn: 3,
       maxPerProject: 200,
+      modelMaxCalls: 3,
+      modelContextChars: 1_200,
+      modelTimeoutMs: 4_000,
     },
   },
   stats: { enabled: true, bytesPerToken: 4, maxBaselineBytes: 128 * 1024 },
@@ -917,6 +926,30 @@ export function loadConfig(
           10,
           100_000,
           "memory.distill.maxPerProject",
+          warnings,
+        ),
+        modelMaxCalls: readInteger(
+          distill.modelMaxCalls,
+          DEFAULT_CONFIG.memory.distill.modelMaxCalls,
+          0,
+          50,
+          "memory.distill.modelMaxCalls",
+          warnings,
+        ),
+        modelContextChars: readInteger(
+          distill.modelContextChars,
+          DEFAULT_CONFIG.memory.distill.modelContextChars,
+          200,
+          20_000,
+          "memory.distill.modelContextChars",
+          warnings,
+        ),
+        modelTimeoutMs: readInteger(
+          distill.modelTimeoutMs,
+          DEFAULT_CONFIG.memory.distill.modelTimeoutMs,
+          500,
+          60_000,
+          "memory.distill.modelTimeoutMs",
           warnings,
         ),
       },

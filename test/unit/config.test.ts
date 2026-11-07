@@ -338,6 +338,9 @@ describe("memory distillation", () => {
       minConfidence: 55,
       maxPerTurn: 3,
       maxPerProject: 200,
+      modelMaxCalls: 3,
+      modelContextChars: 1200,
+      modelTimeoutMs: 4000,
     });
   });
 

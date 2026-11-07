@@ -104,6 +104,9 @@ export interface DistillSummary {
   readonly model: number;
   /** Recall hits that came from a distilled memory. */
   readonly recalled: number;
+  /** Model calls and prompt characters the model judge spent. */
+  readonly calls: number;
+  readonly chars: number;
 }
 
 export interface TelemetryReport {
@@ -129,7 +132,7 @@ export const EMPTY_REPORT: TelemetryReport = {
   process: null,
   storeBytes: 0,
   historyStart: null,
-  distill: { promoted: 0, heuristic: 0, model: 0, recalled: 0 },
+  distill: { promoted: 0, heuristic: 0, model: 0, recalled: 0, calls: 0, chars: 0 },
 };
 
 const QUEUE_LIMIT = 5_000;
@@ -1102,6 +1105,8 @@ function distillSummary(records: ReadonlyArray<OpRecord>): DistillSummary {
   let heuristic = 0;
   let model = 0;
   let recalled = 0;
+  let calls = 0;
+  let chars = 0;
 
   for (const record of records) {
     if (record.op === "memory.distill" && record.meta?.phase !== "retire") {
@@ -1109,12 +1114,14 @@ function distillSummary(records: ReadonlyArray<OpRecord>): DistillSummary {
       promoted += count;
       if (record.meta?.judge === "model") model += count;
       else heuristic += count;
+      calls += numberMeta(record.meta?.calls);
+      chars += numberMeta(record.meta?.chars);
     }
     if (record.op === "memory.recall") {
       recalled += numberMeta(record.meta?.distilled);
     }
   }
-  return { promoted, heuristic, model, recalled };
+  return { promoted, heuristic, model, recalled, calls, chars };
 }
 
 function numberMeta(value: unknown): number {
