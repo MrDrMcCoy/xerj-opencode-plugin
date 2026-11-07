@@ -149,6 +149,13 @@ group("MemoryStore.remember", () => {
     ]);
   });
 
+  test("rejects an empty memory instead of storing a hash of nothing", async () => {
+    const { client, stores } = clientWith();
+    const store = new MemoryStore(client, "proj-test", logger);
+    await expect(store.remember({ text: "   " })).rejects.toThrow(/needs text/);
+    expect(stores).toHaveLength(0);
+  });
+
   test("normalizes an unknown kind to fact", async () => {
     const { client, stores } = clientWith();
     const store = new MemoryStore(client, "proj-test", logger);

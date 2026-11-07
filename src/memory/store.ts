@@ -59,6 +59,9 @@ export class MemoryStore {
 
   async remember(input: RememberInput): Promise<{ id: string; created: boolean }> {
     const text = input.text.trim();
+    // An empty document is indexed but carries nothing, and its hash would
+    // make every empty remember collide on one id.
+    if (text.length === 0) throw new Error("a memory needs text");
     const kind = normalizeKind(input.kind);
     const metadata: Record<string, unknown> = {
       kind,

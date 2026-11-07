@@ -115,8 +115,13 @@ export interface SidebarRow {
   readonly tone?: "ok" | "warn" | "bad";
 }
 
-/** A row stays inline only when label, gap, and value fit this many cells. */
-export const SIDEBAR_COMPACT_WIDTH = 34;
+/**
+ * A row stays inline only when label, gap, and value fit this many cells.
+ * The box adds a border and one cell of padding on each side, and the host's
+ * `session.sidebar: "auto"` can be narrow, so this is the inner content width
+ * of a 34-cell slot rather than the slot itself.
+ */
+export const SIDEBAR_COMPACT_WIDTH = 30;
 
 /** Stacked rows put the value on its own wrapped line. */
 export type SidebarRowLayout = "inline" | "stacked";

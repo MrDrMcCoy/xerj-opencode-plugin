@@ -642,8 +642,17 @@ export class TelemetryStore {
         `${this.opsPath}.${index + 1}.ndjson`,
       ).catch(() => {});
     }
-    await rename(this.opsPath, `${this.opsPath}.1.ndjson`).catch(() => {});
-    this.opsBytes = 0;
+    try {
+      await rename(this.opsPath, `${this.opsPath}.1.ndjson`);
+      this.opsBytes = 0;
+    } catch (error) {
+      // The live file could not be moved. Keep its size so the next append
+      // tries again instead of letting it grow past the rotation limit.
+      this.options.logger.warn(
+        "could not rotate the telemetry log",
+        String(error),
+      );
+    }
   }
 
   private async writeRing(

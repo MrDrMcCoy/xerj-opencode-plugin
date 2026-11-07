@@ -765,6 +765,22 @@ describe("sidebarView", () => {
     expect(sidebarRowLayout(today!)).toBe("stacked");
   });
 
+  test("a long degraded detail stacks the now row", () => {
+    const base = snapshot();
+    const view = sidebarView(
+      snapshot({
+        state: { ...base.state, name: "degraded", detail: "autoindex exited 1" },
+      }),
+      NOW,
+      all,
+    );
+
+    const state = view.sections.find((section) => section.title === "State");
+    const now = state?.rows.find((row) => row.label === "now");
+    expect(now).toBeDefined();
+    expect(sidebarRowLayout(now!)).toBe("stacked");
+  });
+
   test("collapsed rows name the index, savings and memory", () => {
     const view = sidebarView(snapshot(), NOW, all);
 

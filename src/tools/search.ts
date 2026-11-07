@@ -179,7 +179,11 @@ const STATUS_INPUT = {
 const REMEMBER_INPUT = {
   type: "object",
   properties: {
-    text: { type: "string", description: "The durable fact, decision, or preference to keep." },
+    text: {
+      type: "string",
+      minLength: 1,
+      description: "The durable fact, decision, or preference to keep.",
+    },
     kind: {
       type: "string",
       enum: ["fact", "decision", "preference", "fix", "note"],
