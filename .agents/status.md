@@ -388,6 +388,29 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-07: Audit pass. Fixed: `xerj_status` now returns a compact summary
+  (251 characters, about 63 tokens, against 10.4 KB and 2.6k tokens) with
+  `full: true` for the old JSON; `SearchService` drops its line cache on
+  `invalidate()` and bounds it at 128 files, so an edit no longer leaves a
+  citation on the old line; a failed bootstrap retries on a status call
+  instead of staying error for the life of the process; an orphaned doc
+  comment and one `as never` cast are cleaned up. 1,284 unit and 14
+  integration tests pass.
+
+  Open findings, highest value first:
+  `stopNode` reads the pidfile and signals that pid without proving the port
+  owner, so a reused pid can receive SIGTERM; `ensureNode` and `detectNode`
+  do check ownership. The LSP pool has no pidfile or stale-pid cleanup even
+  though the roadmap's risk table says it does, so a hard crash can leave a
+  language server behind. The binary install lock treats a crashed lock as
+  stale after 10 minutes while the waiter gives up after 5, so one crashed
+  install blocks the next for two windows. `package-lock.json` is stale at
+  0.3.0 while `package.json` and `bun.lock` are 0.7.0. CI runs no coverage
+  gate, so the 86.3% lines / 81.7% functions baseline can regress silently.
+  `dist/tui.js` is rebuilt only by `prepack`, so a source change leaves the
+  working-tree dogfood bundle stale until a manual `bun run build:tui`; that
+  is what made the last sidebar fix look absent.
+
 - 2026-11-07: The degraded badge had three causes, all fixed, and the
   dreamer is verified live. (1) Bun's `fetch` rejects a refused connection with
   a `TypeError` that has no `cause` and no `code`; `isTransportError` only read
