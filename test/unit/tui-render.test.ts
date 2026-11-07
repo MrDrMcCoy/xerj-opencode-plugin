@@ -301,6 +301,48 @@ describe("TUI render bodies", () => {
     dispose();
   });
 
+  test("the header shows the badge and a running job", async () => {
+    const plugin = TuiPlugin as unknown as {
+      setup: (context: unknown) => Promise<() => void>;
+    };
+    const dispose = await plugin.setup(
+      makeHost({
+        status: async () => ({
+          ...SNAPSHOT,
+          state: {
+            ...SNAPSHOT.state,
+            name: "busy",
+            detail: "indexing",
+            since: Date.now() - 12_000,
+            jobs: [
+              { kind: "index", label: "indexing", startedAt: Date.now() - 12_000 },
+            ],
+          },
+        }),
+      }),
+    );
+    await flush();
+
+    // The slot list keeps every setup from this file, so the newest claim is
+    // the one this test's host registered.
+    const sidebar = slots.filter((slot) => slot.append === "sidebar.content").at(-1);
+    const expanded = textOf(sidebar?.render());
+
+    expect(expanded).toContain("◐ busy · indexing · 12s");
+    expect(expanded).toContain("jobs");
+    expect(expanded).toContain("indexing 12s");
+
+    // Collapsed, the running job keeps a row of its own.
+    const toggle = findHandler(sidebar?.render() as Element, "onMouseDown");
+    (toggle as () => void)();
+    const collapsed = textOf(sidebar?.render());
+
+    expect(collapsed).toContain("Jobs");
+    expect(collapsed).toContain("indexing 12s");
+    expect(collapsed).not.toContain("Corpora");
+    dispose();
+  });
+
   test("clicking the header collapses the sidebar", async () => {
     const plugin = TuiPlugin as unknown as {
       setup: (context: unknown) => Promise<() => void>;

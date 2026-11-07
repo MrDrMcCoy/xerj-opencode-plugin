@@ -1,7 +1,7 @@
 // Presentation only: every function here turns a status snapshot into text.
 // No I/O, no RPC, so the TUI stays thin and the formatting stays testable.
 
-import type { StatusSnapshot } from "../rpc.ts";
+import type { JobStatus, StatusSnapshot } from "../rpc.ts";
 import { stateGlyph } from "../telemetry/state.ts";
 
 export interface PanelSection {
@@ -132,6 +132,8 @@ export interface SidebarView {
 
 /** Corpora shown before the list is summarised as a count. */
 const CORPORA_ROWS = 4;
+/** Jobs named in the collapsed row before the rest are counted. */
+const JOBS_IN_ROW = 2;
 
 /**
  * The sidebar as data, so the component only places it. Every number comes
@@ -167,6 +169,17 @@ export function sidebarView(
   };
 
   const state = snapshot.state;
+  // A running job belongs in the collapsed sidebar too: the reason a search is
+  // slow is worth seeing without expanding the block.
+  const jobsRow: SidebarRow | null =
+    state.jobs.length === 0
+      ? null
+      : {
+          label: "Jobs",
+          value: jobsSummary(state.jobs, now),
+          tone: "warn",
+        };
+
   const stateSection: SidebarSectionView = {
     title: "State",
     rows: [
@@ -293,9 +306,14 @@ export function sidebarView(
   return {
     label: "XERJ",
     version: snapshot.pluginVersion,
-    badge: `${stateGlyph(state.name)} ${state.name}` +
-      (state.detail === null ? "" : ` · ${state.detail}`),
-    collapsed: [indexRow, savedRow, memoryRow],
+    badge:
+      `${stateGlyph(state.name)} ${state.name}` +
+      (state.detail === null ? "" : ` · ${state.detail}`) +
+      (state.name === "busy" ? ` · ${formatDuration(now - state.since)}` : ""),
+    collapsed:
+      jobsRow === null
+        ? [indexRow, savedRow, memoryRow]
+        : [indexRow, savedRow, memoryRow, jobsRow],
     sections: [
       stateSection,
       ...(sections.corpora ? [corpora] : []),
@@ -305,6 +323,15 @@ export function sidebarView(
       ...(sections.health ? [health] : []),
     ],
   };
+}
+
+/** `indexing 12s · web 3s`, with a count once more than two run at once. */
+function jobsSummary(jobs: ReadonlyArray<JobStatus>, now: number): string {
+  const shown = jobs
+    .slice(0, JOBS_IN_ROW)
+    .map((job) => `${job.label} ${formatDuration(now - job.startedAt)}`);
+  const rest = jobs.length - shown.length;
+  return rest > 0 ? `${shown.join(" · ")} · +${rest}` : shown.join(" · ");
 }
 
 export function sidebarLines(snapshot: StatusSnapshot, now: number): string[] {

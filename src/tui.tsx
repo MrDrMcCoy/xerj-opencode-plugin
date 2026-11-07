@@ -63,6 +63,9 @@ export default Plugin.define({
     // created inside the component body would reset on the way back.
     let prefs: SidebarPrefs = DEFAULT_PREFS;
     const [collapsed, setCollapsed] = createSignal(false);
+    // Elapsed figures on a running job are read from this clock; the ticker
+    // below moves it once a second only while something is running.
+    const [clock, setClock] = createSignal(Date.now());
     void readPrefs()
       .then((loaded) => {
         prefs = loaded;
@@ -119,6 +122,7 @@ export default Plugin.define({
           draft.ready = snapshot.node.phase === "ready";
           draft.reason = null;
         });
+        setClock(Date.now());
         resubscribe();
       } catch (error) {
         const reason = describe(error);
@@ -333,6 +337,11 @@ export default Plugin.define({
     void refresh();
     // Events arrive on the first success; the timer covers host or node gaps.
     const timer = setInterval(() => void refresh(), FALLBACK_POLL_MS);
+    // A running job counts up without an RPC per second. Nothing ticks when
+    // the service is idle, so a settled sidebar does no work.
+    const ticker = setInterval(() => {
+      if ((state.snapshot?.state.jobs.length ?? 0) > 0) setClock(Date.now());
+    }, 1000);
 
     context.keymap.layer(() => ({
       mode: "global",
@@ -448,7 +457,7 @@ export default Plugin.define({
           );
         }
 
-        const view = sidebarView(snapshot, Date.now(), prefs.sections);
+        const view = sidebarView(snapshot, clock(), prefs.sections);
         const toneColor = (tone: SidebarRow["tone"]) =>
           tone === "bad"
             ? context.theme.text.feedback.error.base
@@ -483,17 +492,20 @@ export default Plugin.define({
               alignItems="center"
               onMouseDown={() => toggleCollapsed()}
             >
-              <box
-                paddingLeft={1}
-                paddingRight={1}
-                backgroundColor={context.theme.background.raised.base}
-              >
-                <text fg={context.theme.text.base}>
-                  <b>
-                    {collapsed() ? "▶ " : "▼ "}
-                    {prefs.headerLabel}
-                  </b>
-                </text>
+              <box flexDirection="row" alignItems="center" gap={1}>
+                <box
+                  paddingLeft={1}
+                  paddingRight={1}
+                  backgroundColor={context.theme.background.raised.base}
+                >
+                  <text fg={context.theme.text.base}>
+                    <b>
+                      {collapsed() ? "▶ " : "▼ "}
+                      {prefs.headerLabel}
+                    </b>
+                  </text>
+                </box>
+                <text fg={context.theme.text.muted}>{view.badge}</text>
               </box>
               {prefs.showVersion ? (
                 <text fg={context.theme.text.faint}>v{view.version}</text>
@@ -530,7 +542,7 @@ export default Plugin.define({
         if (input.name !== PANEL_NAME) return null;
 
         const snapshot = state.snapshot;
-        const sections = snapshot ? panelSections(snapshot, Date.now()) : [];
+        const sections = snapshot ? panelSections(snapshot, clock()) : [];
 
         return (
           <box flexDirection="column">
@@ -574,6 +586,7 @@ export default Plugin.define({
       disposed = true;
       abort.abort();
       clearInterval(timer);
+      clearInterval(ticker);
       unsubscribeEvents();
       detachPanel();
       detachSidebar();

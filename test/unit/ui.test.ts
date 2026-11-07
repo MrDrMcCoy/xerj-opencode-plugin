@@ -627,6 +627,40 @@ describe("sidebarView", () => {
     expect(view.collapsed[1]?.value).toContain("75% hit");
   });
 
+  test("a running job shows in the collapsed rows and the badge counts up", () => {
+    const base = snapshot();
+    const view = sidebarView(
+      snapshot({
+        state: {
+          ...base.state,
+          name: "busy",
+          detail: "indexing",
+          since: NOW - 12_000,
+          jobs: [
+            { kind: "index", label: "indexing", startedAt: NOW - 12_000 },
+            { kind: "web", label: "web index", startedAt: NOW - 3_000 },
+            { kind: "git", label: "commits", startedAt: NOW - 1_000 },
+          ],
+        },
+      }),
+      NOW,
+      all,
+    );
+
+    expect(view.badge).toBe("◐ busy · indexing · 12s");
+    const jobs = view.collapsed.find((row) => row.label === "Jobs");
+    // Two labels fit; the rest are counted so a burst cannot wrap the block.
+    expect(jobs?.value).toBe("indexing 12s · web index 3.0s · +1");
+    expect(jobs?.tone).toBe("warn");
+  });
+
+  test("no jobs row and no elapsed badge while ready", () => {
+    const view = sidebarView(snapshot(), NOW, all);
+
+    expect(view.badge).toBe("● ready");
+    expect(view.collapsed.map((row) => row.label)).toEqual(["Index", "Saved", "Memory"]);
+  });
+
   test("sections carry label/value rows", () => {
     const view = sidebarView(snapshot(), NOW, all);
     const titles = view.sections.map((section) => section.title);
