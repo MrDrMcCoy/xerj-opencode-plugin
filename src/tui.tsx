@@ -85,6 +85,8 @@ export default Plugin.define({
 
     const abort = new AbortController();
     let inFlight = false;
+    // Plain counter, not the reactive state: the ticker runs outside render.
+    let runningJobs = 0;
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
     let disposed = false;
     let unsubscribe: (() => void) | null = null;
@@ -122,10 +124,12 @@ export default Plugin.define({
           draft.ready = snapshot.node.phase === "ready";
           draft.reason = null;
         });
+        runningJobs = snapshot.state.jobs?.length ?? 0;
         setClock(Date.now());
         resubscribe();
       } catch (error) {
         const reason = describe(error);
+        runningJobs = 0;
         unsubscribeEvents();
         update((draft) => {
           draft.snapshot = null;
@@ -340,7 +344,7 @@ export default Plugin.define({
     // A running job counts up without an RPC per second. Nothing ticks when
     // the service is idle, so a settled sidebar does no work.
     const ticker = setInterval(() => {
-      if ((state.snapshot?.state.jobs.length ?? 0) > 0) setClock(Date.now());
+      if (runningJobs > 0) setClock(Date.now());
     }, 1000);
 
     context.keymap.layer(() => ({
@@ -492,20 +496,19 @@ export default Plugin.define({
               alignItems="center"
               onMouseDown={() => toggleCollapsed()}
             >
-              <box flexDirection="row" alignItems="center" gap={1}>
-                <box
-                  paddingLeft={1}
-                  paddingRight={1}
-                  backgroundColor={context.theme.background.raised.base}
-                >
-                  <text fg={context.theme.text.base}>
-                    <b>
-                      {collapsed() ? "▶ " : "▼ "}
-                      {prefs.headerLabel}
-                    </b>
-                  </text>
-                </box>
-                <text fg={context.theme.text.muted}>{view.badge}</text>
+              <box
+                flexDirection="row"
+                paddingLeft={1}
+                paddingRight={1}
+                backgroundColor={context.theme.background.raised.base}
+              >
+                <text fg={context.theme.text.base}>
+                  <b>
+                    {collapsed() ? "▶ " : "▼ "}
+                    {prefs.headerLabel}
+                  </b>
+                </text>
+                <text fg={context.theme.text.muted}>{` ${view.badge}`}</text>
               </box>
               {prefs.showVersion ? (
                 <text fg={context.theme.text.faint}>v{view.version}</text>

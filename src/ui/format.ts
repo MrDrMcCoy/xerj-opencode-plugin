@@ -169,14 +169,16 @@ export function sidebarView(
   };
 
   const state = snapshot.state;
+  // A server half older than the field would otherwise take the sidebar down.
+  const jobs: ReadonlyArray<JobStatus> = state.jobs ?? [];
   // A running job belongs in the collapsed sidebar too: the reason a search is
   // slow is worth seeing without expanding the block.
   const jobsRow: SidebarRow | null =
-    state.jobs.length === 0
+    jobs.length === 0
       ? null
       : {
           label: "Jobs",
-          value: jobsSummary(state.jobs, now),
+          value: jobsSummary(jobs, now),
           tone: "warn",
         };
 
@@ -195,17 +197,12 @@ export function sidebarView(
               ? "warn"
               : "ok",
       },
-      ...(state.jobs.length === 0
+      ...(jobs.length === 0
         ? []
         : [
             {
               label: "jobs",
-              value: state.jobs
-                .map(
-                  (job) =>
-                    `${job.label} ${formatDuration(now - job.startedAt)}`,
-                )
-                .join(" · "),
+              value: jobsSummary(jobs, now, Number.POSITIVE_INFINITY),
               tone: "warn" as const,
             },
           ]),
@@ -325,10 +322,14 @@ export function sidebarView(
   };
 }
 
-/** `indexing 12s · web 3s`, with a count once more than two run at once. */
-function jobsSummary(jobs: ReadonlyArray<JobStatus>, now: number): string {
+/** `indexing 12s · web 3s`, with a count once the row is full. */
+function jobsSummary(
+  jobs: ReadonlyArray<JobStatus>,
+  now: number,
+  limit: number = JOBS_IN_ROW,
+): string {
   const shown = jobs
-    .slice(0, JOBS_IN_ROW)
+    .slice(0, limit)
     .map((job) => `${job.label} ${formatDuration(now - job.startedAt)}`);
   const rest = jobs.length - shown.length;
   return rest > 0 ? `${shown.join(" · ")} · +${rest}` : shown.join(" · ");
@@ -368,6 +369,7 @@ export function sidebarLines(snapshot: StatusSnapshot, now: number): string[] {
 /** Every block of the details panel, in display order. */
 export function panelSections(snapshot: StatusSnapshot, now: number): PanelSection[] {
   const { node, binary, index, memory, usage, state } = snapshot;
+  const jobs: ReadonlyArray<JobStatus> = state.jobs ?? [];
 
   return [
     {
@@ -375,9 +377,9 @@ export function panelSections(snapshot: StatusSnapshot, now: number): PanelSecti
       lines: [
         `${state.name}${state.detail === null ? "" : ` · ${state.detail}`}` +
           ` · ${formatDuration(now - state.since)} in this state`,
-        ...(state.jobs.length === 0
+        ...(jobs.length === 0
           ? ["no jobs running"]
-          : state.jobs.map(
+          : jobs.map(
               (job) =>
                 `${job.kind}  ${job.label} · ` +
                 `${formatDuration(now - job.startedAt)}`,
