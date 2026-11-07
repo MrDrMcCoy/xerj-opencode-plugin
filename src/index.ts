@@ -1870,13 +1870,15 @@ export default Plugin.define({
         ) {
           const canGenerate =
             typeof ctx.experimental?.generate?.text === "function";
-          if (config.memory.distill.enabled && config.memory.distill.judge === "model" && !canGenerate) {
+          const judgeNeeded =
+            config.memory.distill.enabled || config.memory.extract.enabled;
+          if (judgeNeeded && config.memory.distill.judge === "model" && !canGenerate) {
             logger.warn(
               "memory.distill.judge is model but the host exposes no model; using the heuristic",
             );
           }
           const judgeModel =
-            config.memory.distill.enabled &&
+            judgeNeeded &&
             config.memory.distill.judge === "model" &&
             canGenerate
               ? makeModelJudge({
@@ -1893,7 +1895,7 @@ export default Plugin.define({
           const target = jevosTarget(process.platform, process.arch);
           const local = config.memory.distill.local;
           let localJudge: ModelJudge | undefined;
-          if (config.memory.distill.enabled && config.memory.distill.judge === "local") {
+          if (judgeNeeded && config.memory.distill.judge === "local") {
             if (target === null) {
               logger.warn(
                 "jevos publishes no build for this platform; memory.distill.judge falls back to the heuristic",
