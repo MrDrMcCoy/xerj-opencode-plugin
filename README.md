@@ -754,9 +754,9 @@ and `xerj_telemetry op=memory.recall`. The panel's Telemetry section shows the
 same line: `distilled N · heuristic A · model B · local C · calls D · recalled
 E`, with a judge's count omitted while it is zero.
 
-The measurement harness is `bun run eval:distill`. It prints the heuristic's
-recall, false positives, and class accuracy on a labeled set of fifteen
-sentences. `DISTILL_EVAL_JEVOS_URL` points it at a running jevos server and
+The measurement harness is `bun run eval:distill`. It prints each judge's
+recall, false positives, class accuracy, and how many labeled progress reports
+it keeps, so a wording change is compared on the same two fronts. `DISTILL_EVAL_JEVOS_URL` points it at a running jevos server and
 prints the local judge's figures; `DISTILL_EVAL_URL`, `DISTILL_EVAL_MODEL`, and
 `DISTILL_EVAL_KEY` do the same for an OpenAI-compatible chat endpoint. A script
 cannot borrow the host's model, which is why that endpoint is explicit; the

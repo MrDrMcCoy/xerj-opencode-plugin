@@ -143,6 +143,43 @@ describe("distilling a turn", () => {
     expect(second.duplicates).toBe(1);
   });
 
+  test("the local judge is called like any other judge", async () => {
+    const { memory } = fakeStore();
+    let calls = 0;
+    const summary = await distillTurn({
+      memory,
+      prompt: "",
+      answer: "We decided to use SQLite.",
+      sessionID: "s1",
+      config: { ...config, judge: "local" },
+      logger,
+      judgeModel: async () => {
+        calls += 1;
+        return { keep: false, score: 0.9 };
+      },
+    });
+
+    expect(calls).toBe(1);
+    expect(summary.judge).toBe("local");
+    expect(summary.promoted).toBe(0);
+  });
+
+  test("a judge's own score is not gated by minConfidence again", async () => {
+    const { memory } = fakeStore();
+    const summary = await distillTurn({
+      memory,
+      prompt: "",
+      answer: "We decided to use SQLite.",
+      sessionID: "s1",
+      config: { ...config, judge: "model", minConfidence: 90 },
+      logger,
+      judgeModel: async () => ({ keep: true, score: 0.05 }),
+    });
+
+    expect(summary.judge).toBe("model");
+    expect(summary.promoted).toBe(1);
+  });
+
   test("model judge without a model falls back to the heuristic", async () => {
     const { memory } = fakeStore();
     const summary = await distillTurn({
