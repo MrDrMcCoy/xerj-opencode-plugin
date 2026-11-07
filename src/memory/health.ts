@@ -29,6 +29,7 @@ export async function recoverMemoryIndex(options: {
   const indices = await client.indices().catch(() => []);
   const match = indices.find((entry) => entry.index === name);
   if (!match || match.health === HEALTHY) return false;
+  if (await answers(client, name)) return false;
 
   await backupIndex(nodeDir, name);
   await client.deleteIndex(name).catch((error: unknown) => {
@@ -55,6 +56,18 @@ export function memoryIndexMissing(
   const hasMemory = names.includes(`${MEMORY_INDEX_PREFIX}${namespace}`);
   const hasCorpus = names.some((name) => name.startsWith(`${projectPrefix}-`));
   return hasCorpus && !hasMemory;
+}
+
+// Health is a cluster reading, not proof that the index cannot be read: a
+// stale or half-open index reports red and still answers. Only a failed query
+// justifies resetting it, because memory cannot be rebuilt from the corpus.
+async function answers(client: XerjClient, name: string): Promise<boolean> {
+  try {
+    await client.search(name, { size: 0, query: { match_all: {} } });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function backupIndex(nodeDir: string, name: string): Promise<void> {

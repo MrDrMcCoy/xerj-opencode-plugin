@@ -13,12 +13,17 @@ interface Stub {
 
 function stubClient(
   indices: ReadonlyArray<{ index: string; health: string }>,
+  answers = true,
 ): Stub {
   const deleted: string[] = [];
   const created: string[] = [];
   const client = {
     indices: async () =>
       indices.map(({ index, health }) => ({ index, health, docs: 0, bytes: 0 })),
+    search: async () => {
+      if (!answers) throw new Error("holds vectors produced by embedding backend");
+      return { hits: { hits: [] } };
+    },
     deleteIndex: async (index: string) => {
       deleted.push(index);
     },
@@ -61,7 +66,7 @@ describe("memory index health", () => {
     const indexDir = join(nodeDir, "data", name);
     await mkdir(indexDir, { recursive: true });
     await writeFile(join(indexDir, "xerj_meta.json"), "old");
-    const { client, deleted } = stubClient([{ index: name, health: "red" }]);
+    const { client, deleted } = stubClient([{ index: name, health: "red" }], false);
 
     const recovered = await recoverMemoryIndex({ client, nodeDir, namespace });
 
@@ -69,6 +74,20 @@ describe("memory index health", () => {
     expect(deleted).toEqual([name]);
     const backup = join(nodeDir, "embed-backup", "unreadable", name, "xerj_meta.json");
     expect(await readFile(backup, "utf8")).toBe("old");
+  });
+
+  test("a red index that still answers is left alone", async () => {
+    const name = `.xerj-memory-${namespace}`;
+    const indexDir = join(nodeDir, "data", name);
+    await mkdir(indexDir, { recursive: true });
+    await writeFile(join(indexDir, "xerj_meta.json"), "old");
+    const { client, deleted } = stubClient([{ index: name, health: "red" }]);
+
+    const recovered = await recoverMemoryIndex({ client, nodeDir, namespace });
+
+    expect(recovered).toBe(false);
+    expect(deleted).toEqual([]);
+    expect(await readFile(join(indexDir, "xerj_meta.json"), "utf8")).toBe("old");
   });
 
   test("a missing index is not created up front", async () => {
@@ -128,6 +147,9 @@ describe("memory index health failures", () => {
   test("a missing index directory is not an error", async () => {
     const client = {
       indices: async () => [{ index: name, health: "red", docs: 0, bytes: 0 }],
+      search: async () => {
+        throw new Error("holds vectors produced by embedding backend");
+      },
       deleteIndex: async () => {},
     } as unknown as XerjClient;
 
@@ -148,6 +170,9 @@ describe("memory index health failures", () => {
   test("a yellow index counts as unreadable", async () => {
     const client = {
       indices: async () => [{ index: name, health: "yellow", docs: 0, bytes: 0 }],
+      search: async () => {
+        throw new Error("holds vectors produced by embedding backend");
+      },
       deleteIndex: async () => {},
     } as unknown as XerjClient;
 
