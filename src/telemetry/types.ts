@@ -38,6 +38,7 @@ export const OP_TYPES = [
   "memory.distill",
   "memory.distill.judge",
   "memory.distill.autotune",
+  "memory.extract",
   "hook.prompt",
   "hook.context",
   "hook.tool",

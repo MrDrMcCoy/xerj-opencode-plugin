@@ -381,6 +381,23 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-07: Window extraction shipped behind `memory.extract` (off). The
+  `compaction` hook already sees the messages a summary will replace, so the
+  plugin flattens the user and assistant text with the archive's own
+  `captureWindow`, runs the same candidate extractor and judge as a turn, and
+  writes up to `maxFacts` durable sentences with `source: extract:<judge>` and
+  `derived: true`. It reuses `memory.distill.judge`, `minConfidence`, and
+  `modelMaxCalls`; the write is fire-and-forget, so a slow judge never delays
+  the summary. Extracted memories count toward `maxPerProject` and retire by
+  the same confidence-and-age rule; `memory.extract` telemetry reports
+  candidates, promoted, duplicates, rejected, and calls per window.
+
+  The gate stays off because the window has not had a precision measurement;
+  only the turn pipeline has. The labelled set and `replay:judge` are the path
+  to that measurement. Five module tests cover the store path, the fact cap,
+  duplicates, the heuristic route, and the hook; 1219 unit tests pass and
+  typecheck is clean. Nothing is pushed or released.
+
 - 2026-11-07: Autotune is implemented and on by default. Ten minutes after
   setup, and every 24 hours after, the autotuner replays the fixed labelled
   set through the live jevos model, sweeps nine thresholds, and adopts one only

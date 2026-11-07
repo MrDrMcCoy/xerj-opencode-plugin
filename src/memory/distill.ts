@@ -394,7 +394,10 @@ export async function retireDistilled(input: RetireInput): Promise<number> {
   const records = await input.memory.scan(Math.max(50, input.maxPerProject * 2));
   const distilled = records.filter((record) => {
     const source = record.metadata.source;
-    return typeof source === "string" && source.startsWith(DISTILL_SOURCE);
+    return (
+      typeof source === "string" &&
+      (source.startsWith(DISTILL_SOURCE) || source.startsWith("extract:"))
+    );
   });
   const excess = distilled.length - input.maxPerProject;
   if (excess <= 0) return 0;

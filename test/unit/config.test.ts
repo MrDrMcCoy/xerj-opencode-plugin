@@ -363,6 +363,27 @@ describe("memory distillation", () => {
     });
   });
 
+  test("extract is off by default with bounded counts", () => {
+    expect(DEFAULT_CONFIG.memory.extract).toEqual({
+      enabled: false,
+      maxFacts: 3,
+      maxBytes: 204800,
+    });
+  });
+
+  test("clamps extract counts and takes a boolean enable", () => {
+    const { config, warnings } = loadConfig({
+      memory: { extract: { enabled: true, maxFacts: 0, maxBytes: 10 } },
+    });
+
+    expect(config.memory.extract).toEqual({
+      enabled: true,
+      maxFacts: 1,
+      maxBytes: 1024,
+    });
+    expect(warnings.filter((w) => w.includes("memory.extract"))).toHaveLength(2);
+  });
+
   test("takes the model judge and clamps its counts", () => {
     const { config, warnings } = loadConfig({
       memory: {

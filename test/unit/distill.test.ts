@@ -294,6 +294,38 @@ describe("retirement", () => {
     expect(retired).toBe(2);
     expect(forgotten).toEqual(["b", "c"]);
   });
+
+  test("counts extracted memories toward the same budget", async () => {
+    const records = [
+      {
+        id: "extract",
+        text: "one",
+        metadata: { source: "extract:local", confidence: 0.9 },
+      },
+      {
+        id: "distill",
+        text: "two",
+        metadata: { source: "distill:heuristic", confidence: 0.4 },
+      },
+    ];
+    const forgotten: string[] = [];
+    const memory = {
+      scan: async () => records,
+      forget: async (id: string) => {
+        forgotten.push(id);
+        return true;
+      },
+    } as unknown as MemoryStore;
+
+    const retired = await retireDistilled({
+      memory,
+      maxPerProject: 1,
+      logger,
+    });
+
+    expect(retired).toBe(1);
+    expect(forgotten).toEqual(["distill"]);
+  });
 });
 
 describe("model judge", () => {

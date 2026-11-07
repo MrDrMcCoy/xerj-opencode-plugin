@@ -21,6 +21,7 @@ cited passages instead of whole files. Nothing leaves the machine.
   - [Measuring a change](#measuring-a-change)
 - [Memory](#memory)
   - [Distillation](#distillation)
+  - [Window extraction](#window-extraction)
 - [Command output](#command-output)
 - [Fetched pages and external files](#fetched-pages-and-external-files)
 - [Tools](#tools)
@@ -336,6 +337,11 @@ This is the complete set with its defaults, in
                 "minSamples": 12          // answered samples needed
               }
             }
+          },
+          "extract": {                   // facts from the compaction window
+            "enabled": false,            // off; precision not measured yet
+            "maxFacts": 3,               // memories promoted per window
+            "maxBytes": 204800           // window text read per compaction
           }
         },
         "stats": {
@@ -451,6 +457,9 @@ The same entry works with a checkout path instead of the package name; see
 | `memory.distill.local.autotune.initialDelayMs` | Delay after setup before the first pass. |
 | `memory.distill.local.autotune.margin` | F1 percentage points a candidate needs over the active floor. |
 | `memory.distill.local.autotune.minSamples` | Answered samples a pass needs before it can decide. |
+| `memory.extract.enabled` | Mine the pre-compaction window for durable facts. Off by default; precision is not measured yet. |
+| `memory.extract.maxFacts` | Memories promoted from one compaction window. |
+| `memory.extract.maxBytes` | Window text read before extraction. |
 | `index.graph` | Index the project as one graph corpus (a "super brain"): sections, symbols, `path:line`, and edges. On by default; `false` restores the flat `--no-graph` corpus with the engine's own watcher. A change rebuilds the project corpus once. |
 | `index.semantic` | Include the semantic retrieval leg. |
 | `index.neural` | Embed passages with the node's neural model (`--embed-mode neural`). Set `false` for lexical embeddings. Changing it rebuilds the project index once; neural indexing is roughly ten times slower than lexical. |
@@ -796,6 +805,24 @@ local judge's figures; `DISTILL_EVAL_URL`, `DISTILL_EVAL_MODEL`, and
 `DISTILL_EVAL_KEY` do the same for an OpenAI-compatible chat endpoint. A script
 cannot borrow the host's model, which is why that endpoint is explicit; the
 plugin's own judge uses the host model when `judge` is `model`.
+
+### Window extraction
+
+`memory.extract.enabled` (off by default) mines the same pre-compaction window
+the turn archive sees. When the host compacts, the plugin flattens the user and
+assistant text, runs the same candidate extractor and judge as distillation,
+and writes up to `maxFacts` durable sentences to memory. The rest of the
+judging settings are shared: `memory.distill.judge`, `minConfidence`, and
+`modelMaxCalls`. The gate stays off until the window's precision is measured;
+the turn pipeline is the tested route.
+
+Extracted memories carry `source: extract:<judge>` and `derived: true` in their
+metadata, so verification and the budget sweep treat them like distilled ones
+while recall still sees their class. They are counted toward
+`maxPerProject` and retired by the same confidence-and-age rule. The write runs
+in the background: a slow judge or a failed memory write is logged and never
+delays the summary. `xerj_telemetry op=memory.extract` reports candidates,
+promoted, duplicates, rejected, and calls per window.
 
 [Back to top](#table-of-contents)
 

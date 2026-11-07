@@ -86,6 +86,7 @@ import { TurnArchive } from "./archive/turns.ts";
 import { CmdService } from "./cmd/service.ts";
 import { cmdTools } from "./tools/cmd.ts";
 import { registerCompactionArchive } from "./archive/window.ts";
+import { registerCompactionExtraction } from "./memory/extract.ts";
 import { memoryIndexMissing, recoverMemoryIndex } from "./memory/health.ts";
 import { curateMemories } from "./memory/curate.ts";
 import { verifyMemories } from "./memory/verify.ts";
@@ -1864,6 +1865,7 @@ export default Plugin.define({
         if (
           config.memory.captureTurns ||
           config.memory.distill.enabled ||
+          config.memory.extract.enabled ||
           archive !== null
         ) {
           const canGenerate =
@@ -2019,6 +2021,21 @@ export default Plugin.define({
           }
           const chosenJudge =
             config.memory.distill.judge === "local" ? localJudge : judgeModel;
+
+          if (config.memory.extract.enabled) {
+            await registerCompactionExtraction(ctx, {
+              memory: runtime.memory,
+              config: config.memory.extract,
+              judge: config.memory.distill.judge,
+              minConfidence: config.memory.distill.minConfidence / 100,
+              maxCalls: config.memory.distill.modelMaxCalls,
+              judgeModel: chosenJudge,
+              logger,
+              signal: shutdown.signal,
+              owns: (sessionID) => prompts.knows(sessionID),
+              measure: (op, body, meta) => telemetry.span(op, body, meta),
+            });
+          }
 
           startTurnCapture({
             events: ctx.event,

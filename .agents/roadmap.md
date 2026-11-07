@@ -1197,6 +1197,21 @@ leave the heuristic result in place. The caller's `calls < modelMaxCalls` cap
 applies to the local judge too, so at most three candidates per turn pay for a
 request.
 
+#### Window extraction
+
+The `compaction` hook is the only place the window exists before the summary
+replaces it. `src/memory/extract.ts` reuses `captureWindow` from the archive,
+joins user and assistant text, and runs the same candidate extractor and judge
+as a turn. It writes at most `memory.extract.maxFacts` (3) memories per window
+with `source: extract:<judge>` and `derived: true`. The `derived` flag is
+metadata rather than a new kind, so recall keeps decision/constraint/... and
+the existing verification and budget sweep apply unchanged.
+
+The write is fire-and-forget: the hook returns before the judge answers, and a
+failure is a debug line. The gate is off (`memory.extract.enabled: false`)
+because the window has not had a precision measurement; only the turn pipeline
+has. The labelled set and the replay harness are the path to that measurement.
+
 #### Retirement
 
 Retirement is by evidence and budget, in this order: a distilled memory whose
@@ -1369,7 +1384,7 @@ measured; they include tests and the commits that carry them. A status of
 | Turn archive | M | Done | 1.5 h | `archive/turns.ts`: one NDJSON file per session under `<node dir>/archive`, 4 KB per turn, oldest half dropped past `context.archive.maxBytes`; prompts and answers both archived; eight module tests |
 | `xerj_expand` | M | Done | 0.5 h | Prints `[n] U:`/`[n] A:` for a turn range, or says the archive is off; wired for the plugin and the MCP server |
 | Pre-compaction window archive | M | Done | 1.5 h | `archive/window.ts` flattens text and tool-result bodies from the newest messages (40 or about 200 KB, whichever binds first) into the turn archive behind a `system` marker; media, reasoning, and compaction parts are skipped, message ids are deduped against retries, and only this instance's sessions are captured. Roles gained `tool` and `system`, and `xerj_expand` labels them `T` and `S`. Eleven module tests |
-| Fact mining from the compaction window | M | Not started | — | Deferred by the user. Two routes: a heuristic pass over the same window (patterns for decisions, constraints, config keys, commands that worked) at about 2 h, or one model call bounded by a token budget at about 3 to 4 h. Needs a precision measurement before it defaults on, a `derived` memory kind, and reuse of the stale flag; gated by `memory.extract`, off by default |
+| Fact mining from the compaction window | M | Done (gated off) | 2.0 h | `src/memory/extract.ts`: the `compaction` hook flattens the window with the archive's own `captureWindow`, runs `extractCandidates` and the shared judge, and writes up to `maxFacts` memories with `source: extract:<judge>` and `derived: true`. It reuses `memory.distill.judge`, `minConfidence`, and `modelMaxCalls`; retirement counts extracted memories toward `maxPerProject`. Runs in the background, so a slow judge never delays the summary. `memory.extract` telemetry reports candidates/promoted/duplicates/rejected/calls. Five module tests. The gate stays off until the window's precision is measured |
 | Post-compaction rehydration | M | Done | 2.0 h | `src/rehydrate.ts` builds the block from the three newest citations, re-reading a 24-line window inside the project root and capping the result at `context.rehydrateTokens` (600); `session.compaction.ended` snapshots the working set, the `model.request` hook suppresses the summariser's own call, and a fresh retrieval with hits supersedes the recall. Ten module tests and six hook tests |
 | History search | M | Done | 1.0 h | `archive/index.ts` bulk-loads one document per turn into `<prefix>-archive-docs`, idempotent by session and ordinal, with a manifest so a pruned turn leaves the index; the archive is now a search prefix and its own dataset row; five module tests |
 | Live context distillation | M | Done | 10.0 h | `src/memory/distill.ts`: five classes, heuristic and model judges behind one write path, idempotent promotion with `source: distill:<judge>` and `confidence`, budget retirement, `memory.distill`/`memory.recall` telemetry with a report line and per-judge calls/chars. The model judge caps calls per turn, clips the turn, times out, and falls back. 16 distill tests, a capture test, config tests, and a report test. A golden set of 8 labeled memory sentences plus 7 sentences that must never be promoted: 8/8 recalled and classified, 0 false positives. The measurement harness is `bun run eval:distill` (heuristic always, local with `DISTILL_EVAL_JEVOS_URL`, model with an explicit OpenAI-compatible endpoint); the model delta is not yet recorded. The local jevos judge (`src/jev/`) is the default: checksum-verified install of the binary and the 630 MB model, one shared loopback server with attach and idle stop, a contrastive keep question at 7/8 recall on the labelled set and 1/10 report noise at 0.20 (3/10 without a judge), and a heuristic fallback on every failure path. Every judgement is a `memory.distill.judge` telemetry record; `bun run tune:local` turns the live store into a labelled JSONL corpus and `bun run replay:judge` sweeps wordings and thresholds against it. `local.autotune` (on) replays the fixed labelled set every 24 hours and moves the floor only on a 5-point F1 gain, with the chosen value and evidence in `<data root>/jev/autotune.json`. 33 new unit tests across release, judge, manager, supervisor, distill, the tuning report, the replay sweep, and autotune, plus an end-to-end install run against the real assets |
@@ -1393,12 +1408,12 @@ the `git log` record layout cost an extra hour and a half, and the auto-search
 hint, where the dedupe test had to distinguish the hint pass from the retrieval
 pass.
 
-Tier M so far: **11.0 h** across eight items this pass, nine of fourteen with
+Tier M so far: **13.0 h** across nine items this pass, ten of fourteen with
 the graph overview that predates it. Remaining, all deferred or gated: the
 tree-sitter layer and the complexity work it enables (grammar source settled,
-work deferred), fact mining (deferred by the user, gated by
-`memory.extract`), `xerj_code` (needs a network gate, since `corpus add`
-clones), and `xerj_ask` (gated by `hub.enabled` and `hub.network`).
+work deferred), `xerj_code` (needs a network gate, since `corpus add` clones),
+and `xerj_ask` (gated by `hub.enabled` and `hub.network`). Window extraction
+ships behind `memory.extract` (off) until its precision is measured.
 
 ## Settled decisions
 

@@ -195,6 +195,16 @@ export interface MemoryOptions {
   readonly retain: MemoryRetainOptions;
   /** Turn live context into typed memories, and retire what stops being true. */
   readonly distill: DistillOptions;
+  /** Mine the pre-compaction window for durable facts. */
+  readonly extract: ExtractOptions;
+}
+
+export interface ExtractOptions {
+  readonly enabled: boolean;
+  /** Facts promoted from one window. */
+  readonly maxFacts: number;
+  /** Bytes of window text read before extraction. */
+  readonly maxBytes: number;
 }
 
 export interface DistillOptions {
@@ -451,6 +461,11 @@ export const DEFAULT_CONFIG: Config = {
         },
       },
     },
+    extract: {
+      enabled: false,
+      maxFacts: 3,
+      maxBytes: 200 * 1024,
+    },
   },
   stats: { enabled: true, bytesPerToken: 4, maxBaselineBytes: 128 * 1024 },
   cmd: {
@@ -504,6 +519,7 @@ export function loadConfig(
   const distill = asObject(memory.distill);
   const local = asObject(distill.local);
   const tune = asObject(local.autotune);
+  const extract = asObject(memory.extract);
   const stats = asObject(root.stats);
   const telemetry = asObject(root.telemetry);
   const cmd = asObject(root.cmd);
@@ -1124,6 +1140,30 @@ export function loadConfig(
             ),
           },
         },
+      },
+      extract: {
+        enabled: readBoolean(
+          extract.enabled,
+          DEFAULT_CONFIG.memory.extract.enabled,
+          "memory.extract.enabled",
+          warnings,
+        ),
+        maxFacts: readInteger(
+          extract.maxFacts,
+          DEFAULT_CONFIG.memory.extract.maxFacts,
+          1,
+          20,
+          "memory.extract.maxFacts",
+          warnings,
+        ),
+        maxBytes: readInteger(
+          extract.maxBytes,
+          DEFAULT_CONFIG.memory.extract.maxBytes,
+          1_024,
+          1_048_576,
+          "memory.extract.maxBytes",
+          warnings,
+        ),
       },
     },
     stats: {
