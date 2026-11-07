@@ -29,7 +29,8 @@ import { reconcileEmbedMode } from "./node/embed-mode.ts";
 import { detectNode, EmbedMode, stopNode, type NodeHandle } from "./node/supervisor.ts";
 import {
   brainSpecs,
-  dataRoot,
+  cacheRoot,
+  legacyDataRoot,
   documentRoots,
   environmentFrom,
   externalPrefix,
@@ -166,7 +167,8 @@ export default Plugin.define({
     const { config, warnings } = loadConfig(ctx.options, process.env);
     const storage = asStorage(ctx.storage);
 
-    const root = dataRoot(environmentFrom(process.env));
+    const root = cacheRoot(environmentFrom(process.env));
+    const legacyRoot = legacyDataRoot(environmentFrom(process.env));
     // The location may be a subdirectory of the project; index the project root
     // so a session opened in `docs/` does not create a second corpus.
     const projectRoot = ctx.location.project.canonical;
@@ -1160,6 +1162,7 @@ export default Plugin.define({
     });
     const hub = new HubService({
       config: config.hub,
+      hubRoot: join(root, "hub"),
       binary: () => runtime.binary?.path ?? null,
       nodeUrl: () => runtime.node?.baseUrl ?? null,
       logger,
@@ -1723,15 +1726,18 @@ export default Plugin.define({
         }
       }
 
-      await migrateProjectStorage(
-        root,
-        storageRoot,
-        prefix,
-        webPrefix(projectRoot),
-        logger,
-      ).catch((error: unknown) => {
-        logger.warn("could not migrate project storage", String(error));
-      });
+      const legacyRoots = [...new Set([root, legacyRoot])];
+      for (const legacy of legacyRoots) {
+        await migrateProjectStorage(
+          legacy,
+          storageRoot,
+          prefix,
+          webPrefix(projectRoot),
+          logger,
+        ).catch((error: unknown) => {
+          logger.warn("could not migrate project storage", String(error));
+        });
+      }
     };
 
     /**
@@ -1761,15 +1767,19 @@ export default Plugin.define({
      * restarts once for the copied index to appear.
      */
     const migrateMemory = async (): Promise<void> => {
-      const migrated = await migrateMemoryIndex(
-        join(root, "data"),
-        engineDataDir,
-        memoryNamespace(projectRoot),
-        logger,
-      ).catch((error: unknown) => {
-        logger.warn("could not migrate project memory", String(error));
-        return false;
-      });
+      let migrated = false;
+      for (const legacy of [...new Set([root, legacyRoot])]) {
+        migrated =
+          (await migrateMemoryIndex(
+            join(legacy, "data"),
+            engineDataDir,
+            memoryNamespace(projectRoot),
+            logger,
+          ).catch((error: unknown) => {
+            logger.warn("could not migrate project memory", String(error));
+            return false;
+          })) || migrated;
+      }
       if (migrated && (await nodes.detect()).running) {
         await nodes.stop("memory migration");
       }

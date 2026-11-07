@@ -103,8 +103,9 @@ cited passages instead of whole files. Nothing leaves the machine.
 
 - OpenCode V2 with plugin support.
 - Linux x86_64/aarch64, macOS x86_64/arm64, or Windows x86_64/arm64.
-- No XERJ install needed: the plugin manages its own binary under
-  `~/.local/share/opencode/xerj/` (or `%LOCALAPPDATA%` on Windows).
+- No XERJ install needed: the plugin manages its own binary under the OpenCode
+  cache directory, `~/.cache/opencode/xerj/` on Linux (or the platform
+  equivalent), never in the source tree.
 - Linux installs use the static musl build by default.
 
 Only Linux x86_64 has been exercised end to end. The other release targets are
@@ -572,7 +573,7 @@ The same entry works with a checkout path instead of the package name; see
 | `share.timeoutMs` | Deadline for one share command. |
 | `analysis.lsp.enabled` | Register `xerj_callers` and `xerj_impact`, and start language servers. On by default. |
 | `analysis.lsp.servers` | Language id to command or `[command, args]`. Empty means auto-resolve. |
-| `analysis.lsp.autoInstall` | Install a missing pinned TypeScript server into `<data root>/lsp`. |
+| `analysis.lsp.autoInstall` | Install a missing pinned TypeScript server into `<cache root>/lsp`. |
 | `analysis.lsp.idleMs` | Stop a server after this long without a request. |
 | `analysis.lsp.maxServers` | Concurrent language servers. |
 | `analysis.lsp.timeoutMs` | Deadline for one language-server request. |
@@ -588,7 +589,7 @@ The same entry works with a checkout path instead of the package name; see
 
 The plugin measures its own cost. Every operation, boot phase, crash, restart,
 service-state transition, and CPU/RSS sample goes into bounded NDJSON files
-under `telemetry/` at the XERJ data root:
+under `telemetry/` at the XERJ cache root:
 
 ```
 ops.ndjson            every operation, newest last; rotates at 8 MiB, 4 kept
@@ -837,7 +838,7 @@ jevos CPU model described below. The judge is stored on every memory as
 `judge: "local"` is the default and needs no endpoint and no network after
 the first run. The
 plugin downloads the jevos v5 OpenVINO INT8 model (about 630 MB) and its
-binary once into `<data root>/jev/`, checks both against the release
+binary once into `<cache root>/jev/`, checks both against the release
 `SHA256SUMS.txt`, and starts a loopback server. The download runs in the
 background from `setup`, so a turn never waits for it; until it finishes, or
 on a platform jevos does not publish for, distillation keeps the heuristic
@@ -867,7 +868,7 @@ after that, `memory.distill.local.autotune` replays the labeled set through the
 live model and adopts a different threshold only when its F1 beats the active
 one by `margin`. A stable model leaves the floor alone; a model, wording, or
 tokenizer change is what moves it. The chosen value and the evidence live in
-`<data root>/jev/autotune.json`, and the panel's Memory section shows
+`<cache root>/jev/autotune.json`, and the panel's Memory section shows
 `judge floor 0.20 · autotuned · date · F1`. Changing `local.threshold` yourself
 discards the saved value and starts from the new config. Turning the feature off
 leaves the heuristic and every previous memory untouched. `local.path` points at a pre-installed directory holding
@@ -1096,7 +1097,7 @@ of structurally identical functions. It answers "where is the hard part" and
 
 The first call downloads the pinned `tree-sitter-wasms` pack: 4.4 MB
 compressed, about 50 MB unpacked, verified against its npm sha512 and installed
-under `<data root>/grammars/0.1.13/`. One download covers every grammar the pack
+under `<cache root>/grammars/0.1.13/`. One download covers every grammar the pack
 ships. The analyzer maps `.ts` and `.tsx` (plus JavaScript, Python, Rust, Go,
 Java, C/C++, Ruby, PHP, Kotlin, Lua, and shell) to those grammars; an empty
 `languages` list parses whatever the project contains. Files above
@@ -1121,7 +1122,7 @@ A server is resolved in one order: `analysis.lsp.servers` for that language,
 the project's `node_modules`, `PATH`, the plugin cache, then a pinned install
 when `analysis.lsp.autoInstall` is true. The pinned pair is
 `typescript-language-server@6.0.3` and `typescript@5.9.3`, installed with
-`--ignore-scripts` into `<data root>/lsp/typescript/6.0.3`. The server starts on
+`--ignore-scripts` into `<cache root>/lsp/typescript/6.0.3`. The server starts on
 the first tool call, opens up to 500 project TypeScript files (tsserver only
 indexes what the client opened), and stops after `idleMs` without a request.
 At most `maxServers` run at once.
@@ -1141,7 +1142,7 @@ labelled heuristic.
 
 `code.enabled` (on) adds `xerj_code`, which wraps `xerj code` and the
 `xerj corpus` lifecycle. A reference corpus is a peer project, cloned once,
-licence-detected, and indexed under `<data root>/code` (the engine's
+licence-detected, and indexed under `<cache root>/code` (the engine's
 `XERJ_CODE_HOME`). `action=list` shows them, `add` takes a name and git URLs,
 `index` builds or refreshes one, and `query` returns cited passages with the
 licence and a do-not-copy warning where the licence requires it.
@@ -1661,15 +1662,32 @@ reviewers, branch or tag restrictions) apply before it publishes.
 ## Data locations
 
 ```
-~/.local/share/opencode/xerj/bin/<version>-<target>/xerj
-~/.local/share/opencode/xerj/nodes/.port-lock  shared port lock
+~/.cache/opencode/xerj/                         OpenCode cache root (Linux)
+  bin/<version>-<target>/xerj                   managed binary
+  grammars/0.1.13/out/                          tree-sitter pack
+  lsp/typescript/6.0.3/                         language server
+  jev/                                          jevos model, log, autotune state
+  code/                                         reference corpora (XERJ_CODE_HOME)
+  hub/                                          catalogue and packs (XERJ_HUB_HOME)
+  telemetry/                                    local diagnostic store
+  nodes/.port-lock                              shared port lock
 <project>/.xerj/                               storage root by default
 <project>/.xerj/nodes/<prefix>/                node port, pid, log, heartbeats
 <project>/.xerj/nodes/<prefix>/data/           engine storage and journal
 <project>/.xerj/spool/<prefix>/                fetched pages
 <project>/.xerj/nodes/<prefix>/sysdocs/        man and info manifest
 <project>/.xerj/nodes/<prefix>/prjdocs/        documentation crawl manifest
+<project>/.xerj/cmd/                            command output pairs
+<project>/.xerj/notes.jsonl                     deferred notes
+<project>/.xerj/dreamer.json                    last dreamer run
+<project>/.xerj/nodes/<prefix>/archive/         turn archive
 ```
+
+On macOS the cache root is `~/Library/Caches/opencode/xerj`; on Windows it is
+`%LOCALAPPDATA%\opencode\cache\xerj`. `storage.root` can move the project
+state, but the default is the project's own `.xerj`. Explicit paths you pass to
+`xerj_dataset` (export/import), `xerj_index`, or a shell command are used as
+given: they are deliberate file operations, not plugin state.
 
 Datasets you create with `xerj_dataset`, and the documentation corpora, live
 inside the engine data directory; `xerj_status` reports their document counts

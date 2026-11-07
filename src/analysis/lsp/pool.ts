@@ -413,6 +413,7 @@ export class LspPool {
           `typescript@${TYPESCRIPT_VERSION}`,
         ],
         INSTALL_TIMEOUT_MS,
+        { npm_config_cache: join(this.options.root, "npm-cache") },
       );
       if (result.code !== 0) {
         throw new Error(`npm exited ${result.code}: ${result.stderr.slice(0, 200)}`);
@@ -553,12 +554,14 @@ function run(
   command: string,
   args: ReadonlyArray<string>,
   timeoutMs: number,
+  extraEnv: NodeJS.ProcessEnv = {},
 ): Promise<{ code: number | null; stderr: string }> {
   return new Promise((resolve) => {
     const child = spawn(command, [...args], {
       stdio: ["ignore", "ignore", "pipe"],
       windowsHide: true,
       shell: process.platform === "win32",
+      env: { ...process.env, ...extraEnv },
     });
     let stderr = "";
     child.stderr.on("data", (chunk: Buffer) => {

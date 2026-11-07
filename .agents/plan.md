@@ -123,15 +123,19 @@ grows.
 
 ## 4. Paths and identity
 
+`<data root>` in this document means the global OpenCode cache root,
+`~/.cache/opencode/xerj` on Linux (the platform equivalent elsewhere). It is
+disposable and outside the source tree. Project state is `<project>/.xerj`.
+
 ```
-data root     ~/.local/share/opencode/xerj               (binary only, 0700)
-binary        <data root>/bin/<ver>-<target>/xerj
+cache root    ~/.cache/opencode/xerj                      (binary, grammars, LSP, jevos, code, hub, telemetry; 0700)
+binary        <cache root>/bin/<ver>-<target>/xerj
 storage root  <project>/.xerj                          (storage.root)
 node dir      <storage root>/nodes/<prefix>/           (one per project)
 engine data   <node dir>/data/                         (engine storage)
 port          <node dir>/port                          (resolved, persisted)
 pid           <node dir>/node.pid
-lock          <data root>/nodes/.port-lock            (shared by all projects)
+lock          <cache root>/nodes/.port-lock           (shared by all projects)
 spool         <storage root>/spool/<prefix>/           (remote documents)
 journal       <node dir>/data/state/<prefix>/journal.ndjson
 ```

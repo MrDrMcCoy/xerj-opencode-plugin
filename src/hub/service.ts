@@ -11,6 +11,8 @@ import type { Logger } from "../log.ts";
 
 export interface HubOptions {
   readonly config: Config["hub"];
+  /** `<cache root>/hub`; the engine keeps its catalogue and packs here. */
+  readonly hubRoot: string;
   readonly binary: () => string | null;
   readonly nodeUrl: () => string | null;
   readonly logger: Logger;
@@ -138,6 +140,7 @@ export class HubService {
     const env = {
       ...process.env,
       XERJ_HUB_URL: this.options.config.url,
+      XERJ_HUB_HOME: this.options.hubRoot,
     };
     if (this.options.run !== undefined) return this.options.run(args, env);
     return runEngine(binary, args, env, this.options.config.timeoutMs);

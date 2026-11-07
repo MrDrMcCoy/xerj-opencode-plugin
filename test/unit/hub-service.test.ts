@@ -79,6 +79,7 @@ function service(
   const envs: Array<NodeJS.ProcessEnv> = [];
   const hub = new HubService({
     config: { ...DEFAULT_CONFIG.hub, network: false, hosted: "off", ...overrides },
+    hubRoot: "/tmp/xerj-hub",
     binary: () => "/tmp/xerj",
     nodeUrl: () => "http://127.0.0.1:9200",
     logger,
@@ -140,6 +141,7 @@ describe("hub service", () => {
     expect(args[0]).toContain("--url");
     expect(args[0]).toContain("http://127.0.0.1:9200");
     expect(envs[0]?.XERJ_HUB_URL).toBe("https://hub.xerj.org");
+    expect(envs[0]?.XERJ_HUB_HOME).toBe("/tmp/xerj-hub");
   });
 
   test("allows the network and hosted mode when configured", async () => {

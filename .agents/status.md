@@ -388,6 +388,26 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-07: Global state moved to the OpenCode cache root. `cacheRoot` is
+  `$XDG_CACHE_HOME/opencode/xerj` on Linux, `~/Library/Caches/opencode/xerj`
+  on macOS, and `%LOCALAPPDATA%\opencode\cache\xerj` on Windows. The managed
+  binary, release cache, port lock, grammars, language servers, jevos model,
+  reference corpora, hub catalogue/packs, and telemetry live there. Project
+  state stays in `<project>/.xerj` (node data, spool, archive, cmd, notes,
+  dreamer). The hub gets `XERJ_HUB_HOME`, code gets `XERJ_CODE_HOME`, and the
+  npm language-server install gets `npm_config_cache`, so none of them fall
+  back to `~/.xerj`, `~/npm`, or the source directory.
+
+  Existing installs are migrated once from the old XDG data root: project
+  storage and memory are checked in the old root as well as the cache root.
+  TUI preferences remain in the host's shared
+  `$XDG_CONFIG_HOME/opencode/tui-preferences.jsonc`, because that file is
+  shared with other plugins; it is configuration, not cache or project state.
+  Explicit `xerj_dataset` paths, external `xerj_index` reads, shell reads, and
+  system doc roots are deliberate file operations and keep their given paths.
+  1274 unit and 14 integration tests pass; typecheck clean. Nothing is pushed
+  or released.
+
 - 2026-11-07: The sidebar guards variable-length text. A row whose label and
   value exceed `SIDEBAR_COMPACT_WIDTH` (34 cells) moves the value to its own
   line and wraps it, so an error, path, or job summary cannot squeeze the

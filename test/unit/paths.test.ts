@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
   brainPrefix,
-  dataRoot,
+  cacheRoot,
+  legacyDataRoot,
   externalPrefix,
   indexPrefix,
   isOverbroadRoot,
@@ -14,24 +15,35 @@ import {
   webPrefix,
 } from "../../src/paths.ts";
 
-describe("dataRoot", () => {
-  test("honours XDG_DATA_HOME on Linux", () => {
-    expect(dataRoot({ XDG_DATA_HOME: "/xdg" }, "linux")).toBe("/xdg/opencode/xerj");
+describe("cacheRoot", () => {
+  test("honours XDG_CACHE_HOME on Linux", () => {
+    expect(cacheRoot({ XDG_CACHE_HOME: "/xdg" }, "linux")).toBe("/xdg/opencode/xerj");
   });
 
   test("falls back to ~/.local/share on Linux", () => {
-    expect(dataRoot({ HOME: "/home/me" }, "linux")).toBe("/home/me/.local/share/opencode/xerj");
+    expect(cacheRoot({ HOME: "/home/me" }, "linux")).toBe("/home/me/.cache/opencode/xerj");
   });
 
   test("uses Application Support on macOS", () => {
-    expect(dataRoot({ HOME: "/Users/me" }, "darwin")).toBe(
-      "/Users/me/Library/Application Support/opencode/xerj",
+    expect(cacheRoot({ HOME: "/Users/me" }, "darwin")).toBe(
+      "/Users/me/Library/Caches/opencode/xerj",
     );
   });
 
   test("uses LOCALAPPDATA on Windows", () => {
-    expect(dataRoot({ LOCALAPPDATA: "C:/Users/me/AppData/Local" }, "win32")).toBe(
-      "C:/Users/me/AppData/Local/opencode/xerj",
+    expect(cacheRoot({ LOCALAPPDATA: "C:/Users/me/AppData/Local" }, "win32")).toBe(
+      "C:/Users/me/AppData/Local/opencode/cache/xerj",
+    );
+  });
+});
+
+describe("legacyDataRoot", () => {
+  test("keeps the old XDG data layout for migration", () => {
+    expect(legacyDataRoot({ XDG_DATA_HOME: "/xdg" }, "linux")).toBe(
+      "/xdg/opencode/xerj",
+    );
+    expect(legacyDataRoot({ HOME: "/home/me" }, "linux")).toBe(
+      "/home/me/.local/share/opencode/xerj",
     );
   });
 });

@@ -12,7 +12,7 @@
 
 import { readdir, readFile, mkdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { dataRoot, environmentFrom } from "../src/paths.ts";
+import { cacheRoot, environmentFrom } from "../src/paths.ts";
 
 export interface JudgeRecord {
   readonly at: number;
@@ -211,7 +211,7 @@ function percent(value: number): string {
 /** Prints what the store holds and where the tuning corpus went. */
 export async function run(): Promise<void> {
   const directory =
-    arg("--dir") ?? join(dataRoot(environmentFrom(process.env)), "telemetry");
+    arg("--dir") ?? join(cacheRoot(environmentFrom(process.env)), "telemetry");
   const prefix = arg("--prefix");
   const out =
     arg("--out") ??

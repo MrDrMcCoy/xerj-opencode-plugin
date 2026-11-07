@@ -171,8 +171,8 @@ describe("plugin setup end to end", () => {
     const outside = join(root, "outside.md");
     await Bun.write(outside, "# Outside\n\nThe outsidemarker token is not in the project.\n");
 
-    const previous = process.env.XDG_DATA_HOME;
-    process.env.XDG_DATA_HOME = join(root, "data-home");
+    const previous = process.env.XDG_CACHE_HOME;
+    process.env.XDG_CACHE_HOME = join(root, "cache-home");
 
     const host = stubHost(project, {
       binary: { path: binaryPath },
@@ -312,8 +312,8 @@ describe("plugin setup end to end", () => {
           // Already gone between the check and the signal.
         }
       }
-      if (previous === undefined) delete process.env.XDG_DATA_HOME;
-      else process.env.XDG_DATA_HOME = previous;
+      if (previous === undefined) delete process.env.XDG_CACHE_HOME;
+      else process.env.XDG_CACHE_HOME = previous;
     }
   }, 120_000);
 });

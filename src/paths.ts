@@ -8,6 +8,7 @@ import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 export interface Environment {
   readonly XDG_DATA_HOME?: string;
+  readonly XDG_CACHE_HOME?: string;
   readonly LOCALAPPDATA?: string;
   readonly HOME?: string;
 }
@@ -15,6 +16,7 @@ export interface Environment {
 export function environmentFrom(env: Readonly<Record<string, string | undefined>>): Environment {
   return {
     XDG_DATA_HOME: env.XDG_DATA_HOME,
+    XDG_CACHE_HOME: env.XDG_CACHE_HOME,
     LOCALAPPDATA: env.LOCALAPPDATA,
     HOME: env.HOME,
   };
@@ -40,20 +42,45 @@ const PREFIX_ROOT = "xop";
 const MAX_SLUG_LENGTH = 24;
 const HASH_LENGTH = 8;
 
-/** Root for the binary, node data, and spool. Independent of any project. */
-export function dataRoot(env: Environment, platform: NodeJS.Platform = process.platform): string {
+/**
+ * The pre-cache global root (XDG data on Linux). Read only, for the one-time
+ * migration of an existing install into the cache root or project `.xerj`.
+ */
+export function legacyDataRoot(
+  env: Environment,
+  platform: NodeJS.Platform = process.platform,
+): string {
   if (platform === "win32") {
     const local = env.LOCALAPPDATA ?? join(env.HOME ?? homedir(), "AppData", "Local");
     return join(local, APP_DIR);
   }
-
   if (platform === "darwin") {
     const base = env.XDG_DATA_HOME ?? join(env.HOME ?? homedir(), "Library", "Application Support");
     return join(base, APP_DIR);
   }
-
   const base = env.XDG_DATA_HOME ?? join(env.HOME ?? homedir(), ".local", "share");
   return join(base, APP_DIR);
+}
+
+/**
+ * Root for downloaded binaries, models, grammars, language servers, and local
+ * diagnostic data. It is the OpenCode cache directory, not the source tree or
+ * the user's data directory: a writable checkout is not a guarantee, and a
+ * cache is disposable by definition.
+ */
+export function cacheRoot(env: Environment, platform: NodeJS.Platform = process.platform): string {
+  if (platform === "win32") {
+    const local = env.LOCALAPPDATA ?? join(env.HOME ?? homedir(), "AppData", "Local");
+    return join(local, "opencode", "cache", "xerj");
+  }
+
+  if (platform === "darwin") {
+    const base = env.XDG_CACHE_HOME ?? join(env.HOME ?? homedir(), "Library", "Caches");
+    return join(base, "opencode", "xerj");
+  }
+
+  const base = env.XDG_CACHE_HOME ?? join(env.HOME ?? homedir(), ".cache");
+  return join(base, "opencode", "xerj");
 }
 
 export function binaryPath(

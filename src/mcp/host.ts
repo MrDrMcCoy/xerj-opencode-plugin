@@ -33,7 +33,7 @@ import { CodeService } from "../code/service.ts";
 import { ShareService } from "../share/service.ts";
 import { LspPool } from "../analysis/lsp/pool.ts";
 import { NoteStore } from "../notes/store.ts";
-import { dataRoot, environmentFrom, projectStateDir } from "../paths.ts";
+import { cacheRoot, environmentFrom, projectStateDir } from "../paths.ts";
 import { fileStorage } from "./storage.ts";
 import { SysdocIndexer } from "../sysdocs/index.ts";
 import { PrjdocsIndexer } from "../prjdocs/index.ts";
@@ -198,6 +198,7 @@ export class McpHost {
       getAnomaly: () => this.anomaly,
       hub: new HubService({
         config: this.config.hub,
+        hubRoot: join(cacheRoot(environmentFrom(process.env)), "hub"),
         binary: () => this.binary?.path ?? null,
         nodeUrl: () => this.client?.baseUrl ?? null,
         logger: this.logger,
@@ -208,7 +209,7 @@ export class McpHost {
       }),
       lsp: new LspPool({
         projectRoot: this.projectRoot,
-        root: join(dataRoot(environmentFrom(process.env)), "lsp"),
+        root: join(cacheRoot(environmentFrom(process.env)), "lsp"),
         config: this.config.analysis.lsp,
         logger: this.logger,
       }),
@@ -216,7 +217,7 @@ export class McpHost {
         config: this.config.code,
         binary: () => this.binary?.path ?? null,
         nodeUrl: () => this.client?.baseUrl ?? null,
-        codeRoot: join(dataRoot(environmentFrom(process.env)), "code"),
+        codeRoot: join(cacheRoot(environmentFrom(process.env)), "code"),
         logger: this.logger,
       }),
       share: new ShareService({
@@ -228,7 +229,7 @@ export class McpHost {
       treeSitter: new TreeSitterService({
         projectRoot: this.projectRoot,
         grammarRoot: join(
-          dataRoot(environmentFrom(process.env)),
+          cacheRoot(environmentFrom(process.env)),
           "grammars",
         ),
         config: this.config.analysis.treeSitter,
