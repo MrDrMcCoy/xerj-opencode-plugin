@@ -388,6 +388,30 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-07: The audit findings are addressed. `stopNode` now proves the
+  port owner before signalling a pid, so a reused pid is left alone. The LSP
+  pool records a per-project, per-language pidfile, sweeps a stale one only
+  when the command line still names the server, and removes it on stop.
+  Binary installs record their owner pid and use a 15-minute wait over a
+  10-minute stale window, so a crashed install is reclaimed at once and a
+  slow one is not stolen. `xerj_status` is compact, the line cache is bounded
+  and cleared on every corpus run, the bootstrap retry is tested, the sidebar
+  threshold matches the box's inner width, an empty memory is rejected, and a
+  failed telemetry rotation no longer resets the byte count.
+
+  New tests: a fake stdio LSP server (handshake, call hierarchy, pidfile,
+  teardown, stale pid), `runEngine` output caps and timeout, grammar install
+  against a loopback tarball (good pack, hash mismatch, no `out/`),
+  `detectRuntime` branch selection, `/proc` and `ps` process counters, the
+  sampler's `forget`, the real tree-sitter parser (skipped without the pack),
+  and the bootstrap retry with a mocked clock. Coverage is 89.2% lines and
+  84.1% functions; `bunfig.toml` enforces 85/80 and CI runs `--coverage`.
+  `package-lock.json` is removed, `watch:tui` and a README note close the
+  stale-bundle gap. 1,313 unit tests (1 skip) and 14 integration tests pass;
+  typecheck clean. The structural split of `src/index.ts` and
+  `src/tools/search.ts` remains a separate refactor; it is a readability
+  issue, not a correctness one.
+
 - 2026-11-07: Audit pass. Fixed: `xerj_status` now returns a compact summary
   (251 characters, about 63 tokens, against 10.4 KB and 2.6k tokens) with
   `full: true` for the old JSON; `SearchService` drops its line cache on
