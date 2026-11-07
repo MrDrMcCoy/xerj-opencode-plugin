@@ -1649,6 +1649,7 @@ export default Plugin.define({
       binary: () => runtime.binary,
       onSpawned: () => counters.noteSpawn(),
       onStart: (handle) => {
+        const previousUrl = runtime.node?.baseUrl ?? null;
         runtime.node = handle;
         client?.setBaseUrl(handle.baseUrl);
         // A start counts as activity; otherwise an immediate idle check would
@@ -1661,6 +1662,13 @@ export default Plugin.define({
           { port: handle.port },
         );
         void boot.ready({ port: handle.port, spawned: handle.spawned });
+        // A corpus keeps the URL it was built with. When the node comes back
+        // on another port, recreating the indexers is the only way their
+        // `autoindex --url` points at the live node.
+        if (previousUrl !== null && previousUrl !== handle.baseUrl) {
+          void stopIndexers().then(() => startIndexers(handle));
+          return;
+        }
         void startIndexers(handle);
       },
     });
@@ -2257,18 +2265,15 @@ export default Plugin.define({
             storageRoot,
             projectRoot,
             indexName: `${cmdPrefix(projectRoot)}-docs`,
-            getClient: () =>
-              runtime.node === null
-                ? null
-                : new XerjClient(runtime.node.baseUrl, clientTimeouts),
+            // The shared client carries the node resolver; a fixed URL would
+            // go stale when the node restarts on another port.
+            getClient: () => client,
             logger,
             onBusy: busyHook(JobKind.Cmd, "command log"),
             signal: shutdown.signal,
           });
         }
-        runtime.cmd.setClient(
-          new XerjClient(runtime.node.baseUrl, clientTimeouts),
-        );
+        if (client !== null) runtime.cmd.setClient(client);
         await runtime.cmd.start();
         void runtime.cmd.reindex();
       }
