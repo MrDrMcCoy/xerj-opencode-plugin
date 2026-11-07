@@ -9,36 +9,9 @@
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_CONFIG } from "../../src/config.ts";
 import { extractCandidates } from "../../src/memory/distill.ts";
-import type { MemoryKind } from "../../src/memory/store.ts";
+import { ACCEPT, REJECT } from "../../scripts/distill-labels.ts";
 
 const THRESHOLD = DEFAULT_CONFIG.memory.distill.minConfidence / 100;
-
-interface Label {
-  readonly text: string;
-  readonly kind: MemoryKind;
-  readonly origin: "prompt" | "answer";
-}
-
-const ACCEPT: ReadonlyArray<Label> = [
-  { text: "We decided to use SQLite instead of Postgres for the local store.", kind: "decision", origin: "answer" },
-  { text: "We agreed to keep the plugin read-only and let the host write files.", kind: "decision", origin: "answer" },
-  { text: "The collector must never open a port unless share.enabled is true.", kind: "constraint", origin: "answer" },
-  { text: "Do not add new runtime dependencies to this package.", kind: "constraint", origin: "prompt" },
-  { text: "By convention, every tool lives under src/tools and is named after its action.", kind: "convention", origin: "answer" },
-  { text: "I prefer terse replies with no interim status updates.", kind: "preference", origin: "prompt" },
-  { text: "The node listens on 127.0.0.1:9200 unless node.port is set.", kind: "fact", origin: "answer" },
-  { text: "The sweep runs hourly; the timer is in src/index/watcher.ts:44.", kind: "fact", origin: "answer" },
-];
-
-const REJECT: ReadonlyArray<string> = [
-  "Should we use SQLite for the local store?",
-  "Maybe we decided to use SQLite for the local store.",
-  "Let me check whether the indexer must run on musl.",
-  "I think the watcher probably claims ownership before the first pass.",
-  "Here's what the build printed: a long list of compiler warnings.",
-  "```\nWe decided to use SQLite instead of Postgres.\n```",
-  "TBD: the storage engine is still an open question for the group.",
-];
 
 function promotes(text: string, origin: "prompt" | "answer"): boolean {
   const candidates = extractCandidates(

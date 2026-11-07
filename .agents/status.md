@@ -386,8 +386,11 @@ publish, and live TUI verification remain.
   constraints, conventions, preferences, facts) and 7 that must never be
   promoted (questions, hedges, plans, code blocks). It recalls and classifies
   8/8 with 0 false positives, and the floors are 80% / none so a cue change
-  cannot quietly start storing noise. The model-versus-heuristic measurement on
-  the same set still needs a live model.
+  cannot quietly start storing noise. The measurement harness is
+  `bun run eval:distill`: it prints the heuristic's recall, false positives,
+  and class accuracy (8/8, 0/7, 8/8), and runs the model judge over the same
+  set when given an OpenAI-compatible endpoint and key. A script cannot borrow
+  the host's model, so the delta is the user's run to make.
 
 - 2026-11-06: The model judge for live-context distillation is implemented.
   `judge: "model"` now sends each cue-bearing candidate through the host's

@@ -699,6 +699,14 @@ that are actually recalled), readable through `xerj_telemetry op=memory.distill`
 and `xerj_telemetry op=memory.recall`. The panel's Telemetry section shows the
 same line: `distilled N · heuristic A · model B · calls C · recalled R`.
 
+The measurement harness is `bun run eval:distill`. It prints the heuristic's
+recall, false positives, and class accuracy on a labeled set of fifteen
+sentences. With `DISTILL_EVAL_URL`, `DISTILL_EVAL_MODEL`, and
+`DISTILL_EVAL_KEY` set to an OpenAI-compatible chat endpoint, it runs the model
+judge over the same set and prints the same figures with its call count. A
+script cannot borrow the host's model, which is why the endpoint is explicit;
+the plugin's own judge uses the host model when `judge` is `model`.
+
 [Back to top](#table-of-contents)
 
 ## Command output
