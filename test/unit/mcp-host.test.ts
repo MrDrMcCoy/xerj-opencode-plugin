@@ -34,7 +34,7 @@ describe("McpHost", () => {
     const storage = await directory("xerj-mcp-state-");
     const host = new McpHost({
       projectRoot: project,
-      env: { XERJ_STORAGE_ROOT: storage },
+      env: { XERJ_STORAGE_ROOT: storage, OPENCODE_CONFIG_DIR: join(project, "no-config") },
     });
 
     expect(host.storageRoot).toBe(storage);
@@ -51,6 +51,7 @@ describe("McpHost", () => {
         XERJ_BIN: "/opt/xerj/bin/xerj",
         XERJ_STORAGE_ROOT: storage,
         XERJ_NODE_URL: "http://127.0.0.1:9400",
+        OPENCODE_CONFIG_DIR: join(project, "no-config"),
       },
     });
 
@@ -63,7 +64,11 @@ describe("McpHost", () => {
     const project = await directory("xerj-mcp-host-");
     const host = new McpHost({
       projectRoot: project,
-      env: { XERJ_BIN: "   ", XERJ_NODE_URL: "" },
+      env: {
+        XERJ_BIN: "   ",
+        XERJ_NODE_URL: "",
+        OPENCODE_CONFIG_DIR: join(project, "no-config"),
+      },
     });
 
     expect(host.config.binary.path).toBeNull();
@@ -75,7 +80,7 @@ describe("McpHost", () => {
     const storage = await directory("xerj-mcp-state-");
     const host = new McpHost({
       projectRoot: project,
-      env: { XERJ_STORAGE_ROOT: storage },
+      env: { XERJ_STORAGE_ROOT: storage, OPENCODE_CONFIG_DIR: join(project, "no-config") },
     });
 
     const tools = await host.tools();
@@ -98,12 +103,14 @@ describe("McpHost", () => {
       "index",
       "inspect",
       "notes",
+      "out",
       "outline",
       "prjdocs",
       "recall",
       "refs",
       "reindex",
       "remember",
+      "run",
       "search",
       "status",
       "sysdocs",
@@ -158,7 +165,11 @@ describe("McpHost boot against an existing node", () => {
     const host = new McpHost({
       projectRoot: project,
       nodeUrl: `http://127.0.0.1:${server.port}`,
-      env: { XERJ_BIN: fakeBinary, XERJ_STORAGE_ROOT: storage },
+      env: {
+        XERJ_BIN: fakeBinary,
+        XERJ_STORAGE_ROOT: storage,
+        OPENCODE_CONFIG_DIR: join(project, "no-config"),
+      },
     });
 
     await host.start();

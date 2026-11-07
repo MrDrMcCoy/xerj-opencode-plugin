@@ -34,6 +34,10 @@ async function converse(
   expected: number,
   options: { project: string; storage: string; binary: string },
 ): Promise<Sent[]> {
+  await writeFile(
+    join(options.project, "xerj-mcp-test.json"),
+    '{"node":{"shutdownOnIdle":true}}\n',
+  ).catch(() => {});
   const child = Bun.spawn(["bun", "src/mcp/main.ts", "--project", options.project], {
     stdin: "pipe",
     stdout: "pipe",
@@ -42,6 +46,8 @@ async function converse(
       ...process.env,
       XERJ_BIN: options.binary,
       XERJ_STORAGE_ROOT: options.storage,
+      XERJ_MCP_CONFIG: join(options.project, "xerj-mcp-test.json"),
+      OPENCODE_CONFIG_DIR: options.project,
     },
   });
 
@@ -72,6 +78,9 @@ async function converse(
   }
 
   child.kill();
+  // Let the server finish its shutdown before the caller removes the storage;
+  // otherwise the node pidfile is gone before the stop reads it.
+  await child.exited.catch(() => {});
   return responses;
 }
 
@@ -120,18 +129,64 @@ describe("MCP server", () => {
       "index",
       "inspect",
       "notes",
+      "out",
       "outline",
       "prjdocs",
       "recall",
       "refs",
       "reindex",
       "remember",
+      "run",
       "search",
       "status",
       "sysdocs",
       "zoom",
     ]);
     for (const tool of list.tools) expect(tool.inputSchema).toBeDefined();
+  }, 180_000);
+
+  test("reindexes a project and finds a marker", async () => {
+    const project = await directory("xerj-mcp-project-");
+    const storage = await directory("xerj-mcp-storage-");
+    const binary = (await resolveBinary(storage)) as string;
+    await writeFile(
+      join(project, "README.md"),
+      "# demo\n\n" +
+        "A longer project document about the local index. ".repeat(120) +
+        "\n\nzephyrmarker lives here.\n",
+    );
+
+    const responses = await converse(
+      [
+        { jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
+        { jsonrpc: "2.0", method: "notifications/initialized" },
+        {
+          jsonrpc: "2.0",
+          id: 2,
+          method: "tools/call",
+          params: { name: "reindex", arguments: {} },
+        },
+        {
+          jsonrpc: "2.0",
+          id: 3,
+          method: "tools/call",
+          params: { name: "search", arguments: { query: "zephyrmarker" } },
+        },
+      ],
+      3,
+      { project, storage, binary },
+    );
+
+    const text = (id: number): string => {
+      const result = responses.find((response) => response.id === id)?.result as
+        | { content?: Array<{ type: string; text: string }> }
+        | undefined;
+      return result?.content?.[0]?.text ?? "";
+    };
+
+    expect(text(2)).toContain("indexed");
+    expect(text(2)).not.toContain("?");
+    expect(text(3)).toContain("README.md");
   }, 180_000);
 
   test("a status call returns text and starts the node on demand", async () => {

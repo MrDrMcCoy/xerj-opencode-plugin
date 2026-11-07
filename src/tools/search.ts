@@ -40,6 +40,12 @@ export interface ToolOptions {
   readonly getSearch: () => SearchService | null;
   readonly getMemory: () => MemoryStore | null;
   readonly getSpool: () => RemoteSpool | null;
+  /**
+   * Runs after a URL is written to the spool. The plugin's web watcher picks
+   * it up on its own; a standalone MCP host runs one web pass so the page is
+   * searchable before the tool returns.
+   */
+  readonly onSpooledUrl?: () => Promise<void>;
   readonly getAnomaly: () => AnomalyService | null;
   /** The raw turn archive; null when archiving is disabled. */
   readonly getArchive: () => TurnArchive | null;
@@ -748,6 +754,9 @@ export function buildTools(options: ToolOptions): ReadonlyArray<{
 
           const text = await response.text();
           const stored = await spool.ingestUrl(args.url, text);
+          if (stored) {
+            await options.onSpooledUrl?.().catch(() => {});
+          }
           options.getSearch()?.invalidate();
           return stored
             ? {
