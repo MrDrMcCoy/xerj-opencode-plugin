@@ -126,6 +126,16 @@ export class LspPool {
     return this.awaitDiagnostics(uri, signal);
   }
 
+  /** Pids of running servers, for the telemetry sampler. */
+  activePids(): number[] {
+    const pids: number[] = [];
+    for (const active of this.active.values()) {
+      const pid = active.client.pid;
+      if (pid !== null) pids.push(pid);
+    }
+    return pids;
+  }
+
   async stopAll(): Promise<void> {
     if (this.timer !== null) clearInterval(this.timer);
     this.timer = null;

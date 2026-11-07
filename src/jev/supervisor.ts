@@ -44,6 +44,10 @@ export class JevosSupervisor {
     return this.base;
   }
 
+  get pid(): number | null {
+    return this.child?.pid ?? null;
+  }
+
   /** The base URL, starting the server when needed; null when unavailable. */
   async ensure(): Promise<string | null> {
     if (this.base !== null) {

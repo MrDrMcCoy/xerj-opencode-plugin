@@ -606,10 +606,26 @@ without touching it. A record carries the type, duration, outcome, the project
 prefix, the job count at the start (idle or busy), and up to `telemetry.maxText`
 characters of caller text after redaction; error messages are never stored.
 
+Every span also records its own cost: `cpuMs` from `process.cpuUsage()`, RSS
+before and after with the delta, and the process peak. The report groups those
+records into feature rows (retrieval, memory, index, analysis, hub, code,
+share, cmd, graph, archive, and so on), so the cost of a feature is compared
+against its benefit in one place. The benefit side is the bytes a tool
+returned, hits, memories promoted, and the ledger's saved bytes and tokens.
+
 `xerj_telemetry` reports operation counts with p50 and p95 split by idle and
-busy, the last ten boots with setup, ready, and indexed figures, crash and
-restart counts, the day's dwell split, and each XERJ process's CPU and RSS with
-the day's peak and growth. A sweep at startup and every ten minutes keeps the
+busy, the same figures for CPU, each feature's wall and CPU time, returned and
+saved bytes, the last ten boots with setup, ready, and indexed figures, crash
+and restart counts, the day's dwell split, and each XERJ process's CPU and RSS
+with the day's peak and growth. `sort=cpu` orders the operation rows by total
+CPU.
+
+Process samples cover the node, the project watcher, the web indexer, every
+language server, and the jevos judge (`samples/<date>.ndjson`). In-process CPU
+is process-wide: two concurrent features in the plugin share one figure.
+One-shot subprocesses are not sampled; their wall time is the measured cost.
+Use the per-feature row and the process samples together when deciding whether
+to make a feature lighter. A sweep at startup and every ten minutes keeps the
 directory under `telemetry.maxBytes`.
 
 The same five states drive the sidebar badge and the panel: `starting` before
@@ -1042,7 +1058,7 @@ index can answer, and none writes a project file.
 | `xerj_imports` | `action` (`cycles`, `file`), `path?`, `limit?` | Import graph and cycles without a language server. |
 | `xerj_expand` | `sessionID`, `start?`, `end?` | The raw text of earlier turns, including a compaction window. |
 | `xerj_status` | — | Node, index, corpora, memory, and accounting state. |
-| `xerj_telemetry` | `op?`, `window?`, `sort?`, `limit?` | Local operation timings, boots, crashes, and process cost. |
+| `xerj_telemetry` | `op?`, `window?`, `sort?`, `limit?` | Local operation timing, CPU, RSS, per-feature cost and benefit, boots, crashes, and process cost. `sort` accepts `count`, `p95`, `total`, `errors`, or `cpu`. |
 | `xerj_remember` | `text`, `kind?`, `topic?` | Store a durable fact. |
 | `xerj_recall` | `query`, `k?` | Retrieve memories by meaning. |
 | `xerj_forget` | `id` | Retract a memory. |

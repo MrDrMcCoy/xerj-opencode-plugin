@@ -19,6 +19,7 @@ import {
 import { join } from "node:path";
 import type { Logger } from "../log.ts";
 import { redactClip } from "../redact.ts";
+import { costFields, featureOf, snapshotCost, withCost } from "./cost.ts";
 import {
   isOpType,
   ZERO_DWELL,
@@ -54,7 +55,7 @@ export interface TelemetryStoreOptions {
 }
 
 export type ReportWindow = "session" | "day" | "all";
-export type ReportSort = "count" | "p95" | "total" | "errors";
+export type ReportSort = "count" | "p95" | "total" | "errors" | "cpu";
 
 export interface ReportQuery {
   readonly op?: string;
@@ -73,6 +74,37 @@ export interface OpSummary {
   readonly totalMs: number;
   readonly idleP50: number;
   readonly busyP50: number;
+  /** In-process CPU time, summed and percentile-split. */
+  readonly cpuTotal: number;
+  readonly cpuP50: number;
+  readonly cpuP95: number;
+  /** Mean resident-set change and the largest peak seen. */
+  readonly rssDelta: number;
+  readonly rssPeak: number;
+  /** Child-process CPU and RSS when a wrapper recorded them. */
+  readonly childCpuTotal: number;
+  readonly childRssPeak: number;
+  /** Benefit counters recorded by the operation itself. */
+  readonly returnedBytes: number;
+  readonly savedBytes: number;
+  readonly hits: number;
+  readonly promoted: number;
+}
+
+/** Cost and benefit rolled up by feature, for comparing features directly. */
+export interface FeatureSummary {
+  readonly feature: string;
+  readonly count: number;
+  readonly errors: number;
+  readonly wallMs: number;
+  readonly cpuMs: number;
+  readonly childCpuMs: number;
+  readonly rssDelta: number;
+  readonly rssPeak: number;
+  readonly returnedBytes: number;
+  readonly savedBytes: number;
+  readonly hits: number;
+  readonly promoted: number;
 }
 
 export interface BootSummary {
@@ -94,6 +126,8 @@ export interface ProcessSummary {
   readonly cpuReady: number | null;
   /** Resident-set change over the window, in MB per day. */
   readonly growthMbPerDay: number;
+  /** Process kind; `node` for the compatibility `process` field. */
+  readonly kind?: string;
 }
 
 /** Cost and effect of live-context distillation, summed over the window. */
@@ -117,6 +151,9 @@ export interface TelemetryReport {
   readonly restarts: number;
   readonly states: StateDwell;
   readonly process: ProcessSummary | null;
+  /** Per-process cost for every sampled kind: node, watcher, index, lsp, jev. */
+  readonly processes: ReadonlyArray<ProcessSummary>;
+  readonly features: ReadonlyArray<FeatureSummary>;
   readonly storeBytes: number;
   /** Date of the oldest record still on disk, or null when empty. */
   readonly historyStart: string | null;
@@ -131,6 +168,8 @@ export const EMPTY_REPORT: TelemetryReport = {
   restarts: 0,
   states: ZERO_DWELL,
   process: null,
+  processes: [],
+  features: [],
   storeBytes: 0,
   historyStart: null,
   distill: { promoted: 0, heuristic: 0, model: 0, local: 0, recalled: 0, calls: 0, chars: 0 },
@@ -263,12 +302,26 @@ export class TelemetryStore {
     meta?: (result: T) => unknown,
   ): Promise<T> {
     const started = performance.now();
+    const before = snapshotCost();
     try {
       const result = await body();
-      this.record(op, performance.now() - started, true, meta?.(result));
+      const elapsed = performance.now() - started;
+      this.record(
+        op,
+        elapsed,
+        true,
+        withCost(meta?.(result), costFields(before, snapshotCost())),
+      );
       return result;
     } catch (error) {
-      this.record(op, performance.now() - started, false, undefined, error);
+      const elapsed = performance.now() - started;
+      this.record(
+        op,
+        elapsed,
+        false,
+        withCost(undefined, costFields(before, snapshotCost())),
+        error,
+      );
       throw error;
     }
   }
@@ -480,6 +533,8 @@ export class TelemetryStore {
       restarts,
       states: await this.dwellForWindow(since),
       process: await this.processSummary(since),
+      processes: await this.processSummaries(since),
+      features: summarizeFeatures(records),
       storeBytes: await this.storeBytes(),
       historyStart: await this.historyStart(),
       distill: distillSummary(records),
@@ -737,6 +792,27 @@ export class TelemetryStore {
   }
 
   private async processSummary(since: number): Promise<ProcessSummary | null> {
+    const samples = await this.readSamples(since);
+    const node = samples.filter((sample) => sample.kind === "node");
+    return node.length > 0 ? this.summaryOf(node, "node") : null;
+  }
+
+  private async processSummaries(
+    since: number,
+  ): Promise<ReadonlyArray<ProcessSummary>> {
+    const samples = await this.readSamples(since);
+    const kinds = [...new Set(samples.map((sample) => sample.kind))].sort();
+    return kinds
+      .map((kind) =>
+        this.summaryOf(
+          samples.filter((sample) => sample.kind === kind),
+          kind,
+        ),
+      )
+      .filter((summary): summary is ProcessSummary => summary !== null);
+  }
+
+  private async readSamples(since: number): Promise<SampleRecord[]> {
     const directory = join(this.options.directory, "samples");
     const files = (await readdir(directory).catch(() => [] as string[]))
       .filter((name) => name.endsWith(".ndjson"))
@@ -752,19 +828,22 @@ export class TelemetryStore {
         samples.push(sample);
       }
     }
-    if (samples.length === 0) return null;
 
-    // Samples from another project's node share the store; keep this one's.
-    const mine = samples.filter(
-      (sample) => sample.prefix === undefined ||
-        sample.prefix === this.options.prefix,
+    return samples.filter(
+      (sample) =>
+        sample.prefix === undefined || sample.prefix === this.options.prefix,
     );
-    const node = mine.filter((sample) => sample.kind === "node");
-    const pool = node.length > 0 ? node : mine;
-    // Mixing pids compares a fresh node against a retired one; keep the pid of
-    // the newest sample, which is the node that answers now.
-    const currentPid = pool[pool.length - 1]?.pid;
-    const series = pool.filter((sample) => sample.pid === currentPid);
+  }
+
+  private summaryOf(
+    samples: ReadonlyArray<SampleRecord>,
+    kind: string,
+  ): ProcessSummary | null {
+    if (samples.length === 0) return null;
+    // Mixing pids compares a fresh process against a retired one; keep the pid
+    // of the newest sample, which is the one that answers now.
+    const currentPid = samples[samples.length - 1]?.pid;
+    const series = samples.filter((sample) => sample.pid === currentPid);
     const rss = series.map((sample) => sample.rssBytes).sort((a, b) => a - b);
     const busy = series.filter(
       (sample) => sample.load > 0 && sample.cpuPct !== null,
@@ -775,6 +854,7 @@ export class TelemetryStore {
     const last = series[series.length - 1];
 
     return {
+      kind,
       cpuPct: last?.cpuPct ?? null,
       rssBytes: last?.rssBytes ?? null,
       peakRssBytes: rss[rss.length - 1] ?? 0,
@@ -1146,6 +1226,9 @@ function summarize(
     const durations = entries.map((entry) => entry.ms).sort((a, b) => a - b);
     const idle = entries.filter((entry) => entry.load === 0);
     const busy = entries.filter((entry) => entry.load > 0);
+    const cpu = sortNumbers(entries.map((entry) => numberMeta(entry.meta?.cpuMs)));
+    const rssDelta = entries.map((entry) => numberMeta(entry.meta?.rssDelta));
+    const peak = entries.map((entry) => numberMeta(entry.meta?.rssPeak));
     return {
       op,
       count: entries.length,
@@ -1156,6 +1239,31 @@ function summarize(
       totalMs: Math.round(durations.reduce((total, ms) => total + ms, 0)),
       idleP50: percentile(sortNumbers(idle.map((entry) => entry.ms)), 50),
       busyP50: percentile(sortNumbers(busy.map((entry) => entry.ms)), 50),
+      cpuTotal: Math.round(cpu.reduce((total, value) => total + value, 0)),
+      cpuP50: percentile(cpu, 50),
+      cpuP95: percentile(cpu, 95),
+      rssDelta: Math.round(mean(rssDelta) ?? 0),
+      rssPeak: peak.length === 0 ? 0 : Math.max(...peak),
+      childCpuTotal: Math.round(
+        entries.reduce((total, entry) => total + numberMeta(entry.meta?.childCpuMs), 0),
+      ),
+      childRssPeak: entries.reduce(
+        (peakValue, entry) => Math.max(peakValue, numberMeta(entry.meta?.childRssBytes)),
+        0,
+      ),
+      returnedBytes: entries.reduce(
+        (total, entry) => total + numberMeta(entry.meta?.bytes),
+        0,
+      ),
+      savedBytes: entries.reduce(
+        (total, entry) => total + numberMeta(entry.meta?.savedBytes),
+        0,
+      ),
+      hits: entries.reduce((total, entry) => total + numberMeta(entry.meta?.hits), 0),
+      promoted: entries.reduce(
+        (total, entry) => total + numberMeta(entry.meta?.promoted),
+        0,
+      ),
     };
   });
 
@@ -1167,11 +1275,57 @@ function summarize(
         return right.totalMs - left.totalMs;
       case "errors":
         return right.errors - left.errors;
+      case "cpu":
+        return right.cpuTotal - left.cpuTotal;
       default:
         return right.count - left.count;
     }
   });
   return rows;
+}
+
+function summarizeFeatures(records: ReadonlyArray<OpRecord>): FeatureSummary[] {
+  const groups = new Map<string, OpRecord[]>();
+  for (const record of records) {
+    const feature = featureOf(record.op);
+    const group = groups.get(feature);
+    if (group === undefined) groups.set(feature, [record]);
+    else group.push(record);
+  }
+
+  return [...groups.entries()]
+    .map(([feature, entries]) => {
+      const rssDelta = entries.map((entry) => numberMeta(entry.meta?.rssDelta));
+      const peak = entries.map((entry) => numberMeta(entry.meta?.rssPeak));
+      return {
+        feature,
+        count: entries.length,
+        errors: entries.filter((entry) => !entry.ok).length,
+        wallMs: Math.round(entries.reduce((total, entry) => total + entry.ms, 0)),
+        cpuMs: Math.round(
+          entries.reduce((total, entry) => total + numberMeta(entry.meta?.cpuMs), 0),
+        ),
+        childCpuMs: Math.round(
+          entries.reduce((total, entry) => total + numberMeta(entry.meta?.childCpuMs), 0),
+        ),
+        rssDelta: Math.round(mean(rssDelta) ?? 0),
+        rssPeak: peak.length === 0 ? 0 : Math.max(...peak),
+        returnedBytes: entries.reduce(
+          (total, entry) => total + numberMeta(entry.meta?.bytes),
+          0,
+        ),
+        savedBytes: entries.reduce(
+          (total, entry) => total + numberMeta(entry.meta?.savedBytes),
+          0,
+        ),
+        hits: entries.reduce((total, entry) => total + numberMeta(entry.meta?.hits), 0),
+        promoted: entries.reduce(
+          (total, entry) => total + numberMeta(entry.meta?.promoted),
+          0,
+        ),
+      };
+    })
+    .sort((left, right) => right.cpuMs - left.cpuMs || right.wallMs - left.wallMs);
 }
 
 function sortNumbers(values: ReadonlyArray<number>): number[] {
@@ -1243,7 +1397,15 @@ function parseSample(line: string): SampleRecord | null {
     }
     if (typeof value.rssBytes !== "number") return null;
     const kind = value.kind;
-    if (kind !== "node" && kind !== "watcher" && kind !== "index") return null;
+    if (
+      kind !== "node" &&
+      kind !== "watcher" &&
+      kind !== "index" &&
+      kind !== "lsp" &&
+      kind !== "jev"
+    ) {
+      return null;
+    }
     return {
       at: value.at,
       kind,

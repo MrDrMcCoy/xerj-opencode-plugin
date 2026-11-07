@@ -22,10 +22,19 @@ export function measuredTools<T extends ToolLike>(
       telemetry.span(
         `tool.${tool.name}` as OpType,
         () => tool.execute(input, context),
-        (result) =>
-          typeof result === "object" && result !== null
-            ? { bytes: Buffer.byteLength(JSON.stringify(result), "utf8") }
-            : undefined,
+        (result) => {
+          if (typeof result !== "object" || result === null) return undefined;
+          const xerj = (result as {
+            metadata?: { xerj?: { hits?: unknown; bytes?: unknown } };
+          }).metadata?.xerj;
+          return {
+            bytes:
+              typeof xerj?.bytes === "number"
+                ? xerj.bytes
+                : Buffer.byteLength(JSON.stringify(result), "utf8"),
+            ...(typeof xerj?.hits === "number" ? { hits: xerj.hits } : {}),
+          };
+        },
       ),
   }));
 }

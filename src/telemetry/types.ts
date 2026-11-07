@@ -153,7 +153,7 @@ export interface OpRecord {
 /** One process sample. `cpuPct` is null for the first sample of a pid. */
 export interface SampleRecord {
   readonly at: number;
-  readonly kind: "node" | "watcher" | "index";
+  readonly kind: ProcessKind;
   /** Project prefix, so a report shows this project's node, not a peer's. */
   readonly prefix?: string;
   readonly pid: number;
@@ -183,7 +183,7 @@ export interface BootMarker {
   readonly phase: string;
 }
 
-export const PROCESS_KINDS = ["node", "watcher", "index"] as const;
+export const PROCESS_KINDS = ["node", "watcher", "index", "lsp", "jev"] as const;
 export type ProcessKind = (typeof PROCESS_KINDS)[number];
 
 /** A bounded scalar set: never a prompt, a file body, or model output. */

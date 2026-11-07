@@ -279,10 +279,13 @@ export async function registerSessionHooks(
 
     try {
       const already = seen.get(event.sessionID);
-      const result = await measure("retrieve", () =>
-        retrieve(search, text, options, (hit) =>
-          already?.has(locationKey(hit)) ?? false,
-        ),
+      const result = await measure(
+        "retrieve",
+        () =>
+          retrieve(search, text, options, (hit) =>
+            already?.has(locationKey(hit)) ?? false,
+          ),
+        (value) => ({ hits: value.hits.length, bytes: value.bytes }),
       );
       const paths = result.hits.flatMap((hit) => (hit.path ? [hit.path] : []));
       await options.recordQuery(event.sessionID, paths, result.bytes, result.hits.length);

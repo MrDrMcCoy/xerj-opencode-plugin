@@ -62,6 +62,10 @@ export class LspClient {
 
   constructor(private readonly options: LspClientOptions) {}
 
+  get pid(): number | null {
+    return this.child?.pid ?? null;
+  }
+
   async start(): Promise<void> {
     if (this.child !== null) return;
     const child = spawn(this.options.command.command, [...this.options.command.args], {

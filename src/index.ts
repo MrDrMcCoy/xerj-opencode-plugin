@@ -1288,7 +1288,7 @@ export default Plugin.define({
           const args = (input ?? {}) as {
             op?: string;
             window?: "session" | "day" | "all";
-            sort?: "count" | "p95" | "total" | "errors";
+            sort?: "count" | "p95" | "total" | "errors" | "cpu";
             limit?: number;
           };
           const report = await telemetry.report({
@@ -1298,7 +1298,7 @@ export default Plugin.define({
             limit: Math.max(1, Math.min(args.limit ?? 20, 200)),
           });
           return {
-            content: formatReport(report),
+            content: formatReport(report, ledger.snapshot()),
             metadata: {
               xerj: {
                 rows: report.rows.length,
@@ -1388,7 +1388,10 @@ export default Plugin.define({
         telemetry.record("inject", 0, true);
       },
       onNoiseSkip: () => counters.noteNoiseSkip(),
-      onCost: (_sessionID, bytes) => void ledger.recordInjection(bytes),
+      onCost: (_sessionID, bytes) => {
+        void ledger.recordInjection(bytes);
+        telemetry.record("inject", 0, true, { bytes });
+      },
       onPrompt: (sessionID, text) => prompts.note(sessionID, text),
       onPromptArchive: (sessionID, text) => void archive?.append(sessionID, "user", text),
       getNotes: () => notes,
@@ -1684,6 +1687,9 @@ export default Plugin.define({
         }
         const webPid = runtime.web?.pid ?? null;
         if (webPid !== null) targets.push({ kind: "index", pid: webPid });
+        for (const pid of lsp.activePids()) targets.push({ kind: "lsp", pid });
+        const jevosPid = jevos?.pid ?? null;
+        if (jevosPid !== null) targets.push({ kind: "jev", pid: jevosPid });
         return targets;
       },
       load: () => jobs.load,
@@ -2396,13 +2402,52 @@ function memoryExists(
 }
 
 /** The report as plain lines: no JSON, no prompt text, no file bodies. */
-function formatReport(report: TelemetryReport): string {
+function formatReport(
+  report: TelemetryReport,
+  usage?: ReturnType<Ledger["snapshot"]>,
+): string {
   const duration = (ms: number): string =>
     ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
   const states = report.states;
   const last = report.starts[0] ?? null;
 
+  const mb = (bytes: number): string => `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  const featureLines = report.features
+    .filter((feature) => feature.count > 0)
+    .slice(0, 12)
+    .map((feature) => {
+      const parts = [
+        `${feature.feature}  ${feature.count} calls`,
+        `wall ${duration(feature.wallMs)}`,
+        `cpu ${duration(feature.cpuMs)}`,
+      ];
+      if (feature.childCpuMs > 0) parts.push(`child cpu ${duration(feature.childCpuMs)}`);
+      if (feature.rssPeak > 0) parts.push(`rss peak ${mb(feature.rssPeak)}`);
+      if (feature.rssDelta !== 0) parts.push(`rss delta ${mb(feature.rssDelta)}`);
+      if (feature.returnedBytes > 0) parts.push(`returned ${mb(feature.returnedBytes)}`);
+      if (feature.savedBytes > 0) parts.push(`saved ${mb(feature.savedBytes)}`);
+      if (feature.hits > 0) parts.push(`${feature.hits} hits`);
+      if (feature.promoted > 0) parts.push(`${feature.promoted} promoted`);
+      if (feature.errors > 0) parts.push(`${feature.errors} errors`);
+      return parts.join(" · ");
+    });
+  const processLines = report.processes.map((process) => {
+    const kind = process.kind ?? "node";
+    return (
+      `${kind}  cpu ${process.cpuReady === null ? "?" : process.cpuReady.toFixed(1)}% idle / ` +
+      `${process.cpuBusy === null ? "?" : process.cpuBusy.toFixed(1)}% busy · ` +
+      `rss ${process.rssBytes === null ? "?" : mb(process.rssBytes)} · ` +
+      `peak ${mb(process.peakRssBytes)}`
+    );
+  });
+
   return [
+    ...(featureLines.length === 0
+      ? []
+      : ["cost by feature", ...featureLines, ""]),
+    ...(processLines.length === 0
+      ? []
+      : ["processes", ...processLines, ""]),
     `operations (${report.rows.length} types)`,
     ...(report.distill.promoted === 0 && report.distill.recalled === 0
       ? []
@@ -2420,7 +2465,13 @@ function formatReport(report: TelemetryReport): string {
       (row) =>
         `  ${row.op}  ${row.count}x · p50 ${duration(row.p50)} · ` +
         `p95 ${duration(row.p95)} · max ${duration(row.max)} · ` +
-        `idle ${duration(row.idleP50)} · busy ${duration(row.busyP50)}` +
+        `idle ${duration(row.idleP50)} · busy ${duration(row.busyP50)} · ` +
+        `cpu p50 ${duration(row.cpuP50)} · total ${duration(row.cpuTotal)}` +
+        (row.rssPeak > 0 ? ` · rss peak ${mb(row.rssPeak)}` : "") +
+        (row.rssDelta !== 0 ? ` · rss ${mb(row.rssDelta)}` : "") +
+        (row.returnedBytes > 0 ? ` · returned ${mb(row.returnedBytes)}` : "") +
+        (row.hits > 0 ? ` · ${row.hits} hits` : "") +
+        (row.promoted > 0 ? ` · ${row.promoted} promoted` : "") +
         (row.errors > 0 ? ` · ${row.errors} errors` : ""),
     ),
     last === null
@@ -2439,6 +2490,13 @@ function formatReport(report: TelemetryReport): string {
       `busy ${duration(states.busyMs)} · ` +
       `degraded ${duration(states.degradedMs)} · ` +
       `stopped ${duration(states.stoppedMs)}`,
+    ...(usage === undefined
+      ? []
+      : [
+          `benefit: ${usage.queries} queries · ${Math.round(usage.hitRate * 100)}% hit · ` +
+            `saved ${usage.tokensSaved} tok (${mb(usage.savedBytes)}) · ` +
+            `cost ${usage.tokensCost} tok · net ${usage.netTokens} tok`,
+        ]),
     report.process === null
       ? "no CPU or RSS samples yet"
       : `process: ${report.process.cpuPct ?? 0}% cpu · ` +

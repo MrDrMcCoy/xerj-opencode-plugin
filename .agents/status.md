@@ -388,6 +388,23 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-07: Telemetry now carries per-operation and per-feature cost.
+  Every span records `cpuMs` from `process.cpuUsage()`, RSS before and after
+  with the delta, and the process peak, in addition to wall time. The report
+  groups records into feature rows (retrieval, memory, index, analysis, hub,
+  code, share, cmd, graph, archive, and so on) with wall time, CPU, RSS,
+  returned bytes, saved bytes, hits, and promotions, ordered by CPU.
+  `xerj_telemetry` prints those rows, a per-process block for node, watcher,
+  index, language servers, and jevos, and a ledger benefit line; `sort=cpu`
+  orders operations by total CPU.
+
+  Process samples now include `lsp` and `jev`; the process block is built per
+  kind. In-process CPU is process-wide, so concurrent features share a figure;
+  one-shot subprocesses are measured by wall time, not CPU. Five cost tests
+  cover feature mapping, cost merging, span fields, feature rollup, and
+  per-kind process summaries; 1271 unit tests pass, typecheck clean. Nothing
+  is pushed or released.
+
 - 2026-11-07: The dreamer has a manual command. `/xerj-dreamer`, `/xerj
   dreamer`, and the palette run the RPC `dreamer`, which calls
   `Dreamer.runNow(sessionID, true)` for the latest session. A manual run
