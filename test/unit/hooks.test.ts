@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
+  formatCommandBlock,
   formatContextBlock,
   formatCorpusBlock,
   formatHintBlock,
+  formatPipeHint,
   registerSessionHooks,
   shouldRetrieve,
 } from "../../src/hooks/session.ts";
@@ -46,6 +48,20 @@ describe("context blocks", () => {
 
   test("wraps the corpus summary", () => {
     expect(formatCorpusBlock("42 records")).toBe("<xerj-corpus>\n42 records\n</xerj-corpus>");
+  });
+
+  test("the command block names the pipe habit it replaces", () => {
+    const block = formatCommandBlock();
+    expect(block).toContain("Do not pipe");
+    expect(block).toContain("head, tail, grep");
+    expect(block).toContain("xerj_run");
+  });
+
+  test("a filtered command gets its own hint", () => {
+    const hint = formatPipeHint("20260101T000000000Z");
+    expect(hint).toContain("piped to a text filter");
+    expect(hint).toContain("xerj_run");
+    expect(hint).toContain("20260101T000000000Z");
   });
 });
 
@@ -191,6 +207,9 @@ async function register(
     notes?: NoteStore;
     projectRoot?: string;
     readRecallFile?: (path: string) => Promise<string | null>;
+    takeCommandHint?: (
+      sessionID: string,
+    ) => { stem: string; lines: number; filtered?: boolean } | null;
   } = {},
 ): Promise<Hooks> {
   const hooks: Hooks = {
@@ -230,6 +249,7 @@ async function register(
     },
     projectRoot: overrides.projectRoot,
     readRecallFile: overrides.readRecallFile,
+    takeCommandHint: overrides.takeCommandHint,
   });
   return hooks;
 }
@@ -476,6 +496,18 @@ describe("context hook", () => {
     const second = contextEvent("s2");
     await hooks.ctx.handlers.context(second);
     expect(systemTexts(second).some((text) => text.includes("<xerj-corpus>"))).toBe(true);
+  });
+
+  test("a filtered command hint points at xerj_run", async () => {
+    const hooks = await register({
+      takeCommandHint: () => ({ stem: "stem1", lines: 3, filtered: true }),
+    });
+    const event = contextEvent("s1");
+    await hooks.ctx.handlers.context(event);
+    const text = systemTexts(event).join("\n");
+    expect(text).toContain("<xerj-cmd-hint>");
+    expect(text).toContain("piped to a text filter");
+    expect(text).toContain("xerj_run");
   });
 });
 

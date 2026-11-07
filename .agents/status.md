@@ -388,6 +388,16 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-07: The command-output instruction now names the habit it
+  replaces: do not pipe a command to head, tail, grep, sed, awk, or cut to
+  look at part of its output; run the command with `xerj_run` and read it
+  with `xerj_out show`/`search`. The old wording only said "long output",
+  which a `| grep` does not look like. A host `bash`/`shell` command that
+  uses one of those filters queues a `<xerj-cmd-hint>` for the next model
+  call even when the filtered result is short, because the full output never
+  reached the plugin. `sort`, `uniq`, and `wc` are not flagged: their result
+  is often the answer. The `xerj_run` description says the same.
+
 - 2026-11-07: Second audit pass. Fixed: `readProjectFile` accepted a path
   that escaped the project (`../../.ssh/id_rsa`), which `xerj_imports`,
   `xerj_inspect`, and the LSP inspect path could reach; it now resolves the

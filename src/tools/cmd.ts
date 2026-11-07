@@ -63,7 +63,7 @@ export function cmdTools(options: CmdToolOptions): ReadonlyArray<{
     {
       name: "run",
       description:
-        "Run one shell command and keep its output in the XERJ log directory instead of this window. Returns the exit code, duration, line and byte counts, and a stem; read the output with xerj_out show or xerj_out search. Use it for any command whose output you would otherwise paginate with head, tail, or grep.",
+        "Run one shell command and keep its output in the XERJ log directory instead of this window. Returns the exit code, duration, line and byte counts, and a stem; read the output with xerj_out show or xerj_out search. Use it instead of piping a command to head, tail, grep, sed, awk, or cut: the full output stays searchable and the window sees only the receipt.",
       input: RUN_INPUT,
       options: { namespace: "xerj" },
       execute: async (input) => {

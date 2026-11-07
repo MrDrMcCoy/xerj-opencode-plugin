@@ -7,6 +7,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_CONFIG } from "../../src/config.ts";
+import { isFilteredCommand } from "../../src/cmd/filter.ts";
 import { CmdService } from "../../src/cmd/service.ts";
 
 const logger = {
@@ -106,5 +107,15 @@ describe("CmdService.ingest", () => {
     } finally {
       cmd.stop();
     }
+  });
+});
+
+describe("isFilteredCommand", () => {
+  test("recognizes the pipe-to-filter habit", () => {
+    expect(isFilteredCommand("npm test 2>&1 | head -20")).toBe(true);
+    expect(isFilteredCommand("cat build.log | grep -i error")).toBe(true);
+    expect(isFilteredCommand("journalctl -u xerj | tail -n 100")).toBe(true);
+    expect(isFilteredCommand("find . -name '*.ts' | wc -l")).toBe(false);
+    expect(isFilteredCommand("npm test")).toBe(false);
   });
 });

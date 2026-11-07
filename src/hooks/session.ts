@@ -56,8 +56,10 @@ export interface SessionHookOptions {
   readonly onNoiseSkip?: () => void;
   /** Resets the idle deadline; called for every prompt and model call. */
   readonly onActivity?: (sessionID?: string) => void;
-  /** One command stems hint waiting for the next model call of a session. */
-  readonly takeCommandHint?: (sessionID: string) => { stem: string; lines: number } | null;
+  /** One command hint waiting for the next model call of a session. */
+  readonly takeCommandHint?: (
+    sessionID: string,
+  ) => { stem: string; lines: number; filtered?: boolean } | null;
   /** Stops the compaction watch when the plugin shuts down. */
   readonly signal?: AbortSignal;
   /** Project root used to re-read cited files after a compaction. */
@@ -162,12 +164,12 @@ export function formatCorpusBlock(summary: string): string {
 export function formatCommandBlock(): string {
   return [
     "<xerj-command-output>",
-    "Long command output belongs in the XERJ log directory, not in this window.",
-    "Run such a command with `xerj_run` (it writes cmd/<stem>-cmd.txt and",
-    "cmd/<stem>-out.txt and returns only the exit code and sizes), then read what",
-    "you need with `xerj_out show stem=<stem> start=120 end=160` or",
-    "`xerj_out search query=\"...\"`. Before repeating a command, `xerj_out list`",
-    "shows what already ran and how it ended.",
+    "Do not pipe a command to head, tail, grep, sed, awk, or cut to look at part",
+    "of its output. Run the command itself with `xerj_run`: it keeps the full",
+    "output in cmd/<stem>-out.txt and returns only the exit code and sizes. Then",
+    "use `xerj_out show stem=<stem> start=120 end=160` or",
+    "`xerj_out search query=\"...\"`. `xerj_out list` shows what already ran, so do",
+    "not re-run a command to see another part of it.",
     "</xerj-command-output>",
   ].join("\n");
 }
@@ -178,6 +180,17 @@ export function formatCommandHint(stem: string, lines: number): string {
     `That command wrote ${lines} lines to cmd/${stem}-out.txt.`,
     `Read a range with xerj_out show stem=${stem} start=1 end=120, or search it`,
     `with xerj_out search stem=${stem} query="...". Do not re-run it to see another part.`,
+    "</xerj-cmd-hint>",
+  ].join("\n");
+}
+
+/** A bash call that filtered its own output: the full text was never kept. */
+export function formatPipeHint(stem: string): string {
+  return [
+    "<xerj-cmd-hint>",
+    "That command was piped to a text filter, so only the filtered slice is in",
+    `cmd/${stem}-out.txt; XERJ never saw the full output. Run the unfiltered`,
+    "command with xerj_run and read any range with xerj_out show or xerj_out search.",
     "</xerj-cmd-hint>",
   ].join("\n");
 }
@@ -460,7 +473,10 @@ export async function registerSessionHooks(
     // stem, so the model reads it instead of running the command again.
     const hint = options.takeCommandHint?.(event.sessionID);
     if (hint !== null && hint !== undefined) {
-      const block = formatCommandHint(hint.stem, hint.lines);
+      const block =
+        hint.filtered === true
+          ? formatPipeHint(hint.stem)
+          : formatCommandHint(hint.stem, hint.lines);
       event.system.push({ type: "text", text: block });
       overhead += Buffer.byteLength(block, "utf8");
       injected = true;

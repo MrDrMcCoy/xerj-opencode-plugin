@@ -85,6 +85,7 @@ import { CommitIndex, type CommitSummary } from "./index/commits.ts";
 import { ArchiveIndex } from "./archive/index.ts";
 import { TurnArchive } from "./archive/turns.ts";
 import { CmdService } from "./cmd/service.ts";
+import { isFilteredCommand } from "./cmd/filter.ts";
 import { cmdTools } from "./tools/cmd.ts";
 import { registerCompactionArchive } from "./archive/window.ts";
 import { registerCompactionExtraction } from "./memory/extract.ts";
@@ -1145,7 +1146,10 @@ export default Plugin.define({
       ].join(" ");
     };
 
-    const commandHints = new Map<string, { stem: string; lines: number }>();
+    const commandHints = new Map<
+      string,
+      { stem: string; lines: number; filtered?: boolean }
+    >();
     // The local decision model is shared by every project in the installation;
     // one supervisor per plugin instance attaches to the first one.
     let jevos: JevosSupervisor | null = null;
@@ -1362,10 +1366,15 @@ export default Plugin.define({
                   mirror: async (command, text, options) => {
                     const entry = await runtime.cmd!.mirror(command, text, options);
                     if (entry === null) return null;
-                    if (entry.lines >= config.cmd.hintLines) {
+                    // A pipe to head/tail/grep means the full output never
+                    // reached the plugin. That is worth a hint even when the
+                    // filtered result is short.
+                    const filtered = isFilteredCommand(command);
+                    if (entry.lines >= config.cmd.hintLines || filtered) {
                       commandHints.set(event.sessionID, {
                         stem: entry.stem,
                         lines: entry.lines,
+                        filtered,
                       });
                     }
                     return { stem: entry.stem, lines: entry.lines };
