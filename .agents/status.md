@@ -289,6 +289,12 @@ test/unit/*.test.ts    pure-function tests
 
 ## Work in progress
 
+All gated engineering items are implemented and committed: local judge and
+autotune, window extraction, tree-sitter complexity, the hub tools, reference
+corpora, share links, the LSP pool, call hierarchy, and inspect. The two XL
+items (dreamer child sessions and notes) remain blocked on a host contract and
+a scheduler, both documented in `roadmap.md`. Nothing is pushed.
+
 The local distillation judge is the default and needs a restart to load.
 Distillation is on by default with `memory.distill.judge: "local"`, so setup
 starts a background install of the jevos binary and its 630 MB OpenVINO INT8
