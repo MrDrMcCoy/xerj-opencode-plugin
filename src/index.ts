@@ -134,6 +134,7 @@ import {
 } from "./telemetry/store.ts";
 import { JobKind, type OpType } from "./telemetry/types.ts";
 import { measuredTools } from "./tools/measure.ts";
+import { datasetRows } from "./datasets/rows.ts";
 import { buildTools } from "./tools/search.ts";
 
 interface Runtime {
@@ -2718,77 +2719,6 @@ function corpusHealth(runtime: Runtime): CorpusHealth[] {
 }
 
 /** Groups the node's indices into the corpora this plugin maintains. */
-function datasetRows(
-  indices: ReadonlyArray<IndexSummary>,
-  project: string,
-  git: string,
-  web: string,
-  external: string,
-  sysdocs: string,
-  cmd: string,
-  memoryNs: string,
-  brains: ReadonlyArray<BrainSpec>,
-): DatasetStatus[] {
-  const groups = [
-    {
-      name: "project",
-      matches: (index: string) =>
-        index.startsWith(`${project}-`) &&
-        !index.startsWith(`${project}-hidden-`) &&
-        !index.startsWith(`${project}-prjdocs-`) &&
-        !index.startsWith(`${project}-archive-`) &&
-        !index.startsWith(`${cmd}-`) &&
-        !index.startsWith(`${git}-`),
-    },
-    { name: "git", matches: (index: string) => index.startsWith(`${git}-`) },
-    {
-      name: "archive",
-      matches: (index: string) => index.startsWith(`${project}-archive-`),
-    },
-    {
-      name: "cmd",
-      matches: (index: string) => index.startsWith(`${cmd}-`),
-    },
-    {
-      name: "hidden",
-      matches: (index: string) => index.startsWith(`${project}-hidden-`),
-    },
-    {
-      name: "prjdocs",
-      matches: (index: string) => index.startsWith(`${project}-prjdocs-`),
-    },
-    { name: "web", matches: (index: string) => index.startsWith(`${web}-`) },
-    {
-      name: "external",
-      matches: (index: string) => index.startsWith(`${external}-`),
-    },
-    {
-      name: "sysdocs",
-      matches: (index: string) => index.startsWith(`${sysdocs}-`),
-    },
-    ...brains.map((brain) => ({
-      name: `brain:${brain.name}`,
-      matches: (index: string) => index.startsWith(`${brain.prefix}-`),
-    })),
-    {
-      name: "memory",
-      matches: (index: string) => index === `.xerj-memory-${memoryNs}`,
-    },
-  ];
-
-  return groups
-    .map((group) => {
-      const matched = indices.filter((entry) => group.matches(entry.index));
-      return {
-        name: group.name,
-        docs: matched.reduce((total, entry) => total + entry.docs, 0),
-        bytes: matched.reduce((total, entry) => total + entry.bytes, 0),
-      };
-    })
-    .filter((dataset) => dataset.docs > 0 || dataset.bytes > 0);
-}
-
-
 async function pathExists(path: string): Promise<boolean> {
   try {
     await stat(path);

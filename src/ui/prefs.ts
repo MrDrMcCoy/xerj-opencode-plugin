@@ -8,7 +8,10 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { parseJsonc } from "../jsonc.ts";
 import type { Logger } from "../log.ts";
+
+export { parseJsonc };
 
 export const PREFS_FILE_ENV = "OPENCODE_TUI_PREFERENCES_FILE";
 export const PREFS_KEY = "xerj";
@@ -58,27 +61,6 @@ export function prefsFilePath(): string {
     process.env.OPENCODE_CONFIG_DIR ??
     join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "opencode");
   return join(configDir, FILE_NAME);
-}
-
-/**
- * JSON with comments and trailing commas, which is what this file uses. A
- * failure returns an empty object: a broken shared file must not take the
- * sidebar down with it.
- */
-export function parseJsonc(text: string): Record<string, unknown> {
-  const withoutComments = text
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/(^|[^:])\/\/.*$/gm, "$1");
-  const withoutTrailing = withoutComments.replace(/,(\s*[}\]])/g, "$1");
-
-  try {
-    const parsed: unknown = JSON.parse(withoutTrailing);
-    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : {};
-  } catch {
-    return {};
-  }
 }
 
 function record(value: unknown): Record<string, unknown> {
