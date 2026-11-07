@@ -52,6 +52,15 @@ export interface MemoryStatus {
   readonly exists: boolean;
   /** Memories whose every named path is gone; set by the verification pass. */
   readonly stale: number;
+  /** The active local-judge floor and the last autotune result. */
+  readonly tuning?: TuningStatus;
+}
+
+export interface TuningStatus {
+  readonly threshold: number;
+  readonly autotuned: boolean;
+  readonly tunedAt: string | null;
+  readonly f1: number | null;
 }
 
 export interface CitedFileStatus {
@@ -391,15 +400,25 @@ const definition = {
             }),
           },
         }),
-        memory: object({
-          namespace: { type: "string" },
-          count: { type: "number" },
-          // The host builds the response from this schema, so a field the type
-          // declares but the schema does not is dropped before the TUI reads
-          // it. That is what a sidebar reading `exists` off nothing looks like.
-          exists: { type: "boolean" },
-          stale: { type: "number" },
-        }),
+        memory: object(
+          {
+            namespace: { type: "string" },
+            count: { type: "number" },
+            // The host builds the response from this schema, so a field the
+            // type declares but the schema does not is dropped before the TUI
+            // reads it. That is what a sidebar reading `exists` off nothing
+            // looks like.
+            exists: { type: "boolean" },
+            stale: { type: "number" },
+            tuning: object({
+              threshold: { type: "number" },
+              autotuned: { type: "boolean" },
+              tunedAt: { type: ["string", "null"] },
+              f1: { type: ["number", "null"] },
+            }),
+          },
+          ["tuning"],
+        ),
         brains: {
           type: "array",
           items: object({

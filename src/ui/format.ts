@@ -553,6 +553,18 @@ export function panelSections(snapshot: StatusSnapshot, now: number): PanelSecti
             (memory.stale > 0 ? ` · ${formatCount(memory.stale)} stale` : ""),
           memory.namespace,
         ].join(" · "),
+        ...(memory.tuning === undefined
+          ? []
+          : [
+              `judge floor ${memory.tuning.threshold.toFixed(2)}` +
+                (memory.tuning.autotuned ? " · autotuned" : "") +
+                (memory.tuning.tunedAt === null
+                  ? ""
+                  : ` · ${memory.tuning.tunedAt.slice(0, 10)}`) +
+                (memory.tuning.f1 === null
+                  ? ""
+                  : ` · F1 ${formatPercent(memory.tuning.f1)}`),
+            ]),
       ],
     },
     {

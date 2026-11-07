@@ -381,6 +381,21 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-07: Autotune is implemented and on by default. Ten minutes after
+  setup, and every 24 hours after, the autotuner replays the fixed labelled
+  set through the live jevos model, sweeps nine thresholds, and adopts one only
+  when its F1 beats the active floor by `margin` (5 points). It never learns
+  from unlabelled turns; the fixed set is a stability check, so a stable model
+  leaves the floor alone. The chosen value and the evidence live in
+  `<data root>/jev/autotune.json`; changing `local.threshold` in config
+  discards the saved value, and `autotune.enabled: false` removes the pass.
+  The pass costs about twenty short judgements and runs in the background.
+  The panel's Memory section reports the floor, whether it was autotuned, the
+  date, and F1. The labelled set moved to `src/memory/labels.ts` so the
+  runtime and the scripts use one copy. Five autotune tests cover adoption,
+  the margin, too few answers, state reload, and a changed config; 1226 unit
+  tests pass and typecheck is clean. Nothing is pushed or released.
+
 - 2026-11-06: The local judge has a tuning loop and a measured floor. Every
   captured judgement can be replayed through four keep questions and nine
   thresholds with `bun run replay:judge`; labels added to the JSONL survive a

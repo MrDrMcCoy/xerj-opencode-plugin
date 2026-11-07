@@ -16,6 +16,13 @@ import { join, resolve } from "node:path";
 import { DEFAULT_CONFIG } from "../src/config.ts";
 import { JEVOS_KEEP_INSTRUCTIONS } from "../src/jev/judge.ts";
 import { ACCEPT, REPORTS, REJECT } from "./distill-labels.ts";
+import {
+  bestRow,
+  confusion,
+  sweep,
+  type Confusion,
+  type SweepRow,
+} from "../src/jev/autotune.ts";
 import { parseSamples, type JudgeRecord } from "./tune-local.ts";
 
 export interface Wording {
@@ -46,71 +53,6 @@ export const WORDINGS: ReadonlyArray<Wording> = [
     invert: true,
   },
 ];
-
-export interface Confusion {
-  readonly tp: number;
-  readonly fp: number;
-  readonly fn: number;
-  readonly tn: number;
-  readonly precision: number;
-  readonly recall: number;
-  readonly f1: number;
-}
-
-/** Confusion at one threshold; `invert` keeps a low score. */
-export function confusion(
-  scores: readonly (number | null)[],
-  labels: readonly boolean[],
-  threshold: number,
-  invert = false,
-): Confusion {
-  let tp = 0;
-  let fp = 0;
-  let fn = 0;
-  let tn = 0;
-  for (let index = 0; index < scores.length; index += 1) {
-    const score = scores[index];
-    const label = labels[index];
-    if (score === null || score === undefined || label === undefined) continue;
-    const keep = invert ? score <= threshold : score >= threshold;
-    if (keep && label) tp += 1;
-    else if (keep) fp += 1;
-    else if (label) fn += 1;
-    else tn += 1;
-  }
-  const precision = tp + fp === 0 ? 0 : tp / (tp + fp);
-  const recall = tp + fn === 0 ? 0 : tp / (tp + fn);
-  const f1 =
-    precision + recall === 0
-      ? 0
-      : (2 * precision * recall) / (precision + recall);
-  return { tp, fp, fn, tn, precision, recall, f1 };
-}
-
-export interface SweepRow {
-  readonly threshold: number;
-  readonly confusion: Confusion;
-}
-
-export function sweep(
-  scores: readonly (number | null)[],
-  labels: readonly boolean[],
-  thresholds: readonly number[],
-  invert = false,
-): SweepRow[] {
-  return thresholds.map((threshold) => ({
-    threshold,
-    confusion: confusion(scores, labels, threshold, invert),
-  }));
-}
-
-export function bestRow(rows: readonly SweepRow[]): SweepRow | null {
-  let best: SweepRow | null = null;
-  for (const row of rows) {
-    if (best === null || row.confusion.f1 > best.confusion.f1) best = row;
-  }
-  return best;
-}
 
 function arg(name: string): string | undefined {
   const index = process.argv.indexOf(name);
@@ -332,6 +274,9 @@ export async function run(): Promise<void> {
     }
   }
 }
+
+export { bestRow, confusion, sweep };
+export type { Confusion, SweepRow };
 
 if (import.meta.main) {
   void run().catch((error: unknown) => {

@@ -95,6 +95,7 @@ import { makeModelJudge, startDistillRetention, type ModelJudge } from "./memory
 import { JevosManager } from "./jev/manager.ts";
 import { JevosSupervisor } from "./jev/supervisor.ts";
 import { makeJevosJudge } from "./jev/judge.ts";
+import { Autotuner, type TuningView } from "./jev/autotune.ts";
 import { jevosTarget, normaliseVersion } from "./jev/release.ts";
 import { migrateMemoryIndex, migrateProjectStorage } from "./memory/migrate.ts";
 import { RemoteSpool } from "./remote/spool.ts";
@@ -548,7 +549,13 @@ export default Plugin.define({
           netTokens: usage.netTokens,
           topFiles: usage.topFiles,
         },
-        memory: { namespace: memoryNs, count: 0, exists: false, stale: 0 },
+        memory: {
+          namespace: memoryNs,
+          count: 0,
+          exists: false,
+          stale: 0,
+          ...(tuningView === null ? {} : { tuning: tuningView }),
+        },
         brains: brainStatus(runtime.brain, runtime.brains),
         corpora: baseCorpora,
         // The memory check needs the node, which this base path has not
@@ -709,6 +716,7 @@ export default Plugin.define({
               0,
             exists:
               summary?.exists ?? datasets.some((dataset) => dataset.name === "memory"),
+            ...(tuningView === null ? {} : { tuning: tuningView }),
           },
         };
       } catch (error) {
@@ -1075,6 +1083,8 @@ export default Plugin.define({
     // The local decision model is shared by every project in the installation;
     // one supervisor per plugin instance attaches to the first one.
     let jevos: JevosSupervisor | null = null;
+    let autotuner: Autotuner | null = null;
+    let tuningView: TuningView | null = null;
 
     const tools = buildTools({
       config,
@@ -1910,6 +1920,63 @@ export default Plugin.define({
               // The first install downloads about 630 MB; do it in the
               // background so setup never waits on it.
               void jevos.ensure();
+              let activeThreshold = local.threshold / 100;
+              tuningView = {
+                threshold: activeThreshold,
+                autotuned: false,
+                tunedAt: null,
+                f1: null,
+              };
+              const supervisor = jevos;
+              autotuner = new Autotuner({
+                enabled: local.autotune.enabled,
+                intervalMs: local.autotune.intervalMs,
+                initialDelayMs: local.autotune.initialDelayMs,
+                margin: local.autotune.margin / 100,
+                minSamples: local.autotune.minSamples,
+                statePath: join(root, "jev", "autotune.json"),
+                logger,
+                configThreshold: local.threshold / 100,
+                onThreshold: (value) => {
+                  activeThreshold = value;
+                },
+                onState: (view) => {
+                  tuningView = view;
+                },
+                ask: async (text) => {
+                  const base = await supervisor.ensure();
+                  if (base === null) return null;
+                  const verdict = await makeJevosJudge({
+                    baseUrl: base,
+                    threshold: activeThreshold,
+                    kindConfidence: local.kindConfidence / 100,
+                    timeoutMs: local.timeoutMs,
+                    logger,
+                  })(
+                    {
+                      text,
+                      kind: "note",
+                      score: 0.5,
+                      origin: "answer",
+                      reason: "autotune",
+                    },
+                    { prompt: "", answer: "" },
+                  ).catch(() => null);
+                  return verdict?.score ?? null;
+                },
+                record: (result) =>
+                  telemetry.record("memory.distill.autotune", 0, true, {
+                    from: result.from,
+                    to: result.to,
+                    candidate: result.candidate,
+                    f1: Number(result.f1.toFixed(4)),
+                    precision: Number(result.precision.toFixed(4)),
+                    recall: Number(result.recall.toFixed(4)),
+                    samples: result.samples,
+                    applied: result.applied,
+                  }),
+              });
+              void autotuner.start(shutdown.signal);
               localJudge = async (candidate, turn) => {
                 const supervisor = jevos!;
                 // A first install can take minutes; a turn must not wait for
@@ -1936,7 +2003,7 @@ export default Plugin.define({
                 try {
                   return await makeJevosJudge({
                     baseUrl: base,
-                    threshold: local.threshold / 100,
+                    threshold: activeThreshold,
                     kindConfidence: local.kindConfidence / 100,
                     timeoutMs: local.timeoutMs,
                     logger,
@@ -2089,6 +2156,7 @@ export default Plugin.define({
       void (async () => {
         try {
           runtime.cmd?.stop();
+          autotuner?.stop();
           await jevos?.stop();
           await runtime.lifecycle?.stop();
           await stopIndexers();

@@ -241,6 +241,20 @@ export interface LocalJudgeOptions {
   readonly downloadTimeoutMs: number;
   /** Deadline for the server to answer its first health probe. */
   readonly startupTimeoutMs: number;
+  /** Periodic calibration of the keep floor. */
+  readonly autotune: LocalAutotuneOptions;
+}
+
+export interface LocalAutotuneOptions {
+  readonly enabled: boolean;
+  /** Time between calibration passes. */
+  readonly intervalMs: number;
+  /** Delay after setup before the first pass. */
+  readonly initialDelayMs: number;
+  /** F1 points a candidate needs over the active floor, as a percentage. */
+  readonly margin: number;
+  /** Answered samples a pass needs before it can decide. */
+  readonly minSamples: number;
 }
 
 export interface StatsOptions {
@@ -428,6 +442,13 @@ export const DEFAULT_CONFIG: Config = {
         kindConfidence: 40,
         downloadTimeoutMs: 900_000,
         startupTimeoutMs: 120_000,
+        autotune: {
+          enabled: true,
+          intervalMs: 86_400_000,
+          initialDelayMs: 600_000,
+          margin: 5,
+          minSamples: 12,
+        },
       },
     },
   },
@@ -482,6 +503,7 @@ export function loadConfig(
   const retain = asObject(memory.retain);
   const distill = asObject(memory.distill);
   const local = asObject(distill.local);
+  const tune = asObject(local.autotune);
   const stats = asObject(root.stats);
   const telemetry = asObject(root.telemetry);
   const cmd = asObject(root.cmd);
@@ -1061,6 +1083,46 @@ export function loadConfig(
             "memory.distill.local.startupTimeoutMs",
             warnings,
           ),
+          autotune: {
+            enabled: readBoolean(
+              tune.enabled,
+              DEFAULT_CONFIG.memory.distill.local.autotune.enabled,
+              "memory.distill.local.autotune.enabled",
+              warnings,
+            ),
+            intervalMs: readInteger(
+              tune.intervalMs,
+              DEFAULT_CONFIG.memory.distill.local.autotune.intervalMs,
+              3_600_000,
+              604_800_000,
+              "memory.distill.local.autotune.intervalMs",
+              warnings,
+            ),
+            initialDelayMs: readInteger(
+              tune.initialDelayMs,
+              DEFAULT_CONFIG.memory.distill.local.autotune.initialDelayMs,
+              0,
+              86_400_000,
+              "memory.distill.local.autotune.initialDelayMs",
+              warnings,
+            ),
+            margin: readInteger(
+              tune.margin,
+              DEFAULT_CONFIG.memory.distill.local.autotune.margin,
+              0,
+              50,
+              "memory.distill.local.autotune.margin",
+              warnings,
+            ),
+            minSamples: readInteger(
+              tune.minSamples,
+              DEFAULT_CONFIG.memory.distill.local.autotune.minSamples,
+              2,
+              200,
+              "memory.distill.local.autotune.minSamples",
+              warnings,
+            ),
+          },
         },
       },
     },

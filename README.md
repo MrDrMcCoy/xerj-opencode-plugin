@@ -327,7 +327,14 @@ This is the complete set with its defaults, in
               "threshold": 20,           // P(keep) floor, percent
               "kindConfidence": 40,      // kind choice floor, percent
               "downloadTimeoutMs": 900000, // 630 MB model download
-              "startupTimeoutMs": 120000 // model load + first health
+              "startupTimeoutMs": 120000, // model load + first health
+              "autotune": {               // periodic floor calibration
+                "enabled": true,          // on; replays the labeled set
+                "intervalMs": 86400000,   // once a day
+                "initialDelayMs": 600000, // first pass after setup
+                "margin": 5,              // F1 points needed to move the floor
+                "minSamples": 12          // answered samples needed
+              }
             }
           }
         },
@@ -439,6 +446,11 @@ The same entry works with a checkout path instead of the package name; see
 | `memory.distill.local.kindConfidence` | Minimum choice confidence before the model's kind replaces the heuristic class. |
 | `memory.distill.local.downloadTimeoutMs` | Deadline for the one-time 630 MB model download. |
 | `memory.distill.local.startupTimeoutMs` | Deadline for the server to answer its first health probe. |
+| `memory.distill.local.autotune.enabled` | Periodically replay the labeled set and move the floor only when F1 clears a margin. On by default. |
+| `memory.distill.local.autotune.intervalMs` | Time between autotune passes; one day by default. |
+| `memory.distill.local.autotune.initialDelayMs` | Delay after setup before the first pass. |
+| `memory.distill.local.autotune.margin` | F1 percentage points a candidate needs over the active floor. |
+| `memory.distill.local.autotune.minSamples` | Answered samples a pass needs before it can decide. |
 | `index.graph` | Index the project as one graph corpus (a "super brain"): sections, symbols, `path:line`, and edges. On by default; `false` restores the flat `--no-graph` corpus with the engine's own watcher. A change rebuilds the project corpus once. |
 | `index.semantic` | Include the semantic retrieval leg. |
 | `index.neural` | Embed passages with the node's neural model (`--embed-mode neural`). Set `false` for lexical embeddings. Changing it rebuilds the project index once; neural indexing is roughly ten times slower than lexical. |
@@ -736,7 +748,17 @@ state is the sentence alone.
 The model is small on purpose. It runs on the CPU, the first call after a
 start takes about 1.5 s and later calls about 200 ms on four threads, and the
 server holds about 1.2 GB resident with the context and state cache kept to
-one short sentence. `local.path` points at a pre-installed directory holding
+one short sentence.
+
+The floor is calibrated on a schedule. Ten minutes after setup, and once a day
+after that, `memory.distill.local.autotune` replays the labeled set through the
+live model and adopts a different threshold only when its F1 beats the active
+one by `margin`. A stable model leaves the floor alone; a model, wording, or
+tokenizer change is what moves it. The chosen value and the evidence live in
+`<data root>/jev/autotune.json`, and the panel's Memory section shows
+`judge floor 0.20 · autotuned · date · F1`. Changing `local.threshold` yourself
+discards the saved value and starts from the new config. Turning the feature off
+leaves the heuristic and every previous memory untouched. `local.path` points at a pre-installed directory holding
 `bin/jev` and `model/` when the machine already has one; `local.port` is the
 loopback port the plugin attaches to or starts on; `local.threads` sets the
 OpenVINO worker count, and 0 uses every logical CPU.

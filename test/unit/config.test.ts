@@ -352,6 +352,13 @@ describe("memory distillation", () => {
         kindConfidence: 40,
         downloadTimeoutMs: 900000,
         startupTimeoutMs: 120000,
+        autotune: {
+          enabled: true,
+          intervalMs: 86400000,
+          initialDelayMs: 600000,
+          margin: 5,
+          minSamples: 12,
+        },
       },
     });
   });

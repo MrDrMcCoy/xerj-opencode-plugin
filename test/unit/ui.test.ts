@@ -96,7 +96,18 @@ function snapshot(overrides: Partial<StatusSnapshot> = {}): StatusSnapshot {
       netTokens: 42_000,
       topFiles: [{ path: "src/a.ts", citations: 3, bytes: 4_000 }],
     },
-    memory: { namespace: "proj-demo-1a2b3c4d", count: 2, exists: true, stale: 0 },
+    memory: {
+      namespace: "proj-demo-1a2b3c4d",
+      count: 2,
+      exists: true,
+      stale: 0,
+      tuning: {
+        threshold: 0.2,
+        autotuned: true,
+        tunedAt: "2026-11-07T10:00:00.000Z",
+        f1: 0.88,
+      },
+    },
     brains: [],
     disk: { engineBytes: 1024, logBytes: 2048 },
     map: [],
@@ -217,6 +228,29 @@ describe("sidebarLines", () => {
 });
 
 describe("panelSections", () => {
+  test("shows the local judge floor and its autotune result", () => {
+    const base = snapshot();
+    const sections = panelSections(
+      {
+        ...base,
+        memory: {
+          ...base.memory,
+          tuning: {
+            threshold: 0.2,
+            autotuned: true,
+            tunedAt: "2026-11-07T10:00:00.000Z",
+            f1: 0.88,
+          },
+        },
+      },
+      NOW,
+    );
+    const memory = sections.find((section) => section.title === "Memory");
+    expect(memory?.lines.join("\n")).toContain(
+      "judge floor 0.20 · autotuned · 2026-11-07 · F1 88%",
+    );
+  });
+
   test("the index section reports what the data occupies", () => {
     const index = panelSections(snapshot(), NOW).find((section) => section.title === "Index");
     const text = index?.lines.join("\n") ?? "";
@@ -648,6 +682,7 @@ describe("status output schema", () => {
     expect(delivered.frameworks).not.toBeUndefined();
     expect(delivered.memory.exists).not.toBeUndefined();
     expect(delivered.memory.stale).not.toBeUndefined();
+    expect(delivered.memory.tuning).not.toBeUndefined();
     expect(delivered.embeddings).not.toBeUndefined();
     expect(() => sidebarView(delivered, NOW, {
       corpora: true,
