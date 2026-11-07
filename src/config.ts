@@ -340,6 +340,20 @@ export interface Config {
   readonly telemetry: TelemetryOptions;
   readonly cmd: CmdOptions;
   readonly hub: HubOptions;
+  readonly analysis: AnalysisOptions;
+}
+
+export interface AnalysisOptions {
+  readonly treeSitter: TreeSitterOptions;
+}
+
+export interface TreeSitterOptions {
+  /** Register the structural tools and parse project files. Off by default. */
+  readonly enabled: boolean;
+  /** Empty means detect from the project's extensions. */
+  readonly languages: ReadonlyArray<string>;
+  /** Files above this are skipped. */
+  readonly maxParseBytes: number;
 }
 
 export interface HubOptions {
@@ -484,6 +498,13 @@ export const DEFAULT_CONFIG: Config = {
     },
   },
   stats: { enabled: true, bytesPerToken: 4, maxBaselineBytes: 128 * 1024 },
+  analysis: {
+    treeSitter: {
+      enabled: false,
+      languages: [],
+      maxParseBytes: 1_048_576,
+    },
+  },
   hub: {
     enabled: false,
     network: false,
@@ -548,6 +569,8 @@ export function loadConfig(
   const telemetry = asObject(root.telemetry);
   const cmd = asObject(root.cmd);
   const hub = asObject(root.hub);
+  const analysis = asObject(root.analysis);
+  const treeSitter = asObject(analysis.treeSitter);
 
   const envUrl = env.XERJ_URL?.trim();
 
@@ -1209,6 +1232,29 @@ export function loadConfig(
         "stats.maxBaselineBytes",
         warnings,
       ),
+    },
+    analysis: {
+      treeSitter: {
+        enabled: readBoolean(
+          treeSitter.enabled,
+          DEFAULT_CONFIG.analysis.treeSitter.enabled,
+          "analysis.treeSitter.enabled",
+          warnings,
+        ),
+        languages: readStringArray(
+          treeSitter.languages,
+          "analysis.treeSitter.languages",
+          warnings,
+        ),
+        maxParseBytes: readInteger(
+          treeSitter.maxParseBytes,
+          DEFAULT_CONFIG.analysis.treeSitter.maxParseBytes,
+          1024,
+          16_777_216,
+          "analysis.treeSitter.maxParseBytes",
+          warnings,
+        ),
+      },
     },
     hub: {
       enabled: readBoolean(

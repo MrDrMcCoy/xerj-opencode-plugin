@@ -5,6 +5,10 @@ import { join } from "node:path";
 import { DEFAULT_CONFIG } from "../../src/config.ts";
 import { buildTools } from "../../src/tools/search.ts";
 
+const TREE_STUB = {
+  report: async () => ({ files: 0, functions: [], duplicates: [] }),
+} as never;
+
 const HUB_STUB = {
   ask: async () => ({ ok: false, text: "hub disabled" }),
   find: async () => ({ ok: false, text: "hub disabled" }),
@@ -60,6 +64,7 @@ function toolFor(
     getSpool: () => (overrides.spool ?? null) as never,
     getAnomaly: () => (overrides.anomaly ?? null) as never,
     hub: HUB_STUB,
+    treeSitter: TREE_STUB,
     snapshot: async () => status,
     ledger: {
       recordQuery: async (_session: string, paths: string[], bytes: number, hits: number) => {
@@ -152,6 +157,7 @@ describe("the rest of the tool surface", () => {
       getSpool: () => (overrides.spool ?? null) as never,
       getAnomaly: () => (overrides.anomaly ?? null) as never,
       hub: HUB_STUB,
+      treeSitter: TREE_STUB,
 
       snapshot: async () => snapshot(),
       ledger: { recordQuery: async () => {} } as never,
@@ -481,6 +487,7 @@ describe("dataset tool", () => {
       getSpool: () => null,
       getAnomaly: () => null,
       hub: HUB_STUB,
+      treeSitter: TREE_STUB,
 
       snapshot: async () => ({}) as never,
     }) as never;
@@ -595,6 +602,7 @@ describe("dataset tool export and import", () => {
       getSpool: () => null,
       getAnomaly: () => null,
       hub: HUB_STUB,
+      treeSitter: TREE_STUB,
       snapshot: async () => ({}) as never,
     });
     const tool = tools.find((candidate) => candidate.name === "dataset");
@@ -644,6 +652,7 @@ describe("dataset tool export and import", () => {
       getSpool: () => null,
       getAnomaly: () => null,
       hub: HUB_STUB,
+      treeSitter: TREE_STUB,
       snapshot: async () => ({}) as never,
     });
     const tool = tools.find((candidate) => candidate.name === "dataset");

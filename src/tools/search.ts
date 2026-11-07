@@ -19,6 +19,7 @@ import type { Logger } from "../log.ts";
 import type { SearchService } from "../search/service.ts";
 import type { StatusSnapshot } from "../rpc.ts";
 import type { HubService } from "../hub/service.ts";
+import type { TreeSitterService } from "../analysis/treesitter.ts";
 
 export interface ToolOptions {
   readonly config: Config;
@@ -35,6 +36,7 @@ export interface ToolOptions {
   /** The raw turn archive; null when archiving is disabled. */
   readonly getArchive: () => TurnArchive | null;
   readonly hub: HubService;
+  readonly treeSitter: TreeSitterService;
   readonly snapshot: () => Promise<StatusSnapshot>;
 }
 
@@ -886,6 +888,7 @@ export function buildTools(options: ToolOptions): ReadonlyArray<{
       },
     },
     ...(options.config.hub.enabled ? hubTools(options) : []),
+    ...(options.config.analysis.treeSitter.enabled ? [complexityTool(options)] : []),
   ];
 }
 
@@ -935,6 +938,113 @@ const HUB_INPUT = {
   required: ["action"],
   additionalProperties: false,
 } as const;
+
+const COMPLEXITY_INPUT = {
+  type: "object",
+  properties: {
+    path: {
+      type: "string",
+      description: "One project-relative file; omit to scan the project.",
+    },
+    top: {
+      type: "number",
+      description: "Functions to list (1-100, default 20).",
+    },
+    min_nodes: {
+      type: "number",
+      description: "Minimum named nodes for a duplicate group (default 40).",
+    },
+  },
+  additionalProperties: false,
+} as const;
+
+/** Structural complexity and duplicates; registered with the tree-sitter gate. */
+function complexityTool(options: ToolOptions): {
+  name: string;
+  description: string;
+  input: unknown;
+  options: { namespace: string };
+  execute: (input: unknown) => Promise<unknown>;
+} {
+  return {
+    name: "complexity",
+    description:
+      "Parse project files with tree-sitter and report the functions with the most nodes, plus groups of structurally identical functions. Use it to find the hard parts of a file or copied implementations before editing. Reads the tree, not the index.",
+    input: COMPLEXITY_INPUT,
+    options: { namespace: "xerj" },
+    execute: async (input) => {
+      const args = input as { path?: string; top?: number; min_nodes?: number };
+      try {
+        const report = await options.treeSitter.report({
+          path: args.path,
+          top: Math.max(1, Math.min(args.top ?? 20, 100)),
+          minNodes: Math.max(5, args.min_nodes ?? 40),
+        });
+        return {
+          content: formatStructure(report),
+          metadata: {
+            xerj: {
+              files: report.files,
+              functions: report.functions.length,
+              duplicates: report.duplicates.length,
+            },
+          },
+        };
+      } catch (error) {
+        return {
+          content: `Tree-sitter is unavailable: ${String(error)}`,
+          metadata: { xerj: { files: 0, functions: 0, duplicates: 0 } },
+        };
+      }
+    },
+  };
+}
+
+function formatStructure(report: {
+  readonly files: number;
+  readonly functions: ReadonlyArray<{
+    readonly name: string;
+    readonly path: string;
+    readonly startLine: number;
+    readonly nodes: number;
+    readonly lines: number;
+    readonly kind: string;
+  }>;
+  readonly duplicates: ReadonlyArray<{
+    readonly nodes: number;
+    readonly members: ReadonlyArray<{
+      readonly path: string;
+      readonly startLine: number;
+      readonly name: string;
+    }>;
+  }>;
+}): string {
+  if (report.functions.length === 0) {
+    return "No functions parsed. The project has no files for the configured tree-sitter languages.";
+  }
+  const lines = [
+    `${report.functions.length} functions in ${report.files} files`,
+    ...report.functions.map(
+      (fn) =>
+        `${fn.name}  ${fn.path}:${fn.startLine} · ${fn.lines} lines · ${fn.nodes} nodes` +
+        ` · ${fn.kind}`,
+    ),
+  ];
+  if (report.duplicates.length === 0) {
+    lines.push("", "No structural duplicates at this size.");
+  } else {
+    lines.push("", "Duplicate structures:");
+    for (const group of report.duplicates) {
+      lines.push(
+        `${group.nodes} nodes: ` +
+          group.members
+            .map((member) => `${member.name} (${member.path}:${member.startLine})`)
+            .join(", "),
+      );
+    }
+  }
+  return lines.join("\n");
+}
 
 /** The hub surface; registered only when `hub.enabled` is true. */
 function hubTools(options: ToolOptions): ReadonlyArray<{

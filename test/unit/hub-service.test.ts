@@ -3,6 +3,10 @@ import { DEFAULT_CONFIG } from "../../src/config.ts";
 import { HubService, type RunResult } from "../../src/hub/service.ts";
 import { buildTools } from "../../src/tools/search.ts";
 
+const TREE_STUB = {
+  report: async () => ({ files: 0, functions: [], duplicates: [] }),
+} as never;
+
 const logger = {
   debug: () => {},
   info: () => {},
@@ -75,6 +79,7 @@ describe("hub tools", () => {
       getSpool: () => null,
       getAnomaly: () => null,
       hub,
+      treeSitter: TREE_STUB,
       snapshot: async () => ({}) as never,
     }).map((tool) => tool.name);
   }

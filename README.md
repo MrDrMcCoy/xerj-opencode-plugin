@@ -364,6 +364,13 @@ This is the complete set with its defaults, in
           "timeoutMs": 600000,          // deadline for one xerj_run
           "hintLines": 40               // a mirrored result past this queues a hint
         },
+        "analysis": {
+          "treeSitter": {               // structural parsing; off by default
+            "enabled": false,           // registers xerj_complexity
+            "languages": [],            // empty detects from the project
+            "maxParseBytes": 1048576    // files above this are skipped
+          }
+        },
         "hub": {                        // signed pre-indexed corpora
           "enabled": false,             // registers xerj_ask and xerj_hub
           "network": false,             // cached packs only until true
@@ -504,6 +511,9 @@ The same entry works with a checkout path instead of the package name; see
 | `cmd.showTokens` | Output budget for one `xerj_out show`. |
 | `cmd.timeoutMs` | Deadline for one `xerj_run` command. |
 | `cmd.hintLines` | A mirrored command result past this many lines queues one hint for the next turn. |
+| `analysis.treeSitter.enabled` | Register `xerj_complexity`, download the grammar pack, and parse project files. Off by default. |
+| `analysis.treeSitter.languages` | Grammar ids to parse. Empty detects from file extensions. |
+| `analysis.treeSitter.maxParseBytes` | Files above this are skipped. |
 | `hub.enabled` | Register `xerj_ask` and `xerj_hub`. Off by default. |
 | `hub.network` | Allow pack and catalogue downloads. When false, only cached packs answer. |
 | `hub.hosted` | `off`, `auto`, or `on`: may a question be sent to the hosted hub? |
@@ -953,11 +963,34 @@ index can answer, and none writes a project file.
 | `xerj_prjdocs` | `eager?`, `keywords?` | Index official docs for the project's stack. |
 | `xerj_ask` | `question`, `corpus?`, `mode?`, `symbol?`, `max_tokens?` | Ask a signed, pre-indexed hub corpus. Registered when `hub.enabled` is on. |
 | `xerj_hub` | `action`, `query?`, `k?` | Sync the catalogue, find corpora, or show cache status. Registered with `hub.enabled`. |
+| `xerj_complexity` | `path?`, `top?`, `min_nodes?` | Function sizes and structural duplicates through tree-sitter. Registered with `analysis.treeSitter.enabled`. |
 
 The turn archive is one file per session under the project's node directory,
 capped by `context.archiveMaxBytes`. Before the host compacts, the plugin
 appends the messages the summary will replace, so tool output stays available
 to `xerj_expand`.
+
+[Back to top](#table-of-contents)
+
+## Structural analysis
+
+`analysis.treeSitter.enabled` (off by default) adds `xerj_complexity`, which
+parses project files and reports the functions with the most nodes plus groups
+of structurally identical functions. It answers "where is the hard part" and
+"is this copied" from the tree itself, before an edit.
+
+The first call downloads the pinned `tree-sitter-wasms` pack: 4.4 MB
+compressed, about 50 MB unpacked, verified against its npm sha512 and installed
+under `<data root>/grammars/0.1.13/`. One download covers every grammar the pack
+ships. The analyzer maps `.ts` and `.tsx` (plus JavaScript, Python, Rust, Go,
+Java, C/C++, Ruby, PHP, Kotlin, Lua, and shell) to those grammars; an empty
+`languages` list parses whatever the project contains. Files above
+`maxParseBytes` are skipped, and a failed download reports the reason and
+leaves every other tool working.
+
+The pack is cached outside the project, shared by every project in the
+installation, and is never bundled in the npm package. Turning the gate off
+registers no tool and downloads nothing.
 
 [Back to top](#table-of-contents)
 

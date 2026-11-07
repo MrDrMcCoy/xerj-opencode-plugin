@@ -381,6 +381,23 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-07: The tree-sitter layer and `xerj_complexity` are implemented
+  behind `analysis.treeSitter.enabled` (off). The first call downloads the
+  pinned `tree-sitter-wasms` 0.1.13 tarball (4.4 MB compressed, about 50 MB
+  unpacked) from npm, verifies its sha512 in streaming, extracts it into
+  `<data root>/grammars/0.1.13/out`, and reuses it for every project. The
+  analyzer lazily loads `web-tree-sitter`, maps `.ts`/`.tsx` and ten other
+  extensions to their grammars, parses files under `maxParseBytes`, and
+  reports the largest functions by named-node count plus groups of
+  structurally identical functions. A failed download names the reason and
+  leaves the rest of the plugin working.
+
+  Verified against the real pack and a real TypeScript tree: `search.ts`
+  parsed 8 functions, the largest at 320 nodes and 620 lines. Four module
+  tests and one tool test cover extension mapping, sorting, duplicate
+  grouping, the injected parser, the gate, and the tool output; 1234 unit
+  tests pass and typecheck is clean. Nothing is pushed or released.
+
 - 2026-11-07: `xerj_ask` and `xerj_hub` are implemented behind `hub.enabled`
   (off). They wrap the engine's own `xerj ask`/`xerj hub`; the plugin holds no
   pack, signature, or catalogue code. `xerj_ask` passes `--offline` and

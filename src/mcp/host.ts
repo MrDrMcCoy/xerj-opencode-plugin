@@ -28,6 +28,8 @@ import { AnomalyService } from "../telemetry/anomaly.ts";
 import { Ledger, type LedgerSnapshot } from "../stats/ledger.ts";
 import { buildTools, type ToolOptions } from "../tools/search.ts";
 import { HubService } from "../hub/service.ts";
+import { TreeSitterService } from "../analysis/treesitter.ts";
+import { dataRoot, environmentFrom } from "../paths.ts";
 import { fileStorage } from "./storage.ts";
 import { SysdocIndexer } from "../sysdocs/index.ts";
 import { PrjdocsIndexer } from "../prjdocs/index.ts";
@@ -194,6 +196,15 @@ export class McpHost {
         config: this.config.hub,
         binary: () => this.binary?.path ?? null,
         nodeUrl: () => this.client?.baseUrl ?? null,
+        logger: this.logger,
+      }),
+      treeSitter: new TreeSitterService({
+        projectRoot: this.projectRoot,
+        grammarRoot: join(
+          dataRoot(environmentFrom(process.env)),
+          "grammars",
+        ),
+        config: this.config.analysis.treeSitter,
         logger: this.logger,
       }),
       snapshot: () => this.snapshot(),

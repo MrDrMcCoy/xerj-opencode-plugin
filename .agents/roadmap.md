@@ -1395,8 +1395,8 @@ measured; they include tests and the commits that carry them. A status of
 | Import graph and cycles | M | Done | 2.0 h | `analysis/imports.ts` plus `xerj_imports`; relative, Python, Go, and Rust specifiers resolve against project files, unresolved ones are counted; ten module tests and four tool tests |
 | Regex and glob search | M | Done | 1.5 h | `analysis/find.ts` plus `xerj_find`: glob-to-regex with `**` spanning folders, line-numbered matches, secret files skipped, 200-match cap; ten module tests and three tool tests |
 | Structural search (`ast-grep`, read only) | M | Done | 1.0 h | `analysis/ast.ts` plus `xerj_ast`: probes the binary, passes the pattern and glob as arguments, parses `--json=stream`, never rewrites; seven module tests and one tool test |
-| tree-sitter layer, one language | M | In progress | — | Deferral lifted 2026-11-07. TypeScript first; grammar source settled (the pinned `tree-sitter-wasms` pack); `analysis.treeSitter.enabled` stays closed |
-| Complexity and duplicates | M | Not started | — | Needs the tree-sitter layer |
+| tree-sitter layer, one language | M | Done (gated off) | 4.0 h | `analysis/grammar.ts` downloads the pinned `tree-sitter-wasms` 0.1.13 tarball (4.4 MB, sha512 verified) into `<data root>/grammars/0.1.13/out`; `analysis/treesitter.ts` lazily loads `web-tree-sitter`, maps extensions to grammars, parses project files under a size cap, and extracts function ranges, named-node counts, and structural hashes. TypeScript/TSX are the tested pair; JavaScript, Python, Rust, Go, Java, C/C++, Ruby, PHP, Kotlin, Lua, and shell are mapped. Gate stays closed |
+| Complexity and duplicates | M | Done (gated off) | 1.0 h | `xerj_complexity` lists the largest functions by named-node count and groups structurally identical functions above `min_nodes`; `formatStructure` cites `path:line`. Four module tests and one tool test; the parser was verified against a real TypeScript tree and the real pack |
 | `xerj_code` | M | Not started | — | The engine has `corpus add/own/build/index/list`; `add` clones a git URL, so this needs network consent and belongs behind a gate like `hub` rather than in an always-on tool |
 | `xerj_ask` and hub packs | M | Done (gated off) | 2.0 h | `src/hub/service.ts` wraps `xerj ask`/`xerj hub`: `--offline` and `--hosted off` when the network is off, `--url` to the plugin node, JSON answer formatting with corpus/pin/licence, exit-code mapping, and `find`/`sync`/`status`. Defaults: `hub.enabled` false, `hub.network` false, `hub.hosted` off, `https://hub.xerj.org`, 1200 tokens, 120 s. Packs, signatures, catalogue, and cache stay in the engine. Seven service/tool tests plus a live cached-pack answer. |
 | Turn archive | M | Done | 1.5 h | `archive/turns.ts`: one NDJSON file per session under `<node dir>/archive`, 4 KB per turn, oldest half dropped past `context.archive.maxBytes`; prompts and answers both archived; eight module tests |
@@ -1426,12 +1426,11 @@ the `git log` record layout cost an extra hour and a half, and the auto-search
 hint, where the dedupe test had to distinguish the hint pass from the retrieval
 pass.
 
-Tier M so far: **13.0 h** across nine items this pass, ten of fourteen with
-the graph overview that predates it. Remaining, all deferred or gated: the
-tree-sitter layer and the complexity work it enables (grammar source settled,
-work deferred), `xerj_code` (needs a network gate, since `corpus add` clones),
-and `xerj_ask` (gated by `hub.enabled` and `hub.network`). Window extraction
-ships behind `memory.extract` (off) until its precision is measured.
+Tier M so far: **18.0 h** across eleven items this pass, twelve of fourteen
+with the graph overview that predates it. Remaining, all gated: `xerj_code`
+(needs a network gate, since `corpus add` clones), the LSP pool, and `share`.
+Tree-sitter, complexity, `xerj_ask`, and window extraction are shipped behind
+their closed gates.
 
 ## Settled decisions
 

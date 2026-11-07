@@ -98,6 +98,7 @@ import { JevosSupervisor } from "./jev/supervisor.ts";
 import { makeJevosJudge } from "./jev/judge.ts";
 import { Autotuner, type TuningView } from "./jev/autotune.ts";
 import { HubService } from "./hub/service.ts";
+import { TreeSitterService } from "./analysis/treesitter.ts";
 import { jevosTarget, normaliseVersion } from "./jev/release.ts";
 import { migrateMemoryIndex, migrateProjectStorage } from "./memory/migrate.ts";
 import { RemoteSpool } from "./remote/spool.ts";
@@ -1088,6 +1089,12 @@ export default Plugin.define({
     let autotuner: Autotuner | null = null;
     let tuningView: TuningView | null = null;
 
+    const treeSitter = new TreeSitterService({
+      projectRoot,
+      grammarRoot: join(root, "grammars"),
+      config: config.analysis.treeSitter,
+      logger,
+    });
     const hub = new HubService({
       config: config.hub,
       binary: () => runtime.binary?.path ?? null,
@@ -1109,6 +1116,7 @@ export default Plugin.define({
       getSpool: () => runtime.spool,
       getAnomaly: () => runtime.anomaly,
       hub,
+      treeSitter,
       snapshot,
     });
 
