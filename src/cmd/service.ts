@@ -119,7 +119,10 @@ export class CmdService {
     const absolute = isAbsolute(path) ? resolve(path) : resolve(this.options.projectRoot, path);
     const root = resolve(this.options.projectRoot);
     if (absolute !== root && !absolute.startsWith(root + sep)) return null;
-    const info = await readFile(path, "utf8").catch(() => null);
+    // Read the resolved path, not the caller's string: a relative path is
+    // relative to the project root here, while `readFile` would resolve it
+    // against the server's working directory.
+    const info = await readFile(absolute, "utf8").catch(() => null);
     if (info === null) return null;
     if (Buffer.byteLength(info, "utf8") > this.options.config.maxFileBytes) return null;
 

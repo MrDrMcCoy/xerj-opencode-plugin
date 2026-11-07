@@ -121,9 +121,11 @@ export class LspPool {
     if (language === null) return [];
     const active = await this.start(language.server);
     if (active === null) return [];
-    const absolute = join(this.options.projectRoot, path);
-    const text = await readFile(absolute, "utf8").catch(() => null);
+    // The path comes from a tool argument. The walk helper enforces the
+    // project boundary and the size cap; a raw `join` would allow an escape.
+    const text = await readProjectFile(this.options.projectRoot, path, 1_048_576);
     if (text === null) return [];
+    const absolute = join(this.options.projectRoot, path);
     const uri = pathToUri(absolute);
     active.client.didOpen(uri, language.languageId, text);
     return this.awaitDiagnostics(uri, signal);

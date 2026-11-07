@@ -3,7 +3,7 @@
 // never pulled into memory.
 
 import { readdir, readFile, stat } from "node:fs/promises";
-import { join, relative, sep } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 
 export const SKIP_DIRS = new Set([
   ".git",
@@ -85,7 +85,12 @@ export async function readProjectFile(
   path: string,
   maxBytes = DEFAULT_MAX_BYTES,
 ): Promise<string | null> {
-  const absolute = join(root, path);
+  // Tools accept a path from the model. Resolve it and refuse an escape:
+  // `join(root, "../../.ssh/id_rsa")` used to read outside the project.
+  const base = resolve(root);
+  const absolute = resolve(base, path);
+  if (absolute !== base && !absolute.startsWith(base + sep)) return null;
+
   const info = await stat(absolute).catch(() => null);
   if (info === null || !info.isFile() || info.size > maxBytes) return null;
   return readFile(absolute, "utf8").catch(() => null);
