@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-11-04
+Updated: 2026-11-06
 
 ## Where things stand
 
@@ -265,6 +265,10 @@ test/unit/*.test.ts    pure-function tests
 1. Restart OpenCode to load the uncommitted-honesty work: a corpus whose index
    vanished reports `missing`, the memory row says `index missing`, and a
    startup warning fires when a project corpus exists without a memory index.
+   The same restart loads the cleared-run marker and the two corpus fixes
+   above (rooted index names, semantic leg scoped to vector indices), so the
+   ring should stop repeating `archive index mapping not created` and
+   `semantic leg failed`.
 2. Investigate the live memory loss. On 2026-11-06 the memory index was absent
    (`exists: false`) while every corpus index survived, with no backup under
    `embed-backup/` and no warning in the ring. The new warning makes the next
@@ -354,6 +358,36 @@ publish, and live TUI verification remain.
   expected, z-score, and score. Warm-up buckets are not flagged.
 
 ## Log
+
+- 2026-11-06: Three defects behind one boot-time debug line, all fixed. The
+  ring showed `archive index mapping not created` on every boot beside a healthy
+  `index.archive` span, so the line looked like a settled condition.
+
+  `ArchiveIndex` and `CommitIndex` passed a bare index name to
+  `XerjClient.put` while every other caller passed a rooted path. The client
+  concatenates base and path, so the URL's port read as `9267xop-…` and fetch
+  rejected it as an invalid URL; the catch called that "already present" and
+  logged at debug. `_bulk` then created both indices by dynamic inference, so
+  `ax_path`, `hash`, `author`, `session`, and `role` are `text` rather than
+  `keyword`. Retrieval was unaffected because the service reads those fields
+  from `_source`, but the declared mapping never applied. The client now roots
+  a path that lacks a leading slash, both indexers pass the rooted form, and a
+  mapping failure that is not 400/409 warns with its reason. Verified live: a
+  bare index name creates `/xop-…-docs` with the declared `keyword` field, and
+  a repeat put answers 409 and logs at debug. The two live indices keep their
+  inferred mapping until the index and its manifest or state file are removed
+  together, which no code path needs today.
+
+  The same ring showed `semantic leg failed; keeping lexical only` on every
+  search after the docs corpora landed. The semantic query named the full index
+  pattern, and the engine refuses a `semantic` query for a pattern in which any
+  index maps `body` as plain text, which the system-docs, commit, and archive
+  corpora do by design. Retrieval had been lexical-only since. The leg now
+  names only the indices whose mapping says `semantic_text`, and skips itself
+  when there are none. Verified live: the query answers with hits on the
+  project index and 400s with "it is not a `semantic_text` field" when the docs
+  index joins the pattern. 1092 unit tests pass, typecheck clean. Neither fix
+  is loaded in the running server; both need the OpenCode restart.
 
 - 2026-11-06: The stale web run record is fixed, and the badge no longer flaps.
   The live store showed `ready -> degraded · index is missing; the last pass
