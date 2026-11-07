@@ -324,7 +324,7 @@ This is the complete set with its defaults, in
               "threads": 0,              // 0 uses every logical CPU
               "idleMs": 600000,          // stop after this long unused
               "timeoutMs": 5000,         // one judgement request
-              "threshold": 35,           // P(keep) floor, percent
+              "threshold": 15,           // P(keep) floor, percent
               "kindConfidence": 40,      // kind choice floor, percent
               "downloadTimeoutMs": 900000, // 630 MB model download
               "startupTimeoutMs": 120000 // model load + first health
@@ -435,7 +435,7 @@ The same entry works with a checkout path instead of the package name; see
 | `memory.distill.local.threads` | Worker threads; 0 uses every logical CPU. |
 | `memory.distill.local.idleMs` | Stop the server after this long without a judgement. |
 | `memory.distill.local.timeoutMs` | Deadline for one judgement request. |
-| `memory.distill.local.threshold` | P(keep) floor as a percentage; the larger of the two questions must clear it. Calibrated on the labeled set. |
+| `memory.distill.local.threshold` | P(keep) floor as a percentage. The report question scores conservatively, so the default is low; calibrate it with `bun run eval:distill`. |
 | `memory.distill.local.kindConfidence` | Minimum choice confidence before the model's kind replaces the heuristic class. |
 | `memory.distill.local.downloadTimeoutMs` | Deadline for the one-time 630 MB model download. |
 | `memory.distill.local.startupTimeoutMs` | Deadline for the server to answer its first health probe. |
@@ -719,16 +719,18 @@ on a platform jevos does not publish for, distillation keeps the heuristic
 verdict. The server stops after `local.idleMs` without a judgement and starts
 again on the next one.
 
-A judgement is one request with the sentence as the state and two yes/no
-questions: whether it is a durable fact, and whether it is a rule or decision
-for future work. The larger of the two probabilities is the score, and the
-same request asks for the five-way kind. Neither question works alone: "durable
-fact" scores facts and constraints high but leaves preferences low, and "rule
-or decision" does the reverse. On the labeled set the pair accepts 7 of 8 with
-no false positive among the non-code noise at the default 35 percent floor; the
-one miss is a preference the heuristic already classifies, and the one false
-positive is a fenced code block the heuristic never emits. Sending the turn
-around the sentence lowered every score, so the state is the sentence alone.
+A judgement is one request with the sentence as the state. One yes/no
+question decides whether the sentence is a lasting project rule or fact,
+rather than a report of what was just done, and the same request asks for the
+five-way kind. The keep question is contrastive because the plain "is this a
+durable fact" wording accepted 24 of 40 candidates mined from this project's
+own turn archive, most of them progress reports ("completed the archive",
+"wrote the tests", "version 0.7.0"). The contrastive wording keeps 10 of those
+40 and accepts 7 of the 8 labeled memories. On the labeled report set it cuts
+noise from 3 of 10 to 2 of 10, so it is a report filter, not a noise filter:
+the heuristic drops questions, hedges, and code before a judge sees a
+candidate. Sending the turn around the sentence lowered every score, so the
+state is the sentence alone.
 
 The model is small on purpose. It runs on the CPU, the first call after a
 start takes about 1.5 s and later calls about 200 ms on four threads, and the

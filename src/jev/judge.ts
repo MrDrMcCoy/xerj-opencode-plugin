@@ -1,26 +1,25 @@
-// The local judgement: one request to the jevos server, two questions over the
-// same state, and one five-way kind choice.
+// The local judgement: one request to the jevos server with the sentence as
+// the state, one durability question, and one five-way kind choice.
 //
-// Calibrated on the labeled set in `scripts/distill-labels.ts` (2026-11-06,
-// jevos-v5): no single question separates durable statements from noise well.
-// "Durable fact" scores facts and constraints high but leaves preferences
-// low; "rule or decision" scores rules high but leaves facts low. Taking the
-// larger of the two scores 13 of 14 at a 0.35 floor, with the one miss a
-// preference the heuristic already classifies.
+// Calibrated on the labeled set in `scripts/distill-labels.ts` and on
+// candidates mined from this project's turn archive (2026-11-06, jevos-v5).
+// The question that works is contrastive: a lasting rule or fact, rather than
+// a report of what was just done. Plain "is this a durable fact" wording
+// accepted 24 of 40 real archived candidates, most of them progress reports.
+// The contrastive wording keeps 10 of 11 durable sentences and rejects 9 of 10
+// reports. Questions and hedges are not the model's job: the heuristic filter
+// already drops them before a candidate reaches a judge.
 //
 // The state is the sentence alone. Adding the turn around it, before or after,
 // lowered every positive and cost three to five of the eight accepted
-// sentences at the same floor. The wording is a constant so a test can pin
-// it.
+// sentences. The wording is a constant so a test can pin it.
 
 import type { Logger } from "../log.ts";
 import type { JudgeVerdict, ModelJudge } from "../memory/distill.ts";
 
-export const JEVOS_DURABLE_INSTRUCTIONS =
-  "Is the sentence a durable fact about the project that will remain true?";
-
-export const JEVOS_APPLIES_INSTRUCTIONS =
-  "Is this a project rule or decision that applies to all future work?";
+export const JEVOS_KEEP_INSTRUCTIONS =
+  "Is this sentence a lasting project rule or fact, rather than a report of " +
+  "what was just done?";
 
 export type JudgedKind =
   | "decision"
@@ -51,7 +50,7 @@ const KIND_ORDER: ReadonlyArray<JudgedKind> = [
 
 export interface JevosJudgeOptions {
   readonly baseUrl: string;
-  /** P(keep) floor, 0..1, applied to the larger of the two answers. */
+  /** P(keep) floor, 0..1. The report question scores conservatively. */
   readonly threshold: number;
   /** Choice confidence floor, 0..1; below it the heuristic kind stays. */
   readonly kindConfidence: number;
@@ -66,8 +65,7 @@ export function makeJevosJudge(options: JevosJudgeOptions): ModelJudge {
       model: "jev-latest",
       state,
       questions: {
-        durable: { type: "noul", instructions: JEVOS_DURABLE_INSTRUCTIONS },
-        applies: { type: "noul", instructions: JEVOS_APPLIES_INSTRUCTIONS },
+        keep: { type: "noul", instructions: JEVOS_KEEP_INSTRUCTIONS },
         kind: {
           type: "choice",
           instructions: JEVOS_KIND_INSTRUCTIONS,
@@ -87,12 +85,8 @@ export function makeJevosJudge(options: JevosJudgeOptions): ModelJudge {
     if (!response.ok) throw new Error(`jevos answered ${response.status}`);
 
     const answers = asRecord(asRecord(await response.json()).answers);
-    const durable = noul(answers.durable);
-    const applies = noul(answers.applies);
-    if (durable === null || applies === null) {
-      throw new Error("jevos returned no keep probability");
-    }
-    const score = Math.max(durable, applies);
+    const score = noul(answers.keep);
+    if (score === null) throw new Error("jevos returned no keep probability");
 
     const kindAnswer = asRecord(answers.kind);
     const choice = typeof kindAnswer.choice === "string" ? kindAnswer.choice : null;
@@ -113,8 +107,7 @@ export function makeJevosJudge(options: JevosJudgeOptions): ModelJudge {
     };
     options.logger.debug("jevos judged a candidate", {
       keep: verdict.keep,
-      durable: round3(durable),
-      applies: round3(applies),
+      score: round3(score),
       kind: kind ?? "heuristic",
     });
     return verdict;

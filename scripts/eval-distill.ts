@@ -27,7 +27,7 @@ import {
   type ModelJudge,
 } from "../src/memory/distill.ts";
 import type { Logger } from "../src/log.ts";
-import { ACCEPT, REJECT, type Label } from "./distill-labels.ts";
+import { ACCEPT, REJECT, REPORTS, type Label } from "./distill-labels.ts";
 
 const logger: Logger = {
   debug: () => {},
@@ -45,10 +45,11 @@ interface Tally {
   falsePositives: number;
   classOk: number;
   calls: number;
+  reportsKept: number;
 }
 
 function empty(): Tally {
-  return { accepted: 0, falsePositives: 0, classOk: 0, calls: 0 };
+  return { accepted: 0, falsePositives: 0, classOk: 0, calls: 0, reportsKept: 0 };
 }
 
 function heuristicCandidate(label: Label): Candidate | null {
@@ -70,6 +71,11 @@ function runHeuristic(): Tally {
   for (const text of REJECT) {
     if (heuristicCandidate({ text, kind: "fact", origin: "answer" })) {
       tally.falsePositives += 1;
+    }
+  }
+  for (const text of REPORTS) {
+    if (heuristicCandidate({ text, kind: "fact", origin: "answer" })) {
+      tally.reportsKept += 1;
     }
   }
   return tally;
@@ -110,6 +116,20 @@ async function runModel(judge: ModelJudge): Promise<Tally> {
     if (verdict !== null && verdict.keep) tally.falsePositives += 1;
   }
 
+  for (const text of REPORTS) {
+    const candidate: Candidate = {
+      text,
+      kind: "fact",
+      score: MIN_SCORE,
+      origin: "answer",
+      reason: "label",
+    };
+    tally.calls += 1;
+    const verdict = await judge(candidate, { prompt: "", answer: text })
+      .catch(() => null);
+    if (verdict !== null && verdict.keep) tally.reportsKept += 1;
+  }
+
   return tally;
 }
 
@@ -125,12 +145,17 @@ function report(name: string, tally: Tally): void {
     `${name.padEnd(10)} accepted ${tally.accepted}/${ACCEPT.length} (${recall}%) · ` +
       `false positives ${tally.falsePositives}/${REJECT.length} · ` +
       `precision ${precision}% · ` +
+      `reports kept ${tally.reportsKept}/${REPORTS.length} · ` +
       `class ${tally.classOk}/${ACCEPT.length}` +
       (tally.calls > 0 ? ` · ${tally.calls} calls` : ""),
   );
 }
 
 async function main(): Promise<void> {
+  console.log(
+    "the heuristic rejects noise before a judge sees it; `reports kept` is " +
+      "the judgment that matters for a judge",
+  );
   report("heuristic", runHeuristic());
 
   const jevosUrl = process.env.DISTILL_EVAL_JEVOS_URL?.trim();

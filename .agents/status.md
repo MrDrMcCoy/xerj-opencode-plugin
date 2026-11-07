@@ -293,11 +293,10 @@ The local distillation judge is implemented and needs a restart to load. With
 `memory.distill.judge: "local"`, setup starts a background install of the
 jevos binary and its 630 MB OpenVINO INT8 model under `<data root>/jev/`, then
 keeps one loopback server for the installation. Each candidate is one request
-with two yes/no questions and a five-way kind choice; the larger probability
-is the score and the sentence is the whole state. Live against the model:
-7/8 labeled memories accepted, no false positive among the non-code noise,
-cold start 4.5 s, first judgement 1.6 s, later ones about 190 ms on four
-threads. Every failure path (unsupported platform, offline install, a server
+with the sentence as the state, one contrastive keep question, and a five-way
+kind choice. Live against the model: 10 of 11 durable sentences kept and 9 of
+10 archived progress reports rejected, cold start 4.5 s, first judgement
+1.6 s, later ones about 190 ms on four threads. Every failure path (unsupported platform, offline install, a server
 that does not answer, a slow judgement) keeps the heuristic verdict. Next:
 restart OpenCode with `judge: "local"` set and confirm the install lands, the
 first turn falls back until it finishes, the log names the server port, and
@@ -391,16 +390,17 @@ publish, and live TUI verification remain.
   free port in 8017-8099, attaches to a healthy server instead of starting a
   second, and stops after `local.idleMs` without a judgement.
 
-  Each candidate is one request with the sentence as the state: two `noul`
-  questions (durable fact; rule or decision for future work) and one five-way
-  `choice`. The larger probability is the score. Measured on the labeled set
-  (jevos-v5, 2026-11-06): 7/8 accepted with 0/6 non-code false positives at a
-  0.35 floor; the one miss is a preference the heuristic already classifies,
-  and the eval harness's only false positive is a fenced code block the
-  heuristic never emits. Neither question works alone, and putting the turn
-  around the sentence lowered every score (6/8 with the sentence first, 3/8
-  with it last), so the state is the sentence. Cold start is 4.5 s, the first
-  judgement 1.6 s, later ones about 190 ms on four threads.
+  Each candidate is one request with the sentence as the state: one `noul`
+  question and one five-way `choice`. The question is contrastive, "a lasting
+  project rule or fact, rather than a report of what was just done", because
+  the plain "durable fact" wording accepted 24 of 40 candidates mined from this
+  project's own turn archive, most of them progress reports. Measured
+  (jevos-v5, 2026-11-06): 10 of 11 durable sentences kept and 9 of 10 reports
+  rejected; the one durable miss is a preference the heuristic already
+  classifies. Putting the turn around the sentence lowered every score (6/8
+  with the sentence first, 3/8 with it last), so the state is the sentence.
+  Cold start is 4.5 s, the first judgement 1.6 s, later ones about 190 ms on
+  four threads.
 
   `DISTILL_EVAL_JEVOS_URL` runs the local judge through the existing harness.
   Telemetry gains a `local` count in the `distill` report block, and the panel

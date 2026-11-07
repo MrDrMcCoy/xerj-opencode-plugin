@@ -424,7 +424,7 @@ export const DEFAULT_CONFIG: Config = {
         threads: 0,
         idleMs: 600_000,
         timeoutMs: 5_000,
-        threshold: 35,
+        threshold: 15,
         kindConfidence: 40,
         downloadTimeoutMs: 900_000,
         startupTimeoutMs: 120_000,

@@ -1120,33 +1120,37 @@ caller's `--threads` decides the worker count. The server stops after
 lives under `<data root>/jev/jev.log`, not in any project.
 
 **The judgement.** One `POST /v1/systemone` per candidate, with the sentence as
-the state and three questions:
+the state and two questions:
 
 | Id | Type | Asks |
 |---|---|---|
-| `durable` | `noul` | Is the sentence a durable fact about the project that will remain true? |
-| `applies` | `noul` | Is this a project rule or decision that applies to all future work? |
+| `keep` | `noul` | Is this sentence a lasting project rule or fact, rather than a report of what was just done? |
 | `kind` | `choice` | decision, constraint, convention, preference, or fact |
 
-The larger of the two `noul` probabilities is the score, and the verdict keeps
-the candidate when it clears `local.threshold`. The kind replaces the
-heuristic class only when the choice confidence clears `local.kindConfidence`.
+The `noul` probability is the score, and the verdict keeps the candidate when
+it clears `local.threshold` (15 by default). The kind replaces the heuristic
+class only when the choice confidence clears `local.kindConfidence`.
 
-Two questions are used because neither separates the labeled set alone:
-`durable` scores facts and constraints high but leaves preferences low, and
-`applies` scores rules high but facts low. Measured 2026-11-06 on jevos-v5:
+The keep question is contrastive because the obvious wording failed on real
+turns. "Is the sentence a durable fact about the project that will remain
+true?" accepted 24 of 40 candidates mined from this project's turn archive,
+most of them progress reports ("completed the turn archive", "wrote the
+tests", "version 0.7.0"). The contrastive wording keeps 10 of those 40, and
+on the labelled set it accepts 7 of 8 memories and cuts report noise from 3 of
+10 to 2 of 10. It is a report filter, not a noise filter: the heuristic drops
+questions, hedges, and code before a judge sees a candidate.
 
-| State layout | Recall at 0.35 | False positives |
-|---|---|---|
-| sentence alone | 7/8 | 0/6 non-code noise |
-| sentence first, then the turn | 6/8 | 0/6 |
-| the turn, then the sentence | 3/8 | 0/6 |
-| labelled sentence only | 5/8 | 0/6 |
+| Keep wording | Archive kept | Label recall | Reports kept |
+|---|---|---|---|
+| plain "durable fact" | 24/40 | 7/8 | — |
+| contrastive, sentence alone | 10/40 | 7/8 | 2/10 |
 
-So the state is the sentence alone; adding turn context consistently lowered
-every score. The one remaining miss is a preference sentence the heuristic
-already classifies, and the eval harness's one false positive is a fenced code
-block the heuristic never emits.
+The heuristic alone keeps 3 of the 10 labelled reports, so the contrastive
+question removes one more. A two-question variant (`durable fact` plus `rule or
+decision`) reached 13 of 14 on the labelled set, but still accepted the
+archived reports, which is why the contrastive single question replaced it.
+The state stays the sentence alone: adding the turn around it lowered every
+positive (6 of 8 with the sentence first, 3 of 8 with it last).
 
 **Cost.** Cold server start is about 4.5 s (model load), the first judgement
 adds about 1.6 s, and later judgements take about 190 ms on four threads. The
