@@ -63,6 +63,8 @@ async function writeFakeNode(): Promise<string> {
       "const portIndex = process.argv.indexOf('--port');",
       "const port = Number(process.argv[portIndex + 1]);",
       "Bun.serve({ port, fetch: () => Response.json({ cluster_name: 'xerj' }) });",
+      // A test that forgets to stop its fake node must not leave it running.
+      "setTimeout(() => process.exit(0), 30_000).unref?.();",
       "setInterval(() => {}, 10_000);",
       "",
     ].join("\n"),
