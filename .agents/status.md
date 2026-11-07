@@ -269,11 +269,16 @@ test/unit/*.test.ts    pure-function tests
    above (rooted index names, semantic leg scoped to vector indices), so the
    ring should stop repeating `archive index mapping not created` and
    `semantic leg failed`.
-2. Investigate the live memory loss. On 2026-11-06 the memory index was absent
-   (`exists: false`) while every corpus index survived, with no backup under
-   `embed-backup/` and no warning in the ring. The new warning makes the next
-   occurrence visible; the cause is still unknown. Suspects: the rc.101 data
-   format change, or the embed-mode reconcile before the backup rule existed.
+2. Memory loss is explained and the data is back (2026-11-06). The index was
+   not corrupt: a lexical node was serving the project's data dir while the
+   memory index held neural vectors, so `recoverMemoryIndex` read the mismatch
+   as damage, backed the index up to `embed-backup/unreadable/`, and deleted
+   it. The backup was intact, was restored in place, and vector recall answers
+   again with all 47 memories. The repair now requires a failed query rather
+   than a non-green health reading. Still open: attaching a node in another
+   embed mode remains destructive, because the node does not report its mode
+   over HTTP and the config is the only mode the plugin knows. Until that is
+   fixed, do not point a running node at another mode's data dir.
 3. Publish the next release when the user asks. `v0.7.0` is released and
    `npm` serves it. `publish.yml` stages when the token requires it; approve
    the staged version at npmjs.com.
@@ -358,6 +363,32 @@ publish, and live TUI verification remain.
   expected, z-score, and score. Warm-up buckets are not flagged.
 
 ## Log
+
+- 2026-11-06: The missing memory index was a false positive, and the store is
+  restored. On boot the plugin logged `memory index was unreadable and has been
+  reset`, backed `.xerj-memory-proj-…` up to `embed-backup/unreadable/` and
+  deleted it, then reported it missing. The backup held all 47 entries and the
+  neural vectors were intact; the index was restored in place, and a recall on
+  the live node returns the telemetry design memory with its score. Nothing was
+  lost.
+
+  Cause: the node answering for that data dir was started lexical while the
+  memory index held neural vectors, so the engine refused the index and
+  `recoverMemoryIndex` read the refusal as corruption. The corpus indices
+  survived because the embed-mode reconcile only drops `xop-*` when the
+  recorded mode changes, and the recorded mode never did.
+
+  `recoverMemoryIndex` now proves damage before acting: it runs one query and
+  repairs only when that query fails. Cluster health is not evidence, because a
+  stale or half-open index reports red and still answers, and memory cannot be
+  rebuilt from the corpus, so a false positive costs the whole store. A
+  non-green index that answers is left alone. Two tests cover both sides;
+  1093 unit tests pass, typecheck clean.
+
+  The remaining hazard is real but narrow: a node in a different embed mode
+  still makes the index unreadable, and the plugin cannot tell the mode from
+  the node because the banner does not carry it. Recorded under Next actions
+  with the operational rule.
 
 - 2026-11-06: Three defects behind one boot-time debug line, all fixed. The
   ring showed `archive index mapping not created` on every boot beside a healthy
