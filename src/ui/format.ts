@@ -268,7 +268,10 @@ export function sidebarView(
           ? "off"
           : dreamer.lastRunAt === null
             ? "never"
-            : `${formatAge(now, dreamer.lastRunAt)} · ${formatCount(dreamer.checked)} checked`,
+            : `${formatAge(now, dreamer.lastRunAt)}` +
+              (dreamer.checked > 0
+                ? ` · ${formatCount(dreamer.checked)} checked`
+                : ""),
         tone: dreamer.stale > 0 ? "warn" : undefined,
       },
       {
@@ -700,11 +703,19 @@ export function panelSections(snapshot: StatusSnapshot, now: number): PanelSecti
         return [
           dreamer.lastRunAt === null
             ? "no runs yet"
-            : `last run ${formatAge(now, dreamer.lastRunAt)} · ` +
-              `${formatCount(dreamer.checked)} checked · ` +
-              `${formatCount(dreamer.stale)} stale · ` +
-              `${formatCount(dreamer.merged)} merged · ` +
-              `${formatCount(dreamer.flagged)} flagged`,
+            : `last run ${formatAge(now, dreamer.lastRunAt)}` +
+              (dreamer.checked > 0
+                ? ` · ${formatCount(dreamer.checked)} checked`
+                : "") +
+              (dreamer.stale > 0
+                ? ` · ${formatCount(dreamer.stale)} stale`
+                : "") +
+              (dreamer.merged > 0
+                ? ` · ${formatCount(dreamer.merged)} merged`
+                : "") +
+              (dreamer.flagged > 0
+                ? ` · ${formatCount(dreamer.flagged)} flagged`
+                : ""),
           dreamer.nextRunAt === null
             ? "next run after the next idle period"
             : dreamer.nextRunAt <= now
