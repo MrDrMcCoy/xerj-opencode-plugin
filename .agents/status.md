@@ -381,6 +381,22 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-07: The LSP pool, the pinned TypeScript installer, and the
+  `xerj_callers`/`xerj_impact` tools are implemented behind
+  `analysis.lsp.enabled` (off); `xerj_inspect` is always registered for TODOs
+  and adds diagnostics when the gate is open. The client speaks JSON-RPC over
+  stdio, answers server requests, and covers workspace symbols, document
+  symbols, call hierarchy, definitions, references, and publishDiagnostics.
+  The pool resolves a configured command, project `node_modules`, PATH, or
+  `<data root>/lsp`, installs the pinned
+  `typescript-language-server@6.0.3` + `typescript@5.9.3` with
+  `--ignore-scripts`, opens up to 500 TypeScript files (tsserver only indexes
+  what the client opened), caps concurrent servers, and stops idle ones.
+  Verified against the real server on a two-file fixture: one caller for the
+  target, one impact hop, clean shutdown. Five LSP tool tests plus two config
+  tests; 1251 unit tests pass and typecheck is clean. Nothing is pushed or
+  released.
+
 - 2026-11-07: `xerj_code` and `xerj_share` are implemented behind their gates
   (both off). `xerj_code` wraps the engine's `xerj code` and `xerj corpus
   list/add/index`; `code.network` gates cloning, `XERJ_CODE_HOME` is

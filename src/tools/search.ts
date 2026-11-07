@@ -22,6 +22,8 @@ import type { HubService } from "../hub/service.ts";
 import type { TreeSitterService } from "../analysis/treesitter.ts";
 import type { CodeService } from "../code/service.ts";
 import type { ShareService } from "../share/service.ts";
+import type { LspPool } from "../analysis/lsp/pool.ts";
+import { listProjectFiles } from "../analysis/walk.ts";
 
 export interface ToolOptions {
   readonly config: Config;
@@ -41,6 +43,7 @@ export interface ToolOptions {
   readonly treeSitter: TreeSitterService;
   readonly code: CodeService;
   readonly share: ShareService;
+  readonly lsp: LspPool;
   readonly snapshot: () => Promise<StatusSnapshot>;
 }
 
@@ -895,6 +898,8 @@ export function buildTools(options: ToolOptions): ReadonlyArray<{
     ...(options.config.analysis.treeSitter.enabled ? [complexityTool(options)] : []),
     ...(options.config.code.enabled ? [codeTool(options)] : []),
     ...(options.config.share.enabled ? [shareTool(options)] : []),
+    ...(options.config.analysis.lsp.enabled ? lspTools(options) : []),
+    inspectTool(options),
   ];
 }
 
@@ -991,6 +996,185 @@ const CODE_INPUT = {
   required: ["action"],
   additionalProperties: false,
 } as const;
+
+const CALLERS_INPUT = {
+  type: "object",
+  properties: {
+    symbol: { type: "string", description: "Function or method name." },
+    path: { type: "string", description: "Optional file to disambiguate the symbol." },
+  },
+  required: ["symbol"],
+  additionalProperties: false,
+} as const;
+
+const IMPACT_INPUT = {
+  type: "object",
+  properties: {
+    symbol: { type: "string", description: "Function or method name." },
+    path: { type: "string", description: "Optional file to disambiguate the symbol." },
+    depth: { type: "number", description: "How many caller hops to follow (1-5, default 3)." },
+  },
+  required: ["symbol"],
+  additionalProperties: false,
+} as const;
+
+/** Language-server call hierarchy; registered with `analysis.lsp.enabled`. */
+function lspTools(options: ToolOptions): ReadonlyArray<{
+  name: string;
+  description: string;
+  input: unknown;
+  options: { namespace: string };
+  execute: (input: unknown) => Promise<unknown>;
+}> {
+  return [
+    {
+      name: "callers",
+      description:
+        "List the functions that directly call a symbol, using the project's language server. Returns path:line for each caller and the call site. Use it before changing a signature.",
+      input: CALLERS_INPUT,
+      options: { namespace: "xerj" },
+      execute: async (input) => {
+        const args = input as { symbol: string; path?: string };
+        const sites = await options.lsp
+          .callers(args.symbol, args.path)
+          .catch(() => []);
+        if (sites.length === 0) {
+          return {
+            content: `No callers found for ${args.symbol}. Check analysis.lsp.enabled and the server.`,
+            metadata: { xerj: { callers: 0 } },
+          };
+        }
+        return {
+          content: [
+            `${sites.length} caller${sites.length === 1 ? "" : "s"} of ${args.symbol}`,
+            ...sites.map(
+              (site) =>
+                `${site.name}  ${site.path}:${site.line}` +
+                (site.callerLine === site.line ? "" : ` (call at line ${site.callerLine})`),
+            ),
+          ].join("\n"),
+          metadata: { xerj: { callers: sites.length } },
+        };
+      },
+    },
+    {
+      name: "impact",
+      description:
+        "Follow the call hierarchy outward from a symbol and list every caller up to a depth. Use it to see the blast radius of a signature or behavior change.",
+      input: IMPACT_INPUT,
+      options: { namespace: "xerj" },
+      execute: async (input) => {
+        const args = input as { symbol: string; path?: string; depth?: number };
+        const sites = await options.lsp
+          .impact(args.symbol, args.path, Math.max(1, Math.min(args.depth ?? 3, 5)))
+          .catch(() => []);
+        if (sites.length === 0) {
+          return {
+            content: `No impact found for ${args.symbol}. Check analysis.lsp.enabled and the server.`,
+            metadata: { xerj: { impact: 0 } },
+          };
+        }
+        return {
+          content: [
+            `${sites.length} caller${sites.length === 1 ? "" : "s"} of ${args.symbol}`,
+            ...sites.map(
+              (site) =>
+                `${"  ".repeat(site.depth - 1)}${site.name}  ${site.path}:${site.line}`,
+            ),
+          ].join("\n"),
+          metadata: { xerj: { impact: sites.length } },
+        };
+      },
+    },
+  ];
+}
+
+const INSPECT_INPUT = {
+  type: "object",
+  properties: {
+    path: { type: "string", description: "One project-relative file; omit to scan all files." },
+    top: { type: "number", description: "Maximum TODOs to list (1-200, default 50)." },
+  },
+  additionalProperties: false,
+} as const;
+
+/** TODO markers always, diagnostics when the LSP gate is open. */
+function inspectTool(options: ToolOptions): {
+  name: string;
+  description: string;
+  input: unknown;
+  options: { namespace: string };
+  execute: (input: unknown, context: unknown) => Promise<unknown>;
+} {
+  return {
+    name: "inspect",
+    description:
+      "Inspect a file or the project for TODO/FIXME/HACK markers and, when analysis.lsp.enabled is on, for language-server diagnostics. Read-only; use it before planning work or a cleanup.",
+    input: INSPECT_INPUT,
+    options: { namespace: "xerj" },
+    execute: async (input, context) => {
+      const args = input as { path?: string; top?: number };
+      const tool = context as { signal?: AbortSignal };
+      const files =
+        args.path !== undefined
+          ? [args.path]
+          : await listProjectFiles(options.projectRoot, { maxFiles: 2_000 });
+      const limit = Math.max(1, Math.min(args.top ?? 50, 200));
+      const todos: string[] = [];
+      for (const path of files) {
+        if (tool.signal?.aborted) break;
+        const text = await readProjectFile(options.projectRoot, path, 512 * 1024);
+        if (text === null) continue;
+        const lines = text.split("\n");
+        for (let index = 0; index < lines.length; index += 1) {
+          if (/\b(TODO|FIXME|HACK|XXX)\b/.test(lines[index] ?? "")) {
+            todos.push(`${path}:${index + 1}  ${(lines[index] ?? "").trim().slice(0, 160)}`);
+            if (todos.length >= limit) break;
+          }
+        }
+        if (todos.length >= limit) break;
+      }
+
+      const lines = [
+        todos.length === 0
+          ? "No TODO/FIXME/HACK markers found."
+          : `${todos.length} marker${todos.length === 1 ? "" : "s"}:\n${todos.join("\n")}`,
+      ];
+      let diagnostics = 0;
+      if (options.config.analysis.lsp.enabled && args.path !== undefined) {
+        const items = await options.lsp
+          .inspect(args.path, tool.signal)
+          .catch(() => []);
+        diagnostics = items.length;
+        lines.push(
+          items.length === 0
+            ? "No diagnostics (the server sent none)."
+            : `Diagnostics:\n${items
+                .map((item) => {
+                  const severity =
+                    item.severity === 1
+                      ? "error"
+                      : item.severity === 2
+                        ? "warning"
+                        : item.severity === 3
+                          ? "info"
+                          : "hint";
+                  return `${args.path}:${item.range.start.line + 1}:${item.range.start.character + 1} [${severity}] ${item.message}`;
+                })
+                .join("\n")}`,
+        );
+      } else if (options.config.analysis.lsp.enabled) {
+        lines.push("Diagnostics need a path; pass one file.");
+      } else {
+        lines.push("Diagnostics are gated by analysis.lsp.enabled.");
+      }
+      return {
+        content: lines.join("\n\n"),
+        metadata: { xerj: { todos: todos.length, diagnostics } },
+      };
+    },
+  };
+}
 
 /** Reference corpora; registered with `code.enabled`. */
 function codeTool(options: ToolOptions): {

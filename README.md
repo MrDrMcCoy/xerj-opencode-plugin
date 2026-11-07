@@ -27,6 +27,7 @@ cited passages instead of whole files. Nothing leaves the machine.
 - [Tools](#tools)
 - [Analysis tools](#analysis-tools)
 - [Structural analysis](#structural-analysis)
+- [Language servers](#language-servers)
 - [Reference corpora](#reference-corpora)
 - [Share links](#share-links)
 - [Hub corpora](#hub-corpora)
@@ -373,6 +374,14 @@ This is the complete set with its defaults, in
             "enabled": false,           // registers xerj_complexity
             "languages": [],            // empty detects from the project
             "maxParseBytes": 1048576    // files above this are skipped
+          },
+          "lsp": {                       // language servers; off by default
+            "enabled": false,           // registers callers and impact
+            "servers": {},              // language -> command or [command, args]
+            "autoInstall": true,        // install a missing pinned server
+            "idleMs": 300000,           // stop an idle server
+            "maxServers": 2,            // concurrent servers
+            "timeoutMs": 2000           // one request
           }
         },
         "code": {                       // reference corpora
@@ -539,6 +548,12 @@ The same entry works with a checkout path instead of the package name; see
 | `share.expires` | Default link lifetime, for example `24h` or `7d`. |
 | `share.maxClaims` | Default number of times a link can be opened. |
 | `share.timeoutMs` | Deadline for one share command. |
+| `analysis.lsp.enabled` | Register `xerj_callers` and `xerj_impact`, and start language servers. Off by default. |
+| `analysis.lsp.servers` | Language id to command or `[command, args]`. Empty means auto-resolve. |
+| `analysis.lsp.autoInstall` | Install a missing pinned TypeScript server into `<data root>/lsp`. |
+| `analysis.lsp.idleMs` | Stop a server after this long without a request. |
+| `analysis.lsp.maxServers` | Concurrent language servers. |
+| `analysis.lsp.timeoutMs` | Deadline for one language-server request. |
 | `analysis.treeSitter.maxParseBytes` | Files above this are skipped. |
 | `hub.enabled` | Register `xerj_ask` and `xerj_hub`. Off by default. |
 | `hub.network` | Allow pack and catalogue downloads. When false, only cached packs answer. |
@@ -992,6 +1007,9 @@ index can answer, and none writes a project file.
 | `xerj_complexity` | `path?`, `top?`, `min_nodes?` | Function sizes and structural duplicates through tree-sitter. Registered with `analysis.treeSitter.enabled`. |
 | `xerj_code` | `action`, `corpus?`, `query?`, `urls?`, `k?`, `mode?`, `lang?`, `full?` | Query or manage reference corpora. Registered with `code.enabled`. |
 | `xerj_share` | `action`, `target?`, `handle?`, `expires?`, `max_claims?`, `passcode?`, `label?` | Create, list, or revoke a read-only share. Registered with `share.enabled`. |
+| `xerj_callers` | `symbol`, `path?` | Direct callers from the language server. Registered with `analysis.lsp.enabled`. |
+| `xerj_impact` | `symbol`, `path?`, `depth?` | Callers up to a depth. Registered with `analysis.lsp.enabled`. |
+| `xerj_inspect` | `path?`, `top?` | TODO markers always; diagnostics when the LSP gate is on. |
 
 The turn archive is one file per session under the project's node directory,
 capped by `context.archiveMaxBytes`. Before the host compacts, the plugin
@@ -1019,6 +1037,30 @@ leaves every other tool working.
 The pack is cached outside the project, shared by every project in the
 installation, and is never bundled in the npm package. Turning the gate off
 registers no tool and downloads nothing.
+
+[Back to top](#table-of-contents)
+
+## Language servers
+
+`analysis.lsp.enabled` (off by default) adds `xerj_callers` and
+`xerj_impact`, and lets `xerj_inspect` add diagnostics. TypeScript is the
+supported server today. `xerj_callers` lists the functions that directly call a
+symbol; `xerj_impact` follows incoming calls up to a depth and caps the result
+at 50.
+
+A server is resolved in one order: `analysis.lsp.servers` for that language,
+the project's `node_modules`, `PATH`, the plugin cache, then a pinned install
+when `analysis.lsp.autoInstall` is true. The pinned pair is
+`typescript-language-server@6.0.3` and `typescript@5.9.3`, installed with
+`--ignore-scripts` into `<data root>/lsp/typescript/6.0.3`. The server starts on
+the first tool call, opens up to 500 project TypeScript files (tsserver only
+indexes what the client opened), and stops after `idleMs` without a request.
+At most `maxServers` run at once.
+
+`xerj_inspect` is always registered, even with both parser gates closed. It
+scans for TODO/FIXME/HACK markers in the project. When the LSP gate is open and
+a file is given, it also opens that file and reports diagnostics the server
+publishes. Unused exports and dead-code analysis are not implemented yet.
 
 [Back to top](#table-of-contents)
 

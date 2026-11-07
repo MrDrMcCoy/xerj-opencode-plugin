@@ -146,6 +146,7 @@ describe("server setup wiring", () => {
         "forget",
         "imports",
         "index",
+        "inspect",
         "out",
         "outline",
         "prjdocs",
@@ -160,7 +161,7 @@ describe("server setup wiring", () => {
         "telemetry",
         "zoom",
       ]);
-      expect(host.tools.length).toBe(22);
+      expect(host.tools.length).toBe(23);
       expect(host.toolHooks).toContain("execute.after");
       expect(host.sessionHooks).toContain("prompt");
       expect(host.sessionHooks).toContain("context");

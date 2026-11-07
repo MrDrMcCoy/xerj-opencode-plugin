@@ -365,6 +365,22 @@ export interface ShareOptions {
 
 export interface AnalysisOptions {
   readonly treeSitter: TreeSitterOptions;
+  readonly lsp: LspOptions;
+}
+
+export interface LspOptions {
+  /** Register the language-server tools and start servers. Off by default. */
+  readonly enabled: boolean;
+  /** Language id to command; empty means detect and auto-resolve. */
+  readonly servers: Readonly<Record<string, string | ReadonlyArray<string>>>;
+  /** Install a missing pinned server into the plugin cache. */
+  readonly autoInstall: boolean;
+  /** Stop a server that answered nothing for this long. */
+  readonly idleMs: number;
+  /** Concurrent servers across languages. */
+  readonly maxServers: number;
+  /** Deadline for one language-server request. */
+  readonly timeoutMs: number;
 }
 
 export interface TreeSitterOptions {
@@ -524,6 +540,14 @@ export const DEFAULT_CONFIG: Config = {
       languages: [],
       maxParseBytes: 1_048_576,
     },
+    lsp: {
+      enabled: false,
+      servers: {},
+      autoInstall: true,
+      idleMs: 300_000,
+      maxServers: 2,
+      timeoutMs: 2_000,
+    },
   },
   code: {
     enabled: false,
@@ -604,6 +628,7 @@ export function loadConfig(
   const hub = asObject(root.hub);
   const analysis = asObject(root.analysis);
   const treeSitter = asObject(analysis.treeSitter);
+  const lsp = asObject(analysis.lsp);
   const code = asObject(root.code);
   const share = asObject(root.share);
 
@@ -1334,6 +1359,45 @@ export function loadConfig(
       ),
     },
     analysis: {
+      lsp: {
+        enabled: readBoolean(
+          lsp.enabled,
+          DEFAULT_CONFIG.analysis.lsp.enabled,
+          "analysis.lsp.enabled",
+          warnings,
+        ),
+        servers: readLspServers(lsp.servers, warnings),
+        autoInstall: readBoolean(
+          lsp.autoInstall,
+          DEFAULT_CONFIG.analysis.lsp.autoInstall,
+          "analysis.lsp.autoInstall",
+          warnings,
+        ),
+        idleMs: readInteger(
+          lsp.idleMs,
+          DEFAULT_CONFIG.analysis.lsp.idleMs,
+          60_000,
+          86_400_000,
+          "analysis.lsp.idleMs",
+          warnings,
+        ),
+        maxServers: readInteger(
+          lsp.maxServers,
+          DEFAULT_CONFIG.analysis.lsp.maxServers,
+          1,
+          8,
+          "analysis.lsp.maxServers",
+          warnings,
+        ),
+        timeoutMs: readInteger(
+          lsp.timeoutMs,
+          DEFAULT_CONFIG.analysis.lsp.timeoutMs,
+          200,
+          60_000,
+          "analysis.lsp.timeoutMs",
+          warnings,
+        ),
+      },
       treeSitter: {
         enabled: readBoolean(
           treeSitter.enabled,
@@ -1642,6 +1706,34 @@ function readBoolean(value: unknown, fallback: boolean, key: string, warnings: s
   if (typeof value === "boolean") return value;
   warnings.push(`${key} must be a boolean; using ${fallback}`);
   return fallback;
+}
+
+function readLspServers(
+  value: unknown,
+  warnings: string[],
+): Readonly<Record<string, string | ReadonlyArray<string>>> {
+  if (value === undefined) return DEFAULT_CONFIG.analysis.lsp.servers;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    warnings.push("analysis.lsp.servers must be an object; using {}");
+    return {};
+  }
+  const out: Record<string, string | ReadonlyArray<string>> = {};
+  for (const [language, command] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof command === "string" && command.trim().length > 0) {
+      out[language] = command.trim();
+      continue;
+    }
+    if (
+      Array.isArray(command) &&
+      command.length > 0 &&
+      command.every((part) => typeof part === "string" && part.length > 0)
+    ) {
+      out[language] = command as string[];
+      continue;
+    }
+    warnings.push(`analysis.lsp.servers.${language} must be a command or string array; skipped`);
+  }
+  return out;
 }
 
 function readHosted(

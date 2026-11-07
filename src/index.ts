@@ -101,6 +101,7 @@ import { HubService } from "./hub/service.ts";
 import { TreeSitterService } from "./analysis/treesitter.ts";
 import { CodeService } from "./code/service.ts";
 import { ShareService } from "./share/service.ts";
+import { LspPool } from "./analysis/lsp/pool.ts";
 import { jevosTarget, normaliseVersion } from "./jev/release.ts";
 import { migrateMemoryIndex, migrateProjectStorage } from "./memory/migrate.ts";
 import { RemoteSpool } from "./remote/spool.ts";
@@ -1097,6 +1098,12 @@ export default Plugin.define({
       config: config.analysis.treeSitter,
       logger,
     });
+    const lsp = new LspPool({
+      projectRoot,
+      root: join(root, "lsp"),
+      config: config.analysis.lsp,
+      logger,
+    });
     const codeService = new CodeService({
       config: config.code,
       binary: () => runtime.binary?.path ?? null,
@@ -1134,6 +1141,7 @@ export default Plugin.define({
       treeSitter,
       code: codeService,
       share: shareService,
+      lsp,
       snapshot,
     });
 
@@ -2209,6 +2217,7 @@ export default Plugin.define({
         try {
           runtime.cmd?.stop();
           autotuner?.stop();
+          await lsp.stopAll();
           await jevos?.stop();
           await runtime.lifecycle?.stop();
           await stopIndexers();

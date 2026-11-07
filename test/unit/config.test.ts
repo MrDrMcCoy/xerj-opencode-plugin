@@ -330,6 +330,52 @@ describe("git history indexing", () => {
   });
 });
 
+describe("analysis gates", () => {
+  test("tree-sitter and LSP are off by default", () => {
+    expect(DEFAULT_CONFIG.analysis.treeSitter).toEqual({
+      enabled: false,
+      languages: [],
+      maxParseBytes: 1048576,
+    });
+    expect(DEFAULT_CONFIG.analysis.lsp).toEqual({
+      enabled: false,
+      servers: {},
+      autoInstall: true,
+      idleMs: 300000,
+      maxServers: 2,
+      timeoutMs: 2000,
+    });
+  });
+
+  test("takes server commands and clamps the LSP bounds", () => {
+    const { config, warnings } = loadConfig({
+      analysis: {
+        lsp: {
+          enabled: true,
+          servers: {
+            typescript: ["typescript-language-server", "--stdio"],
+            python: 5,
+          },
+          idleMs: 1,
+          maxServers: 99,
+          timeoutMs: 1,
+        },
+      },
+    });
+
+    expect(config.analysis.lsp.enabled).toBe(true);
+    expect(config.analysis.lsp.servers.typescript).toEqual([
+      "typescript-language-server",
+      "--stdio",
+    ]);
+    expect(config.analysis.lsp.servers.python).toBeUndefined();
+    expect(config.analysis.lsp.idleMs).toBe(60000);
+    expect(config.analysis.lsp.maxServers).toBe(8);
+    expect(config.analysis.lsp.timeoutMs).toBe(200);
+    expect(warnings.filter((w) => w.includes("analysis.lsp"))).toHaveLength(4);
+  });
+});
+
 describe("reference corpora and share", () => {
   test("both are off by default", () => {
     expect(DEFAULT_CONFIG.code).toEqual({

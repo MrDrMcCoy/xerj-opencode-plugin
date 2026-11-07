@@ -123,6 +123,7 @@ describe("tree-sitter analysis", () => {
       hub: {} as never,
       code: {} as never,
       share: {} as never,
+      lsp: {} as never,
       treeSitter: {
         report: async () => ({
           files: 1,

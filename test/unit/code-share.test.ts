@@ -80,6 +80,7 @@ describe("tool registration", () => {
       treeSitter: {} as never,
       code: {} as never,
       share: {} as never,
+      lsp: {} as never,
       snapshot: async () => ({}) as never,
     }).map((tool) => tool.name);
   }

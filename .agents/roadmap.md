@@ -1409,10 +1409,10 @@ measured; they include tests and the commits that carry them. A status of
 | History search | M | Done | 1.0 h | `archive/index.ts` bulk-loads one document per turn into `<prefix>-archive-docs`, idempotent by session and ordinal, with a manifest so a pruned turn leaves the index; the archive is now a search prefix and its own dataset row; five module tests |
 | Live context distillation | M | Done | 10.0 h | `src/memory/distill.ts`: five classes, heuristic and model judges behind one write path, idempotent promotion with `source: distill:<judge>` and `confidence`, budget retirement, `memory.distill`/`memory.recall` telemetry with a report line and per-judge calls/chars. The model judge caps calls per turn, clips the turn, times out, and falls back. 16 distill tests, a capture test, config tests, and a report test. A golden set of 8 labeled memory sentences plus 7 sentences that must never be promoted: 8/8 recalled and classified, 0 false positives. The measurement harness is `bun run eval:distill` (heuristic always, local with `DISTILL_EVAL_JEVOS_URL`, model with an explicit OpenAI-compatible endpoint); the model delta is not yet recorded. The local jevos judge (`src/jev/`) is the default: checksum-verified install of the binary and the 630 MB model, one shared loopback server with attach and idle stop, a contrastive keep question at 7/8 recall on the labelled set and 1/10 report noise at 0.20 (3/10 without a judge), and a heuristic fallback on every failure path. Every judgement is a `memory.distill.judge` telemetry record; `bun run tune:local` turns the live store into a labelled JSONL corpus and `bun run replay:judge` sweeps wordings and thresholds against it. `local.autotune` (on) replays the fixed labelled set every 24 hours and moves the floor only on a 5-point F1 gain, with the chosen value and evidence in `<data root>/jev/autotune.json`. 33 new unit tests across release, judge, manager, supervisor, distill, the tuning report, the replay sweep, and autotune, plus an end-to-end install run against the real assets |
 | Command output management | M | Done | 5.0 h | `src/cmd/{store,runner,corpus,service}.ts` plus `xerj_run` and `xerj_out`: two files per command under `.xerj/cmd/`, a manifest for exit codes, windowed plain-text index, debounced ingest, two caps (256 MiB files, 32 MiB index), host-result mirroring, the context block and the large-result hint. 21 unit tests across three suites and 2 integration tests; 1101 unit tests pass |
-| LSP pool | L | Not started | — | Gated by `analysis.lsp.enabled` |
-| Server installer | L | Not started | — | — |
-| `xerj_callers`, `xerj_impact` | L | Not started | — | Needs the pool |
-| `xerj_inspect` | L | Not started | — | Needs LSP and tree-sitter |
+| LSP pool | L | Done (gated off) | 6.0 h | `analysis/lsp/client.ts` speaks JSON-RPC over stdio (initialize, didOpen, workspace/symbol, call hierarchy, definitions, references, publishDiagnostics, server-request answers). `analysis/lsp/pool.ts` resolves a configured command, project `node_modules`, PATH, or the cache; starts at most `maxServers`; opens up to 500 TypeScript files because tsserver only indexes opened documents; stops after `idleMs`. Verified against `typescript-language-server@6.0.3` on a two-file fixture: one caller, one impact, clean shutdown. Gate stays closed |
+| Server installer | L | Done (TypeScript) | 1.0 h | `LspPool.installTypeScript` runs `npm install --prefix <staging> --ignore-scripts --no-audit --no-fund typescript-language-server@6.0.3 typescript@5.9.3` into `<data root>/lsp/typescript/6.0.3`, probes `lib/cli.mjs`, and renames under a lock. Other languages use `analysis.lsp.servers` for now |
+| `xerj_callers`, `xerj_impact` | L | Done (gated off) | 1.5 h | Both use `workspace/symbol` to locate the definition, `textDocument/documentSymbol` or the source line to find the name column, then `prepareCallHierarchy` and incoming calls. `impact` follows up to depth 5 and caps at 50. Gated by `analysis.lsp.enabled` |
+| `xerj_inspect` | L | Done (partial) | 1.0 h | Registered without a gate: scans the project for TODO/FIXME/HACK markers. With `analysis.lsp.enabled` and a path, opens the file and reports published diagnostics. Unused exports and dead-code analysis are deferred |
 | `xerj_share` | L | Done (gated off) | 0.5 h | `src/share/service.ts` wraps `xerj share` create/list/revoke with `--expires`, `--max-claims`, optional passcode and label, and `--url` to the plugin node. No tunnel is offered. `share.enabled` is false. Three service tests and a registration test. |
 | Dreamer child sessions | XL | Not started | — | — |
 | Notes and smart notes | XL | Not started | — | — |
@@ -1429,10 +1429,11 @@ hint, where the dedupe test had to distinguish the hint pass from the retrieval
 pass.
 
 Tier M so far: **18.0 h** across eleven items this pass, twelve of fourteen
-with the graph overview that predates it. Remaining: the LSP pool and the
-callers/impact/inspect tools it enables, plus the two XL design items.
-Tree-sitter, complexity, `xerj_ask`, `xerj_code`, `xerj_share`, and window
-extraction are shipped behind their closed gates.
+with the graph overview that predates it. Remaining: the two XL design items
+(dreamer sessions and notes), plus unused-export analysis inside
+`xerj_inspect`. Tree-sitter, complexity, LSP, callers, impact, inspect,
+`xerj_ask`, `xerj_code`, `xerj_share`, and window extraction are shipped behind
+their gates.
 
 ## Settled decisions
 

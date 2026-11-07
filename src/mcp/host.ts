@@ -31,6 +31,7 @@ import { HubService } from "../hub/service.ts";
 import { TreeSitterService } from "../analysis/treesitter.ts";
 import { CodeService } from "../code/service.ts";
 import { ShareService } from "../share/service.ts";
+import { LspPool } from "../analysis/lsp/pool.ts";
 import { dataRoot, environmentFrom } from "../paths.ts";
 import { fileStorage } from "./storage.ts";
 import { SysdocIndexer } from "../sysdocs/index.ts";
@@ -198,6 +199,12 @@ export class McpHost {
         config: this.config.hub,
         binary: () => this.binary?.path ?? null,
         nodeUrl: () => this.client?.baseUrl ?? null,
+        logger: this.logger,
+      }),
+      lsp: new LspPool({
+        projectRoot: this.projectRoot,
+        root: join(dataRoot(environmentFrom(process.env)), "lsp"),
+        config: this.config.analysis.lsp,
         logger: this.logger,
       }),
       code: new CodeService({

@@ -14,6 +14,12 @@ const SHARE_STUB = {
   list: async () => ({ ok: false, text: "share disabled" }),
   revoke: async () => ({ ok: false, text: "share disabled" }),
 } as never;
+const LSP_STUB = {
+  callers: async () => [],
+  impact: async () => [],
+  inspect: async () => [],
+  stopAll: async () => {},
+} as never;
 const TREE_STUB = {
   report: async () => ({ files: 0, functions: [], duplicates: [] }),
 } as never;
@@ -93,6 +99,7 @@ describe("hub tools", () => {
       treeSitter: TREE_STUB,
       code: CODE_STUB,
       share: SHARE_STUB,
+      lsp: LSP_STUB,
       snapshot: async () => ({}) as never,
     }).map((tool) => tool.name);
   }
