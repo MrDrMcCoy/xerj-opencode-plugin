@@ -85,7 +85,7 @@ import { CommitIndex, type CommitSummary } from "./index/commits.ts";
 import { ArchiveIndex } from "./archive/index.ts";
 import { TurnArchive } from "./archive/turns.ts";
 import { CmdService } from "./cmd/service.ts";
-import { isFilteredCommand } from "./cmd/filter.ts";
+import { blockedPipeMessage, isFilteredCommand } from "./cmd/filter.ts";
 import { cmdTools } from "./tools/cmd.ts";
 import { registerCompactionArchive } from "./archive/window.ts";
 import { registerCompactionExtraction } from "./memory/extract.ts";
@@ -1351,6 +1351,18 @@ export default Plugin.define({
         description: "Local XERJ search over this project. Prefer it to reading whole files.",
       });
       for (const tool of measured) editor.add(tool as never);
+    });
+
+    // A host bash/shell call that filters its own output throws away the full
+    // text before xerj_run can keep it. With `cmd.blockPipes` on, the call is
+    // refused and the model is told what to do instead.
+    await ctx.tool.hook("execute.before", async (event) => {
+      if (!config.cmd.blockPipes) return;
+      if (event.tool !== "bash" && event.tool !== "shell") return;
+      const command = (event.input as { command?: unknown } | null)?.command;
+      if (typeof command !== "string") return;
+      const message = blockedPipeMessage(command);
+      if (message !== null) throw new Error(message);
     });
 
     await ctx.tool.hook("execute.after", (event) =>

@@ -303,6 +303,12 @@ export interface CmdOptions {
   readonly enabled: boolean;
   /** Teach the model about `xerj_run` and `xerj_out` in the context block. */
   readonly suggest: boolean;
+  /**
+   * Reject a host `bash`/`shell` call that pipes through head, tail, grep,
+   * sed, awk, or cut. Off by default; the instruction and the per-command
+   * hint are the normal route.
+   */
+  readonly blockPipes: boolean;
   /** Record host bash/shell results, not only commands run through the tool. */
   readonly mirrorHostResults: boolean;
   /** Include the command corpus in prompt-time injection. */
@@ -606,6 +612,7 @@ export const DEFAULT_CONFIG: Config = {
   cmd: {
     enabled: true,
     suggest: true,
+    blockPipes: false,
     mirrorHostResults: true,
     inject: true,
     maxBytes: 256 * 1024 ** 2,
@@ -1549,6 +1556,12 @@ export function loadConfig(
     cmd: {
       enabled: readBoolean(cmd.enabled, DEFAULT_CONFIG.cmd.enabled, "cmd.enabled", warnings),
       suggest: readBoolean(cmd.suggest, DEFAULT_CONFIG.cmd.suggest, "cmd.suggest", warnings),
+      blockPipes: readBoolean(
+        cmd.blockPipes,
+        DEFAULT_CONFIG.cmd.blockPipes,
+        "cmd.blockPipes",
+        warnings,
+      ),
       mirrorHostResults: readBoolean(
         cmd.mirrorHostResults,
         DEFAULT_CONFIG.cmd.mirrorHostResults,

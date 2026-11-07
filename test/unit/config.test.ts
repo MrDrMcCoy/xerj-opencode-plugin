@@ -595,3 +595,16 @@ describe("index.workers", () => {
     expect(loadConfig({ index: { workers: 0 } }).config.index.workers).toBe(1);
   });
 });
+
+describe("cmd.blockPipes", () => {
+  test("is off by default and can be enabled", () => {
+    expect(DEFAULT_CONFIG.cmd.blockPipes).toBe(false);
+    expect(loadConfig({ cmd: { blockPipes: true } }).config.cmd.blockPipes).toBe(true);
+  });
+
+  test("a non-boolean warns and keeps the default", () => {
+    const { config, warnings } = loadConfig({ cmd: { blockPipes: "yes" } });
+    expect(config.cmd.blockPipes).toBe(false);
+    expect(warnings.some((w) => w.includes("cmd.blockPipes"))).toBe(true);
+  });
+});

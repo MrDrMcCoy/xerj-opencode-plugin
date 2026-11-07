@@ -18,6 +18,7 @@ interface Stub {
   readonly sessionHooks: string[];
   readonly rpcMethods: string[];
   readonly call: (method: string, input?: unknown) => Promise<unknown>;
+  readonly runToolHook: (name: string, event: unknown) => Promise<void>;
   readonly status: () => Promise<Record<string, unknown>>;
   emitters: Array<() => void>;
   disposed: number;
@@ -28,6 +29,7 @@ function stubHost(projectRoot: string, options: Record<string, unknown> = {}): S
   const tools: string[] = [];
   const namespaces: string[] = [];
   const toolHooks: string[] = [];
+  const toolHandlers = new Map<string, Handler>();
   const sessionHooks: string[] = [];
   const rpcMethods: string[] = [];
   const emitters: Array<() => void> = [];
@@ -64,7 +66,7 @@ function stubHost(projectRoot: string, options: Record<string, unknown> = {}): S
       },
       hook: async (name: string, handler: Handler) => {
         toolHooks.push(name);
-        void handler;
+        toolHandlers.set(name, handler);
       },
     },
     session: {
@@ -119,6 +121,11 @@ function stubHost(projectRoot: string, options: Record<string, unknown> = {}): S
       if (handler === undefined) throw new Error(`${method} is not registered`);
       return handler(input);
     },
+    runToolHook: async (name, event) => {
+      const handler = toolHandlers.get(name);
+      if (handler === undefined) throw new Error(`${name} is not registered`);
+      await handler(event);
+    },
     status: () => status(),
     emitters,
     disposed: 0,
@@ -170,6 +177,7 @@ describe("server setup wiring", () => {
         "zoom",
       ]);
       expect(host.tools.length).toBe(31);
+      expect(host.toolHooks).toContain("execute.before");
       expect(host.toolHooks).toContain("execute.after");
       expect(host.sessionHooks).toContain("prompt");
       expect(host.sessionHooks).toContain("context");
@@ -306,6 +314,55 @@ describe("bootstrap retry", () => {
       await rm(project, { recursive: true, force: true });
     }
   }, 10_000);
+});
+
+describe("cmd.blockPipes", () => {
+  const event = (command: string, tool = "bash") => ({
+    tool,
+    input: { command },
+  });
+
+  test("is off by default", async () => {
+    const project = await mkdtemp(join(tmpdir(), "xerj-setup-"));
+    const host = stubHost(project, {
+      binary: { path: join(project, "absent-xerj") },
+    });
+
+    try {
+      const cleanup = (await plugin.setup(host.ctx as never)) as () => void;
+      await expect(
+        host.runToolHook("execute.before", event("npm test | head -5")),
+      ).resolves.toBeUndefined();
+      cleanup?.();
+    } finally {
+      await rm(project, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects a filtered host command when on", async () => {
+    const project = await mkdtemp(join(tmpdir(), "xerj-setup-"));
+    const host = stubHost(project, {
+      binary: { path: join(project, "absent-xerj") },
+      cmd: { blockPipes: true },
+    });
+
+    try {
+      const cleanup = (await plugin.setup(host.ctx as never)) as () => void;
+      await expect(
+        host.runToolHook("execute.before", event("npm test | head -5")),
+      ).rejects.toThrow(/xerj_run/);
+      await expect(
+        host.runToolHook("execute.before", event("npm test")),
+      ).resolves.toBeUndefined();
+      // The plugin's own runner is not a host bash call.
+      await expect(
+        host.runToolHook("execute.before", event("npm test | head", "xerj_run")),
+      ).resolves.toBeUndefined();
+      cleanup?.();
+    } finally {
+      await rm(project, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("server rpc handlers", () => {

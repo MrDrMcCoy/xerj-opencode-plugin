@@ -372,6 +372,7 @@ This is the complete set with its defaults, in
         "cmd": {                        // command output kept under .xerj/cmd/
           "enabled": true,              // registers xerj_run and xerj_out
           "suggest": true,              // teach the tools in the context block
+          "blockPipes": false,          // reject host bash | head/tail/grep
           "mirrorHostResults": true,    // record host shell results too
           "inject": true,               // include the corpus in prompt injection
           "maxBytes": 268435456,        // 256 MiB for the pair files
@@ -550,6 +551,7 @@ The same entry works with a checkout path instead of the package name; see
 | `telemetry.maxText` | Characters of caller text kept in a record; `0` records none. |
 | `cmd.enabled` | Register `xerj_run` and `xerj_out` and keep command output under `.xerj/cmd/`. On by default. |
 | `cmd.suggest` | Add the command-output instruction to the first model call of a session and hint after a large result. |
+| `cmd.blockPipes` | Reject a host `bash`/`shell` call that pipes to `head`, `tail`, `grep`, `sed`, `awk`, or `cut`, with a message pointing at `xerj_run`. Off by default. |
 | `cmd.mirrorHostResults` | Record results from the host's `bash`/`shell` tool too, so history covers commands `xerj_run` did not run. |
 | `cmd.inject` | Include the command corpus in prompt-time injection. On by default; `xerj_search` and `xerj_out` still reach it. |
 | `cmd.maxBytes` | Cap for the `<stem>-cmd.txt` and `<stem>-out.txt` pairs together. |

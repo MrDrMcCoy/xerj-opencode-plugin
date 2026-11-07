@@ -388,6 +388,15 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-07: `cmd.blockPipes` (off by default) registers an
+  `execute.before` hook. With the key on, a host `bash`/`shell` call whose
+  command pipes to head, tail, grep, sed, awk, or cut is rejected with a
+  message pointing at `xerj_run` and `xerj_out`. The plugin's own `xerj_run`
+  is not rejected. The default stays the softer route: the first-call
+  instruction and the per-command hint. The README example and option table,
+  a config test, the setup hook test, and the filter tests cover it. 1,337
+  unit tests (1 skip) pass; typecheck clean.
+
 - 2026-11-07: The command-output instruction now names the habit it
   replaces: do not pipe a command to head, tail, grep, sed, awk, or cut to
   look at part of its output; run the command with `xerj_run` and read it

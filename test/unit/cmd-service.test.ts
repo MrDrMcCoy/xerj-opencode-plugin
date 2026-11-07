@@ -7,7 +7,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_CONFIG } from "../../src/config.ts";
-import { isFilteredCommand } from "../../src/cmd/filter.ts";
+import { blockedPipeMessage, isFilteredCommand } from "../../src/cmd/filter.ts";
 import { CmdService } from "../../src/cmd/service.ts";
 
 const logger = {
@@ -117,5 +117,10 @@ describe("isFilteredCommand", () => {
     expect(isFilteredCommand("journalctl -u xerj | tail -n 100")).toBe(true);
     expect(isFilteredCommand("find . -name '*.ts' | wc -l")).toBe(false);
     expect(isFilteredCommand("npm test")).toBe(false);
+  });
+
+  test("the refusal points at xerj_run", () => {
+    expect(blockedPipeMessage("npm test | head -5")).toContain("xerj_run");
+    expect(blockedPipeMessage("npm test")).toBeNull();
   });
 });
