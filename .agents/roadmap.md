@@ -111,12 +111,19 @@ setting, not a build flag: the same published package carries the capability.
 | `share.enabled` | `false` | Register `xerj_share`, which opens a read-only listener for one index |
 | `hub.enabled` | `false` | Register `xerj_ask` and the hub commands |
 | `hub.network` | `false` | Allow `xerj ask` to reach the catalogue and download packs; when false only already-cached packs answer |
+| `cmd.enabled` | `true` | Register `xerj_run` and `xerj_out`, and maintain the command-output corpus. The one open gate; see its design section |
 
 Defaults are closed because each capability adds something a retrieval plugin
 should not impose on its own: 52 to 100 MB of grammars, a process holding
 hundreds of megabytes, an open port, or traffic to a remote catalogue. The
 plugin's contract is that nothing blocks `setup`, and a closed gate keeps
 that true.
+
+`cmd.enabled` is the exception, at the user's request. It writes only inside
+the plugin's own state, it runs one foreground command with a deadline rather
+than owning a shell, and its whole value comes from being on before the first
+long command runs. It still needs an off switch that leaves no directory, no
+tools, and no suggestion.
 
 ### What enabling a gate does
 
@@ -130,6 +137,7 @@ started, no port is opened, and no network call is made.
 | `analysis.lsp.enabled` | Detects the project's languages, then resolves a server for each: `servers[language]`, then the project's `node_modules/.bin`, then `PATH`, then the plugin's own cache. If none is found and `autoInstall` is true, it installs a pinned server into `<data root>/lsp/<language>/<version>/`, probes it with `--version`, and uses it. No toolchain check runs first; a language with no known server logs once and stays unanalysed |
 | `share.enabled` | Nothing until `xerj_share` is invoked. The tool then prints the address and expiry before it accepts a request |
 | `hub.enabled` | The cached catalogue only. `hub.network` adds downloads; until then, a missing pack reports which key would fetch it |
+| `cmd.enabled` (already on) | Nothing until a command runs. `xerj_run` then creates `<project>/.xerj/cmd/` on first use, writes the command and its output, and indexes the text without embedding it. Turning it off removes the tools, the suggestion, and the directory on the next start |
 
 Two rules follow from the table:
 
@@ -200,6 +208,7 @@ Four safety rules for an install:
 | `xerj_inspect` | LSP, tree-sitter | Registered with the index-only part (TODOs); diagnostics and unused exports are omitted and named as gated |
 | `xerj_share` | A listener | Tool not registered |
 | `xerj_ask` | The hub catalogue | Tool not registered; with `hub.enabled` open and `hub.network` closed, only cached packs answer |
+| `xerj_run`, `xerj_out` | `cmd.enabled` (open by default) | Tools not registered, no `cmd/` directory is created, and no suggestion is injected |
 | Retrieval, injection, memory, docs corpora | Nothing gated | Identical with every gate closed |
 
 Five rules make the gates trustworthy:
@@ -803,6 +812,217 @@ tests 2.5 h.
 | Pre-compaction window archive | Magic Context, reduced | Flatten `event.messages` from the `compaction` hook into the archive before the summary replaces them | The turn archive | `context.archive.enabled` |
 | Fact mining from the compaction window | Magic Context, reduced | Turn the same window into durable memories; heuristic first, one bounded model call as the second route | A precision measurement | `memory.extract`, off by default |
 | Post-compaction rehydration | This plugin, defect-driven | After the host compacts, re-inject two or three passages from the session's own working set before the next prompt arrives, under a separate budget and a `<xerj-recall>` marker | The dedupe reset (shipped) | `context.rehydrate`, on by default, capped by `context.rehydrateTokens` (600) |
+| Command output management | This plugin, new | Keep every long command's text in `.xerj/cmd/`, index it cheaply, and give the model `xerj_run` and `xerj_out` instead of `head`/`tail`/`grep` over a terminal | None | `cmd.enabled`, on by default |
+
+### Command output management design
+
+A long command is the one place where an agent reliably spends context it
+cannot afford: a build log, a test run, a `journalctl`, or a `find` over a
+large tree is thousands of lines, and the model reads a `head` or a `tail` and
+then runs the command again to see the middle. The output is already produced
+and already known; what is missing is a place to keep it and a way to ask it a
+question.
+
+This feature adds both: a directory of command text, indexed like a corpus but
+cheaply, and two tools that replace the shell idioms. The model is told to use
+them and the instruction stays in context across turns.
+
+#### What it is not
+
+It is not a second shell. The roadmap's non-goal stands: no pty, no detach, no
+resident session, no background jobs, no notification. `xerj_run` runs one
+command in the foreground, waits for it, and returns a receipt. The host's
+`bash` tool remains the way to do anything interactive.
+
+It is the one write path outside the plugin's own databases, so it is bounded
+to the plugin's state directory: `cmd/` under the project's storage root. No
+project file is ever opened for writing.
+
+#### Paths and file format
+
+```
+<storage root>/cmd/                   0700, gitignored by .xerj/.gitignore
+  20261106T192233123Z-cmd.txt         the command string, exactly as run
+  20261106T192233123Z-out.txt         stdout and stderr interleaved, in order
+  manifest.json                       stem -> { at, bytes, lines, exitCode, durationMs }
+  20261106T192233123Z-out.txt.part    only while the command still runs
+```
+
+Two files per command, as specified. The stem is a UTC timestamp with
+milliseconds, `YYYYMMDDTHHMMSSmmmZ`, so lexical order is age order and a pair
+is found by its common stem. Two commands started in the same millisecond are
+serialised under a writer lock that bumps the stamp, so a stem is unique.
+
+Output is written to `<stem>-out.txt.part` and renamed on exit, so a reader
+never sees a half-written log. The manifest carries the exit code and timing;
+if it is lost, the pairs are still readable, and a rebuild scans the directory
+and reports `exitCode: null` rather than guessing.
+
+The directory sits under `.xerj`, which every ingester skips, so these files
+never enter the project corpus and cannot feed their own writes back.
+
+#### Lifecycle
+
+| Trigger | Action |
+|---|---|
+| `xerj_run` | Run the command, write both files, update the manifest, queue an index pass |
+| Host `bash`/`shell` result, when `cmd.mirrorHostResults` | Write the command and the result text the host returned; mark `truncated: true` when the host clipped it, so history covers commands run outside the wrapper |
+| Exchange of a large result (`cmd.hintLines`, 40) | Queue a one-line hint for the next turn naming the stem |
+| Startup, each ingest, hourly | Sweep to the size cap |
+
+The runner uses the host's shell (`bash -lc`), the project root as the working
+directory, and the inherited environment. The process group is killed on the
+deadline (`cmd.timeoutMs`, 10 min) or when the captured output reaches
+`cmd.maxCommandBytes` (64 MiB), and the file records which limit tripped.
+Binary output is stored and marked, not parsed.
+
+#### The index: present, cheap, and not embedded
+
+The corpus is `<prefix>-cmd-docs` (for example
+`xop-cmd-6f7bb383-docs`), one index, `body` as plain `text`. It is not a
+`semantic_text` field: logs are literal, the neural embedder buys nothing for
+an error string or a stack trace, and embedding megabytes per command would
+cost more than the whole project pass. The semantic leg skips it by mapping,
+which is what the scope fix already does.
+
+Files are split into windows of `cmd.windowLines` (200) lines or
+`cmd.windowBytes` (16 KiB), whichever binds first. One document per window:
+
+```jsonc
+{"stem":"20261106T192233123Z","kind":"out","body":"...",
+ "start_line":401,"end_line":600,"lines":1200,"bytes":48213,
+ "exit_code":1,"at":"2026-11-06T19:22:33Z","truncated":false,
+ "command":"npm test","ax_path":"cmd/20261106T192233123Z-out.txt"}
+```
+
+The id is `sha256(stem + kind + start_line)`, so a re-ingest is idempotent and
+a pruned stem deletes its windows by id. The command file is indexed as one
+small document, so "what did I run last Tuesday" is a search. A file past
+`cmd.maxFileBytes` is stored and named in `list`, but not parsed; the raw file
+keeps everything either way.
+
+This is the "less aggressive" part: no embedding, bounded windows, indexed
+bytes capped, a background job at `node.priority`, and a debounce so a burst
+of commands becomes one pass. Query-time `_passage` offsets map a window hit
+back to the exact line in the raw file.
+
+#### Tools
+
+| Tool | Input | Returns |
+|---|---|---|
+| `xerj_run` | `command`, `timeoutMs?` | Exit code, duration, line and byte counts, the stem, and whether output was truncated; never the output |
+| `xerj_out` with `list` | `limit?`, `command?` | Newest stems first: stem, command, exit code, age, lines, bytes |
+| `xerj_out` with `show` | `stem`, `start?`, `end?` | The exact lines from the raw file, capped by `cmd.showTokens` (1,200 tokens), with `cmd/<stem>-out.txt:120` citations. Works before the file is indexed |
+| `xerj_out` with `search` | `query`, `stem?`, `k?` | Lexical windows with `stem:line` citations and the matched text, deduped by window |
+| `xerj_out` with `ingest` | `path`, `command?` | Copies a file the agent wrote outside the wrapper into the log directory as a new pair, then indexes it; refuses above `cmd.maxFileBytes` |
+
+`list` is what reduces repeat commands: before re-running a build, the model
+can see that it ran it and what the exit code was. `show` and `search` are the
+replacements for `head`, `tail`, `sed -n`, and `grep`.
+
+#### The instruction that stays in context
+
+The first model call of a session appends a `<xerj-command-output>` block next
+to `<xerj-corpus>`:
+
+```
+<xerj-command-output>
+Long command output belongs in the XERJ log directory, not in this window.
+Run such a command with `xerj_run` (it writes cmd/<stem>-cmd.txt and
+cmd/<stem>-out.txt and returns only exit code and sizes), then read what you
+need with `xerj_out show stem=<stem> start=120 end=160` or
+`xerj_out search query="..."`. Before repeating a command, `xerj_out list`
+shows what already ran and how it ended.
+</xerj-command-output>
+```
+
+The block is charged to the 300-token corpus budget, re-emitted when the
+corpus block is rebuilt, and re-emitted after `session.compaction.ended` with
+the recall block, because the summary drops the first call. A single
+`<xerj-hint>` line after a large mirrored result names the stem once; it
+follows the existing hint path and the session dedupe, so it cannot repeat.
+
+`cmd.suggest: false` removes both without disabling the tools.
+
+#### Retention and rotation
+
+One sweep, oldest complete stem first, deleting both files and their index
+documents together:
+
+| Key | Default | Bound |
+|---|---|---|
+| `cmd.maxBytes` | 268435456 (256 MiB) | The directory and `<prefix>-cmd-docs` together: file bytes from a walk plus the index size from `_cat/indices` |
+| `cmd.maxFileBytes` | 33554432 (32 MiB) | One command's output; past this it is stored but not parsed |
+
+One budget covers both stores because the request is one number: 256 MiB is
+what a user expects to spend, not 256 MiB of files plus a second 64 MiB of
+index. The sweep measures both, then deletes the oldest complete stem, files
+and documents together, until the total is under the cap. It runs at startup,
+after each ingest, and hourly; it never deletes a stem whose command is still
+running. A directory walk is cached for 60 seconds, as the telemetry sweep
+already does.
+
+#### Configuration
+
+```jsonc
+"cmd": {
+  "enabled": true,              // registers both tools; false leaves no trace
+  "suggest": true,              // the context block and the large-result hint
+  "mirrorHostResults": true,    // record host bash/shell results too
+  "inject": false,              // include this corpus in prompt-time injection
+  "maxBytes": 268435456,        // 256 MiB: files plus the index, together
+  "maxCommandBytes": 67108864,  // captured per command before truncation
+  "maxFileBytes": 33554432,     // one file past this is stored but not parsed
+  "windowLines": 200,           // index window, lines
+  "windowBytes": 16384,         // index window, bytes
+  "showTokens": 1200,           // cap for one `show` answer
+  "timeoutMs": 600000,          // deadline for xerj_run
+  "hintLines": 40               // a mirrored result past this queues a hint
+}
+```
+
+Injection is off by default: a log corpus that always competes for the turn
+budget would crowd out the project. `xerj_search` reaches it, `xerj_out` is
+the focused path, and `inject: true` opts into automatic retrieval.
+
+#### Failure modes
+
+| Case | Behaviour |
+|---|---|
+| Disk full or the directory unwritable | Stop capturing, log once, tools report the failure; retrieval and the host shell are unaffected |
+| Command times out | Kill the process group, keep the partial output, mark `timedOut` |
+| Output over `maxCommandBytes` | Truncate at the cap, append a marker line, mark `truncated` |
+| Binary output | Store it, mark `binary: true`, index nothing for that file |
+| Manifest missing or corrupt | Rebuild by scanning pairs; exit codes and durations read `null` |
+| A killed process leaves `-out.txt.part` | Startup folds a stale partial (older than `cmd.timeoutMs`) into a completed pair, marked `truncated` |
+| Two commands in one millisecond | The writer lock bumps the stamp, so stems stay unique |
+| Sweep meets a running command | Skip any stem whose `.part` file exists |
+| A tool call names an unknown stem | Report the nearest stems by age, never guess |
+
+#### Tests
+
+Unit: stem format and ordering, pairing, manifest round trip and rebuild,
+window splitting at both limits, id stability, prune order and cap arithmetic,
+redaction of the indexed command string (the raw file keeps what was printed),
+`show` range math and token cap, tool argument validation, the suggestion
+block's token cost, and a runner that hits its deadline and its byte cap.
+
+Integration, against a real node: a `xerj_run` of a noisy command creates two
+files and one index document set; `xerj_out show` returns the exact requested
+range; `search` finds a marker line as `cmd/<stem>-out.txt:<line>`; a run past
+`cmd.maxBytes` prunes the oldest stem and its documents; `cmd.enabled: false`
+creates no directory, registers no tools, and injects nothing; a mirrored host
+result is marked truncated and is searchable.
+
+#### Effort
+
+Tier S slice, about three days: `xerj_run`, the files and manifest, `xerj_out
+list` and `show`, the sweep, and the context block. No index, so `search` is
+absent.
+
+Tier M completion, about five days more (eight total): the windowed index,
+`xerj_out search` and `ingest`, mirroring host results, the large-result hint,
+and the integration suite.
 
 ## Tier L: three to six weeks, high to medium suitability
 
@@ -844,6 +1064,10 @@ tests 2.5 h.
 | Grammar cache corrupts | Verify against a checksum before use, as the binary path does; a bad grammar is a logged skip, not a crash |
 | Host compaction hides an injected passage | The dedupe set resets on `session.compaction.ended`, so the next turn may re-inject what the summary dropped |
 | The turn archive grows without bound | `context.archive.maxBytes` (64 MB) prunes oldest turns at startup, and the panel reports the size |
+| Command output fills the disk | `cmd.maxBytes` (256 MiB) bounds the files and the index together, and the sweep deletes oldest complete stems first, files and documents together |
+| `xerj_run` becomes a privilege path | One foreground command with a deadline and a byte cap, no pty, no detach, no session; it writes only under the plugin's own state and never a project file |
+| A log contains a secret and is indexed | The raw files are 0600 under a 0700 directory and stay on this machine; the indexed command string and body pass through the same redaction as the web spool, and the tool description says the raw files are not redacted |
+| Command history bloats every prompt | The corpus joins prompt-time injection only with `cmd.inject`; by default just the short instruction block and one hint line enter the prompt |
 | An archive surprises a user | It is local, mode 0700, inside the project's own `.xerj`, and `context.archive.enabled: false` removes it |
 | Retrieval slows down | Every new query path is measured against the 400 ms budget; a path that misses it becomes a tool, not an injection |
 | Scope creep | One plugin owning search, analysis, archive, and memory is large; each tier lands as a release with its own coverage gate |
@@ -923,6 +1147,7 @@ measured; they include tests and the commits that carry them. A status of
 | Fact mining from the compaction window | M | Not started | — | Deferred by the user. Two routes: a heuristic pass over the same window (patterns for decisions, constraints, config keys, commands that worked) at about 2 h, or one model call bounded by a token budget at about 3 to 4 h. Needs a precision measurement before it defaults on, a `derived` memory kind, and reuse of the stale flag; gated by `memory.extract`, off by default |
 | Post-compaction rehydration | M | Done | 2.0 h | `src/rehydrate.ts` builds the block from the three newest citations, re-reading a 24-line window inside the project root and capping the result at `context.rehydrateTokens` (600); `session.compaction.ended` snapshots the working set, the `model.request` hook suppresses the summariser's own call, and a fresh retrieval with hits supersedes the recall. Ten module tests and six hook tests |
 | History search | M | Done | 1.0 h | `archive/index.ts` bulk-loads one document per turn into `<prefix>-archive-docs`, idempotent by session and ordinal, with a manifest so a pruned turn leaves the index; the archive is now a search prefix and its own dataset row; five module tests |
+| Command output management | M | Not started | 3 d (S slice) + 5 d (index) | Design settled: `.xerj/cmd/`, two files per command, plain-text windows, `xerj_run` and `xerj_out`, 256 MiB cap, on by default |
 | LSP pool | L | Not started | — | Gated by `analysis.lsp.enabled` |
 | Server installer | L | Not started | — | — |
 | `xerj_callers`, `xerj_impact` | L | Not started | — | Needs the pool |
