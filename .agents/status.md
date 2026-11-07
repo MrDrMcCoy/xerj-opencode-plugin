@@ -381,6 +381,18 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: The local judge has a tuning loop and a measured floor. Every
+  captured judgement can be replayed through four keep questions and nine
+  thresholds with `bun run replay:judge`; labels added to the JSONL survive a
+  later `tune:local` run, and `--labeled` uses the built-in set when the live
+  file is empty. On the labelled reports the current wording scores 88%
+  precision and 88% recall at 0.20 against 78% and 88% at 0.15, so the default
+  floor moved to 20. The plain "durable fact" wording trails at 62% F1, which
+  is the evidence for keeping the contrastive question. 4 new unit tests
+  cover the confusion matrix, inverted wordings, missing answers, and the best
+  threshold; 1205 unit tests pass and typecheck is clean. Nothing is pushed or
+  released.
+
 - 2026-11-06: The local judge is now the default: live-context distillation is
   on (`memory.distill.enabled: true`) and `memory.distill.judge` is `local`.
   A setup therefore starts the jevos install in the background on first run;

@@ -348,7 +348,7 @@ describe("memory distillation", () => {
         threads: 0,
         idleMs: 600000,
         timeoutMs: 5000,
-        threshold: 15,
+        threshold: 20,
         kindConfidence: 40,
         downloadTimeoutMs: 900000,
         startupTimeoutMs: 120000,

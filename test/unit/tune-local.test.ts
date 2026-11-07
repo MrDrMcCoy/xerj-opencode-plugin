@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseOps, summarize } from "../../scripts/tune-local.ts";
+import { mergeSamples, parseOps, summarize } from "../../scripts/tune-local.ts";
 
 function line(meta: Record<string, unknown>, op = "memory.distill.judge"): string {
   return JSON.stringify({
@@ -38,6 +38,23 @@ describe("local judge telemetry", () => {
     const text = line({ verdict: "keep", score: 0.5 });
     expect(parseOps(text, "xop-other-00000000")).toHaveLength(0);
     expect(parseOps(text, "xop-demo-1a2b3c4d")).toHaveLength(1);
+  });
+
+  test("merging keeps history and a human label", () => {
+    const merged = mergeSamples(
+      [
+        { at: 1, prefix: "p", text: "a", label: true },
+        { at: 2, prefix: "p", text: "b", label: false },
+      ],
+      [
+        { at: 1, prefix: "p", text: "a", verdict: "keep" },
+        { at: 3, prefix: "p", text: "c", verdict: "drop" },
+      ],
+    );
+
+    expect(merged).toHaveLength(3);
+    expect(merged[0]).toMatchObject({ text: "a", label: true, verdict: "keep" });
+    expect(merged[2]).toMatchObject({ text: "c", verdict: "drop" });
   });
 
   test("summarizes verdicts, outcomes, means, and score buckets", () => {

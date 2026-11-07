@@ -40,7 +40,8 @@
     "eval": "bun scripts/eval.ts",
     "build:mcp": "bun scripts/build-mcp.ts",
     "eval:distill": "bun scripts/eval-distill.ts",
-    "tune:local": "bun scripts/tune-local.ts"
+    "tune:local": "bun scripts/tune-local.ts",
+    "replay:judge": "bun scripts/replay-judge.ts"
   },
   "devDependencies": {
     "@opencode/theme": "^2.2.5",

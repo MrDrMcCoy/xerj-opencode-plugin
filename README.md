@@ -324,7 +324,7 @@ This is the complete set with its defaults, in
               "threads": 0,              // 0 uses every logical CPU
               "idleMs": 600000,          // stop after this long unused
               "timeoutMs": 5000,         // one judgement request
-              "threshold": 15,           // P(keep) floor, percent
+              "threshold": 20,           // P(keep) floor, percent
               "kindConfidence": 40,      // kind choice floor, percent
               "downloadTimeoutMs": 900000, // 630 MB model download
               "startupTimeoutMs": 120000 // model load + first health

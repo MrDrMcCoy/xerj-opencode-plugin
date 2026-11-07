@@ -29,6 +29,8 @@ export interface JudgeRecord {
   readonly text?: string;
   readonly threshold?: number;
   readonly session?: string;
+  /** Set by a human in the JSONL; preserved across runs. */
+  readonly label?: boolean;
 }
 
 const BUCKETS = 10;
@@ -149,6 +151,54 @@ function textOf(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+/** Reads a `tune:local` JSONL file, labels included. */
+export function parseSamples(text: string): JudgeRecord[] {
+  const records: JudgeRecord[] = [];
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const value = JSON.parse(line) as Record<string, unknown>;
+      if (typeof value !== "object" || value === null) continue;
+      records.push({
+        ...(value as unknown as JudgeRecord),
+        at: typeof value.at === "number" ? value.at : 0,
+        prefix: typeof value.prefix === "string" ? value.prefix : "",
+        label: typeof value.label === "boolean" ? value.label : undefined,
+      });
+    } catch {
+      continue;
+    }
+  }
+  return records;
+}
+
+/**
+ * Unions an old sample file with the new rows, so a run after the ops log
+ * rotated cannot drop history and a human label survives.
+ */
+export function mergeSamples(
+  existing: readonly JudgeRecord[],
+  incoming: readonly JudgeRecord[],
+): JudgeRecord[] {
+  const merged = new Map<string, JudgeRecord>();
+  for (const record of existing) merged.set(sampleKey(record), record);
+  for (const record of incoming) {
+    const key = sampleKey(record);
+    const previous = merged.get(key);
+    merged.set(
+      key,
+      previous?.label === undefined
+        ? record
+        : { ...record, label: previous.label },
+    );
+  }
+  return [...merged.values()].sort((left, right) => left.at - right.at);
+}
+
+function sampleKey(record: JudgeRecord): string {
+  return `${record.at}\u0000${record.prefix}\u0000${record.text ?? ""}`;
+}
+
 function arg(name: string): string | undefined {
   const index = process.argv.indexOf(name);
   return index === -1 ? undefined : process.argv[index + 1];
@@ -234,13 +284,20 @@ export async function run(): Promise<void> {
     }
   }
 
+  let existing: JudgeRecord[] = [];
+  try {
+    existing = parseSamples(await readFile(out, "utf8"));
+  } catch {
+    // First run, or the file is unreadable; start with the live rows.
+  }
+  const merged = mergeSamples(existing, records);
   await mkdir(dirname(out), { recursive: true, mode: 0o700 });
   await writeFile(
     out,
-    `${records.map((record) => JSON.stringify(record)).join("\n")}\n`,
+    `${merged.map((record) => JSON.stringify(record)).join("\n")}\n`,
     { mode: 0o600 },
   );
-  console.log(`\nwrote ${records.length} rows to ${out}`);
+  console.log(`\nwrote ${merged.length} rows to ${out}`);
 }
 
 if (import.meta.main) {
