@@ -710,6 +710,11 @@ idx 2m ago · 1,284 records
 ▸ /xerj for details
 ```
 
+That predates the boxed sidebar. The header now carries only the fold control
+and the label; the state badge and the plugin version sit on their own lines
+below it, inside the open block, so a collapsed sidebar is one header row plus
+the summary rows (and a `Jobs` row while something runs).
+
 The third line reports the last run's record count, not a change count: the
 run document gives totals, and a change delta would need a second source.
 

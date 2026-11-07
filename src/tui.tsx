@@ -569,13 +569,10 @@ export default Plugin.define({
                     {prefs.headerLabel}
                   </b>
                 </text>
-                <text fg={context.theme.text.muted}>{` ${view.badge}`}</text>
               </box>
-              {prefs.showVersion ? (
-                <text fg={context.theme.text.faint}>v{view.version}</text>
-              ) : null}
             </box>
 
+            {/* A failing corpus stays visible in both views. */}
             {trouble === null ? null : (
               <text fg={context.theme.text.feedback.warning.base}>⚠ {trouble}</text>
             )}
@@ -583,6 +580,10 @@ export default Plugin.define({
             {collapsed()
               ? view.collapsed.map(row)
               : [
+                  <text fg={context.theme.text.muted}>{view.badge}</text>,
+                  ...(prefs.showVersion
+                    ? [<text fg={context.theme.text.faint}>{`v${view.version}`}</text>]
+                    : []),
                   ...view.sections.map((section) => (
                     <box flexDirection="column" marginTop={1}>
                       <text fg={context.theme.text.base}>

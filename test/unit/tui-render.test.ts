@@ -301,6 +301,9 @@ describe("TUI render bodies", () => {
 
     const tree = textOf(sidebar?.render());
     expect(tree).toContain("▼  XERJ");
+    // The status and version sit under the header, inside the open block.
+    expect(tree).toContain("● ready");
+    expect(tree).toContain("v0.0.0-test");
     expect(tree).toContain("Corpora");
     expect(tree).toContain("Session");
     expect(tree).toContain("skipped");
@@ -309,7 +312,7 @@ describe("TUI render bodies", () => {
     dispose();
   });
 
-  test("the header shows the badge and a running job", async () => {
+  test("the header is just the label, and the status line moves with the body", async () => {
     const plugin = TuiPlugin as unknown as {
       setup: (context: unknown) => Promise<() => void>;
     };
@@ -337,14 +340,19 @@ describe("TUI render bodies", () => {
     const expanded = textOf(sidebar?.render());
 
     expect(expanded).toContain("◐ busy · indexing · 12s");
+    expect(expanded).toContain("v0.0.0-test");
     expect(expanded).toContain("jobs");
     expect(expanded).toContain("indexing 12s");
 
-    // Collapsed, the running job keeps a row of its own.
+    // Collapsed, the header keeps only the label; the status line, the
+    // version, and the sections fold away, and the job keeps a row.
     const toggle = findHandler(sidebar?.render() as Element, "onMouseDown");
     (toggle as () => void)();
     const collapsed = textOf(sidebar?.render());
 
+    expect(collapsed).toContain("▶  XERJ");
+    expect(collapsed).not.toContain("◐ busy");
+    expect(collapsed).not.toContain("v0.0.0-test");
     expect(collapsed).toContain("Jobs");
     expect(collapsed).toContain("indexing 12s");
     expect(collapsed).not.toContain("Corpora");
