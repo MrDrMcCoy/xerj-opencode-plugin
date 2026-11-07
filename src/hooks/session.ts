@@ -27,8 +27,16 @@ export interface SessionHookOptions {
   readonly summarize: () => Promise<string>;
   /** Times one retrieval leg; omitted leaves the pass unmeasured. */
   readonly measure?: <T>(
-    op: "retrieve" | "recall" | "hint" | "hook.prompt" | "hook.context",
+    op:
+      | "retrieve"
+      | "recall"
+      | "hint"
+      | "hook.prompt"
+      | "hook.context"
+      | "memory.distill",
     body: () => Promise<T>,
+    /** Records the operation's own counts, e.g. a distilled share. */
+    meta?: (result: T) => unknown,
   ) => Promise<T>;
   readonly onInject?: () => void;
   /**
@@ -177,10 +185,17 @@ export async function registerSessionHooks(
   // Every per-session record is bounded: a server can run for days and see
   // thousands of sessions, so nothing here may grow without limit.
   const measure = <T>(
-    op: "retrieve" | "recall" | "hint" | "hook.prompt" | "hook.context",
+    op:
+      | "retrieve"
+      | "recall"
+      | "hint"
+      | "hook.prompt"
+      | "hook.context"
+      | "memory.distill",
     body: () => Promise<T>,
+    meta?: (result: T) => unknown,
   ): Promise<T> =>
-    options.measure === undefined ? body() : options.measure(op, body);
+    options.measure === undefined ? body() : options.measure(op, body, meta);
 
   const prepared = new Map<string, Prepared>();
   const lastInjected = new Map<string, string>();
@@ -218,9 +233,12 @@ export async function registerSessionHooks(
       await options.recordQuery(event.sessionID, paths, result.bytes, result.hits.length);
 
       const shown = memoriesShown.get(event.sessionID) ?? new Set<string>();
-      const memory = await measure("recall", () =>
-        recallMemories(text, options, shown),
+      const recall = await measure(
+        "recall",
+        () => recallMemories(text, options, shown),
+        (value) => ({ hits: value.hits, distilled: value.distilled }),
       );
+      const memory = recall.block;
       if (memory.length > 0) forgetOldest(memoriesShown, event.sessionID, shown);
 
       if (result.hits.length === 0 && memory.length === 0) {
@@ -512,14 +530,21 @@ function sessionOf(raw: unknown): string | null {
   return typeof sessionID === "string" ? sessionID : null;
 }
 
+interface RecalledMemory {
+  readonly block: string;
+  readonly hits: number;
+  /** Hits that came from live-context distillation, per judge mode. */
+  readonly distilled: number;
+}
+
 async function recallMemories(
   text: string,
   options: SessionHookOptions,
   /** Memory ids this session already received. */
   shown: Set<string>,
-): Promise<string> {
+): Promise<RecalledMemory> {
   const memory = options.getMemory();
-  if (!memory) return "";
+  if (!memory) return { block: "", hits: 0, distilled: 0 };
 
   const terms = contentTerms(text);
   const hits = (await memory.recall(text, 3)).filter((hit) => {
@@ -527,13 +552,17 @@ async function recallMemories(
     const topic = typeof hit.metadata.topic === "string" ? hit.metadata.topic : "";
     return coversTerms(`${topic}\n${hit.text}`, terms, MEMORY_COVERAGE_RATIO);
   });
-  if (hits.length === 0) return "";
+  if (hits.length === 0) return { block: "", hits: 0, distilled: 0 };
 
   const block = formatMemories(hits, options.config.context.memoryTokens * 4);
-  if (block.length === 0) return "";
+  if (block.length === 0) return { block: "", hits: hits.length, distilled: 0 };
 
   for (const hit of hits) shown.add(hit.id);
-  return block;
+  const distilled = hits.filter((hit) => {
+    const source = hit.metadata.source;
+    return typeof source === "string" && source.startsWith("distill:");
+  }).length;
+  return { block, hits: hits.length, distilled };
 }
 
 /** A passage's identity for session dedupe: same file and same line. */

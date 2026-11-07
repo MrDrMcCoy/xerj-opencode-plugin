@@ -96,6 +96,16 @@ export interface ProcessSummary {
   readonly growthMbPerDay: number;
 }
 
+/** Cost and effect of live-context distillation, summed over the window. */
+export interface DistillSummary {
+  /** Memories promoted, by judge. */
+  readonly promoted: number;
+  readonly heuristic: number;
+  readonly model: number;
+  /** Recall hits that came from a distilled memory. */
+  readonly recalled: number;
+}
+
 export interface TelemetryReport {
   readonly rows: ReadonlyArray<OpSummary>;
   readonly starts: ReadonlyArray<BootSummary>;
@@ -106,6 +116,7 @@ export interface TelemetryReport {
   readonly storeBytes: number;
   /** Date of the oldest record still on disk, or null when empty. */
   readonly historyStart: string | null;
+  readonly distill: DistillSummary;
 }
 
 /** What `xerj_telemetry` and the panel read; empty when telemetry is off. */
@@ -118,6 +129,7 @@ export const EMPTY_REPORT: TelemetryReport = {
   process: null,
   storeBytes: 0,
   historyStart: null,
+  distill: { promoted: 0, heuristic: 0, model: 0, recalled: 0 },
 };
 
 const QUEUE_LIMIT = 5_000;
@@ -466,6 +478,7 @@ export class TelemetryStore {
       process: await this.processSummary(since),
       storeBytes: await this.storeBytes(),
       historyStart: await this.historyStart(),
+      distill: distillSummary(records),
     };
   }
 
@@ -1081,6 +1094,31 @@ function dwellTotal(dwell: StateDwell): number {
     dwell.degradedMs +
     dwell.stoppedMs
   );
+}
+
+/** Sums the judge and recall counts the distill and recall spans recorded. */
+function distillSummary(records: ReadonlyArray<OpRecord>): DistillSummary {
+  let promoted = 0;
+  let heuristic = 0;
+  let model = 0;
+  let recalled = 0;
+
+  for (const record of records) {
+    if (record.op === "memory.distill" && record.meta?.phase !== "retire") {
+      const count = numberMeta(record.meta?.promoted);
+      promoted += count;
+      if (record.meta?.judge === "model") model += count;
+      else heuristic += count;
+    }
+    if (record.op === "memory.recall") {
+      recalled += numberMeta(record.meta?.distilled);
+    }
+  }
+  return { promoted, heuristic, model, recalled };
+}
+
+function numberMeta(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
 function summarize(

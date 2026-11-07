@@ -20,6 +20,7 @@ cited passages instead of whole files. Nothing leaves the machine.
 - [How retrieval works](#how-retrieval-works)
   - [Measuring a change](#measuring-a-change)
 - [Memory](#memory)
+  - [Distillation](#distillation)
 - [Command output](#command-output)
 - [Fetched pages and external files](#fetched-pages-and-external-files)
 - [Tools](#tools)
@@ -306,6 +307,13 @@ This is the complete set with its defaults, in
             "days": 0,                   // 0 means unlimited
             "maxCount": 0,               // 0 disables the count cap
             "maxBytes": 2147483648       // 2 GiB
+          },
+          "distill": {                   // typed memory from live turns
+            "enabled": false,            // one gate; off by default
+            "judge": "heuristic",        // or "model", the expensive route
+            "minConfidence": 55,         // percentage a candidate needs
+            "maxPerTurn": 3,             // memories promoted per turn
+            "maxPerProject": 200         // distilled memories kept
           }
         },
         "stats": {
@@ -398,6 +406,11 @@ The same entry works with a checkout path instead of the package name; see
 | `memory.retain.days` | Days an automatic summary is kept; `0` (default) means unlimited. |
 | `memory.retain.maxCount` | Summaries kept regardless of age; `0` disables the count cap. |
 | `memory.retain.maxBytes` | Bytes of summary text kept; `0` disables the size cap. |
+| `memory.distill.enabled` | Turn live turns into typed memories and retire what stops being true. Off by default. |
+| `memory.distill.judge` | `heuristic` (the local filter) or `model` (a model call per candidate; the model judge is not wired yet, so it falls back to the heuristic). |
+| `memory.distill.minConfidence` | Percentage a candidate needs to become a memory. |
+| `memory.distill.maxPerTurn` | Memories promoted from one turn. |
+| `memory.distill.maxPerProject` | Distilled memories kept; the lowest-confidence, oldest go first. |
 | `index.graph` | Index the project as one graph corpus (a "super brain"): sections, symbols, `path:line`, and edges. On by default; `false` restores the flat `--no-graph` corpus with the engine's own watcher. A change rebuilds the project corpus once. |
 | `index.semantic` | Include the semantic retrieval leg. |
 | `index.neural` | Embed passages with the node's neural model (`--embed-mode neural`). Set `false` for lexical embeddings. Changing it rebuilds the project index once; neural indexing is roughly ten times slower than lexical. |
@@ -638,6 +651,35 @@ drops an exact duplicate of an automatic summary and flags other repeats as
 
 Memory written before project storage moved out of the global data root is
 copied into the node's data directory on setup when the destination is empty.
+
+### Distillation
+
+`memory.distill.enabled` turns finished turns into typed memories without
+touching the model's window. After each answer the plugin classifies a few
+sentences from that turn as a decision, constraint, convention, preference, or
+fact, scores them, and stores the ones that clear `minConfidence`. A
+`path:line`, a config key, or a version raises the score; a question, a hedge,
+a plan ("let me check"), or fenced code is never a candidate. It runs after
+`session.execution.succeeded`, so a short turn such as "we decided to use
+SQLite" counts even when it is too short for turn capture.
+
+Two judges share the same write path. `heuristic` is the local filter above and
+costs nothing. `model` asks the current model about a candidate; the model route
+is not wired yet, so selecting it falls back to the heuristic and says so at
+debug level. The judge is stored on every memory as `source: distill:<judge>`,
+so a later comparison can tell which produced what.
+
+Retirement is by evidence, not by relevance. A decision stays true whether or
+not this turn needed it, so distilled memories are retired by budget (keep the
+highest confidence, then the newest) and by the usual verification and curation
+passes, never because a retrieval did not select them.
+
+Both judges report to telemetry as `memory.distill`, with the judge name and
+the candidate, promoted, duplicate, and rejected counts, and the recall pass
+records how many of its hits were distilled. Together those are the cost side
+(duration and count per judge) and the effectiveness side (promoted memories
+that are actually recalled), readable through `xerj_telemetry op=memory.distill`
+and `xerj_telemetry op=memory.recall`.
 
 [Back to top](#table-of-contents)
 

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { DEFAULT_CONFIG } from "../../src/config.ts";
 import {
   SessionPrompts,
   startCompactionCapture,
@@ -18,13 +19,28 @@ const logger = {
 
 function stubStore(): {
   store: MemoryStore;
-  seen: Array<{ text: string; kind?: string; topic?: string }>;
+  seen: Array<{
+    text: string;
+    kind?: string;
+    topic?: string;
+    metadata?: Record<string, unknown>;
+  }>;
   forgotten: string[];
 } {
-  const seen: Array<{ text: string; kind?: string; topic?: string }> = [];
+  const seen: Array<{
+    text: string;
+    kind?: string;
+    topic?: string;
+    metadata?: Record<string, unknown>;
+  }> = [];
   const forgotten: string[] = [];
   const store = {
-    remember: async (input: { text: string; kind?: string; topic?: string }) => {
+    remember: async (input: {
+      text: string;
+      kind?: string;
+      topic?: string;
+      metadata?: Record<string, unknown>;
+    }) => {
       seen.push(input);
       return { id: `id-${seen.length}`, created: true };
     },
@@ -200,6 +216,36 @@ describe("turn capture", () => {
     expect(seen[0]?.kind).toBe("summary");
     expect(seen[0]?.topic).toBe("how does the watcher claim ownership");
     expect(seen[0]?.text.startsWith("Q: how does the watcher claim ownership\nA: The watcher")).toBe(true);
+  });
+
+  test("distills a decision from a short turn when enabled", async () => {
+    const prompts = new SessionPrompts();
+    prompts.note("ses_1", "which store should the plugin use");
+    const { store, seen } = stubStore();
+    const controller = new AbortController();
+    startTurnCapture({
+      events: stubEvents([
+        {
+          type: "session.text.ended",
+          data: { sessionID: "ses_1", text: "We decided to use SQLite for the store." },
+        },
+        { type: "session.execution.succeeded", data: { sessionID: "ses_1" } },
+      ]),
+      memory: store,
+      signal: controller.signal,
+      logger,
+      prompts,
+      distill: {
+        config: { ...DEFAULT_CONFIG.memory.distill, enabled: true },
+      },
+    });
+    await settle();
+    controller.abort();
+
+    const distilled = seen.find((entry) => entry.kind === "decision");
+    expect(distilled?.text).toContain("We decided to use SQLite");
+    expect(String(distilled?.metadata?.source)).toBe("distill:heuristic");
+    expect(distilled?.metadata?.confidence).toBeGreaterThan(0.6);
   });
 
   test("skips short answers, unknown sessions, and turns without text", async () => {

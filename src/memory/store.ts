@@ -15,7 +15,9 @@ export type MemoryKind =
   | "preference"
   | "fix"
   | "note"
-  | "summary";
+  | "summary"
+  | "constraint"
+  | "convention";
 
 const KINDS: ReadonlySet<string> = new Set([
   "fact",
@@ -24,6 +26,8 @@ const KINDS: ReadonlySet<string> = new Set([
   "fix",
   "note",
   "summary",
+  "constraint",
+  "convention",
 ]);
 const DEFAULT_KIND: MemoryKind = "fact";
 const RECENCY_WEIGHT = 0.2;
@@ -42,6 +46,8 @@ export interface RememberInput {
   readonly kind?: string;
   readonly topic?: string;
   readonly sessionID?: string;
+  /** Extra metadata, merged last so it can override `source` and add scores. */
+  readonly metadata?: Record<string, unknown>;
 }
 
 export class MemoryStore {
@@ -61,6 +67,7 @@ export class MemoryStore {
     };
     if (input.topic) metadata.topic = input.topic;
     if (input.sessionID) metadata.sessionID = input.sessionID;
+    if (input.metadata) Object.assign(metadata, input.metadata);
 
     return this.client.memoryStore(this.namespace, {
       id: this.memoryId(text),

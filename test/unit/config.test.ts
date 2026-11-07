@@ -329,3 +329,45 @@ describe("git history indexing", () => {
     expect(config.index.gitLimit).toBe(10);
   });
 });
+
+describe("memory distillation", () => {
+  test("off by default, with the heuristic judge", () => {
+    expect(DEFAULT_CONFIG.memory.distill).toEqual({
+      enabled: false,
+      judge: "heuristic",
+      minConfidence: 55,
+      maxPerTurn: 3,
+      maxPerProject: 200,
+    });
+  });
+
+  test("takes the model judge and clamps its counts", () => {
+    const { config, warnings } = loadConfig({
+      memory: {
+        distill: {
+          enabled: true,
+          judge: "model",
+          minConfidence: 900,
+          maxPerTurn: 0,
+          maxPerProject: 1,
+        },
+      },
+    });
+
+    expect(config.memory.distill.enabled).toBe(true);
+    expect(config.memory.distill.judge).toBe("model");
+    expect(config.memory.distill.minConfidence).toBe(100);
+    expect(config.memory.distill.maxPerTurn).toBe(1);
+    expect(config.memory.distill.maxPerProject).toBe(10);
+    expect(warnings.every((warning) => warning.includes("memory.distill"))).toBe(true);
+  });
+
+  test("an unknown judge warns and keeps the heuristic", () => {
+    const { config, warnings } = loadConfig({
+      memory: { distill: { judge: "magic" } },
+    });
+
+    expect(config.memory.distill.judge).toBe("heuristic");
+    expect(warnings.some((warning) => warning.includes("memory.distill.judge"))).toBe(true);
+  });
+});

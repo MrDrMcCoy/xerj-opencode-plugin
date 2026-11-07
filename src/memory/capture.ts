@@ -7,7 +7,13 @@
 // sessions this instance saw a prompt for are captured, so another project's
 // work never lands in this project's memory.
 
+import type { Config } from "../config.ts";
 import type { Logger } from "../log.ts";
+import {
+  distillTurn,
+  type DistillSummary,
+  type ModelJudge,
+} from "./distill.ts";
 import type { MemoryStore } from "./store.ts";
 
 type CaptureEvent =
@@ -45,6 +51,17 @@ export interface TurnCaptureOptions {
   readonly maxChars?: number;
   /** Receives each answer verbatim for the turn archive. */
   readonly onAnswer?: (sessionID: string, text: string) => void;
+  /** Typed memory extraction from the turn; absent leaves it off. */
+  readonly distill?: {
+    readonly config: Config["memory"]["distill"];
+    readonly judgeModel?: ModelJudge;
+  };
+  /** Times the distill run for telemetry. */
+  readonly measure?: <T>(
+    op: "memory.distill",
+    body: () => Promise<T>,
+    meta?: (result: T) => unknown,
+  ) => Promise<T>;
 }
 
 /**
@@ -159,9 +176,14 @@ async function storeTurn(
 
   const prompt = options.prompts.latest(sessionID);
   if (answer === undefined || prompt === undefined) return;
+  if (INTERNAL_MARKER.test(prompt)) return;
+
+  // Distillation sees short turns too: "we decided to use Postgres" is a
+  // decision even when the whole answer is one sentence.
+  await maybeDistill(prompt, answer, sessionID, options);
 
   const minChars = options.minChars ?? TURN_MIN_CHARS;
-  if (answer.length < minChars || INTERNAL_MARKER.test(prompt)) return;
+  if (answer.length < minChars) return;
 
   const topic = clip(prompt, TOPIC_MAX_CHARS);
   const key = `${sessionID}\u0000${topic}`;
@@ -176,6 +198,50 @@ async function storeTurn(
   state.stored.set(key, id);
   if (previous !== undefined && previous !== id) {
     await options.memory.forget(previous).catch(() => false);
+  }
+}
+
+/** Runs the configured judge and logs what it decided. Never throws. */
+async function maybeDistill(
+  prompt: string,
+  answer: string,
+  sessionID: string,
+  options: TurnCaptureOptions,
+): Promise<void> {
+  const distill = options.distill;
+  if (distill === undefined || !distill.config.enabled) return;
+
+  const run = (): Promise<DistillSummary> =>
+    distillTurn({
+      memory: options.memory,
+      prompt,
+      answer,
+      sessionID,
+      config: distill.config,
+      logger: options.logger,
+      judgeModel: distill.judgeModel,
+    });
+
+  try {
+    const summary =
+      options.measure === undefined
+        ? await run()
+        : await options.measure("memory.distill", run, (result) => ({
+            judge: result.judge,
+            candidates: result.candidates,
+            promoted: result.promoted,
+            duplicates: result.duplicates,
+            rejected: result.rejected,
+          }));
+    if (summary.promoted > 0) {
+      options.logger.debug("distilled memories from a turn", {
+        judge: summary.judge,
+        promoted: summary.promoted,
+        candidates: summary.candidates,
+      });
+    }
+  } catch (error) {
+    options.logger.debug("memory distill failed", String(error));
   }
 }
 

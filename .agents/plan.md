@@ -552,7 +552,7 @@ files, so do not label it as a file count in the UI.
   block: a window around each line, capped by `context.rehydrateTokens`
   (600), once, and only inside the project root. A fresh retrieval with hits
   supersedes it. `context.rehydrate=false` disables it.
-- Never touch `event.messages`; never delete tools.
+- Never touch `event.messages` in this hook; never delete tools. The one sanctioned read of the window is the `compaction` hook, which stores the text the summary is about to replace (roadmap's live-context distillation reads only the turn's prompt and answer).
 
 The `context` hook cannot see why the model is being called, so
 `session.hook("model.request")` supplies the kind. A request with

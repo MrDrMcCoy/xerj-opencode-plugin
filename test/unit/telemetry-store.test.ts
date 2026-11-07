@@ -140,6 +140,28 @@ describe("TelemetryStore", () => {
     await built.close();
   });
 
+  test("summarizes distillation cost and recall", async () => {
+    const built = await store();
+    built.record("memory.distill", 5, true, {
+      judge: "heuristic",
+      candidates: 3,
+      promoted: 2,
+    });
+    built.record("memory.distill", 7, true, { judge: "model", promoted: 1 });
+    built.record("memory.recall", 1, true, { hits: 3, distilled: 2 });
+    built.record("memory.distill", 0, true, { phase: "retire", retired: 4 });
+    await built.flush();
+
+    const report = await built.report({ window: "all" });
+    expect(report.distill).toEqual({
+      promoted: 3,
+      heuristic: 2,
+      model: 1,
+      recalled: 2,
+    });
+    await built.close();
+  });
+
   test("UI lines land in their own ring and are clipped and redacted", async () => {
     const built = await store({ samplesPerType: 3, maxText: 160 });
 

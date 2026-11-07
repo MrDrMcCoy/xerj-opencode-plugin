@@ -42,10 +42,12 @@ cheap half ships first.
    `vcs`, `websearch`, `worktree`.
 2. **Compaction belongs to the host.** The harness already compacts, and a
    plugin that also rewrites history double-summarises and thrashes the
-   prompt cache. This plugin therefore keeps its own append-only archive of
-   raw turns and reads the host's summary from `session.compaction.ended`,
-   which it already subscribes to. Expand and history search work over the
-   archive; nothing here rewrites a message.
+   prompt cache. The plugin therefore keeps its own append-only archive of raw
+   turns and reads the host's summary from `session.compaction.ended`. It never
+   rewrites, reorders, or summarises a message. It reads turn-scoped events
+   (prompt, answer, tool result), and reads the message window only in the
+   `compaction` hook, where the window is about to be replaced. Expand and
+   history search work over the archive.
 3. **Grammars are downloaded, not bundled.** Measured: the all-language
    WASM pack is 51.8 MB unpacked, `web-tree-sitter` 4.7 MB, and one
    native TypeScript grammar 38.8 MB. The plugin already owns a verified
@@ -91,7 +93,13 @@ setting, not a build flag: the same published package carries the capability.
         }
       },
       "share": { "enabled": false },
-      "hub": { "enabled": false, "network": false }
+      "hub": { "enabled": false, "network": false },
+      "memory": {
+        "distill": {
+          "enabled": false,
+          "judge": "heuristic"
+        }
+      }
     }
   }]
 }
@@ -112,6 +120,8 @@ setting, not a build flag: the same published package carries the capability.
 | `hub.enabled` | `false` | Register `xerj_ask` and the hub commands |
 | `hub.network` | `false` | Allow `xerj ask` to reach the catalogue and download packs; when false only already-cached packs answer |
 | `cmd.enabled` | `true` | Register `xerj_run` and `xerj_out`, and maintain the command-output corpus. The one open gate; see its design section |
+| `memory.distill.enabled` | `false` | Turn finished turns into typed memories and retire distilled ones past their budget |
+| `memory.distill.judge` | `heuristic` | `heuristic` is the free local filter; `model` asks the current model per candidate |
 
 Defaults are closed because each capability adds something a retrieval plugin
 should not impose on its own: 52 to 100 MB of grammars, a process holding
@@ -137,6 +147,7 @@ started, no port is opened, and no network call is made.
 | `analysis.lsp.enabled` | Detects the project's languages, then resolves a server for each: `servers[language]`, then the project's `node_modules/.bin`, then `PATH`, then the plugin's own cache. If none is found and `autoInstall` is true, it installs a pinned server into `<data root>/lsp/<language>/<version>/`, probes it with `--version`, and uses it. No toolchain check runs first; a language with no known server logs once and stays unanalysed |
 | `share.enabled` | Nothing until `xerj_share` is invoked. The tool then prints the address and expiry before it accepts a request |
 | `hub.enabled` | The cached catalogue only. `hub.network` adds downloads; until then, a missing pack reports which key would fetch it |
+| `memory.distill.enabled` | Nothing until a turn finishes. The turn's own prompt and answer are classified locally, the qualifying sentences are written to memory, and the hourly sweep retires the lowest-confidence distilled ones past the budget. No model call, no window read |
 | `cmd.enabled` (already on) | Nothing until a command runs. `xerj_run` then creates `<project>/.xerj/cmd/` on first use, writes the command and its output, and indexes the text without embedding it. Turning it off removes the tools, the suggestion, and the directory on the next start |
 
 Two rules follow from the table:
@@ -209,6 +220,7 @@ Four safety rules for an install:
 | `xerj_share` | A listener | Tool not registered |
 | `xerj_ask` | The hub catalogue | Tool not registered; with `hub.enabled` open and `hub.network` closed, only cached packs answer |
 | `xerj_run`, `xerj_out` | `cmd.enabled` (open by default) | Tools not registered, no `cmd/` directory is created, and no suggestion is injected |
+| Live context distillation | `memory.distill.enabled` | No judge runs, no distilled memory is written, no retirement sweep runs; recall and `xerj_remember` are unchanged |
 | Retrieval, injection, memory, docs corpora | Nothing gated | Identical with every gate closed |
 
 Five rules make the gates trustworthy:
@@ -813,6 +825,7 @@ tests 2.5 h.
 | Fact mining from the compaction window | Magic Context, reduced | Turn the same window into durable memories; heuristic first, one bounded model call as the second route | A precision measurement | `memory.extract`, off by default |
 | Post-compaction rehydration | This plugin, defect-driven | After the host compacts, re-inject two or three passages from the session's own working set before the next prompt arrives, under a separate budget and a `<xerj-recall>` marker | The dedupe reset (shipped) | `context.rehydrate`, on by default, capped by `context.rehydrateTokens` (600) |
 | Command output management | This plugin, new | Keep every long command's text in `.xerj/cmd/`, index it cheaply, and give the model `xerj_run` and `xerj_out` instead of `head`/`tail`/`grep` over a terminal | None | `cmd.enabled`, on by default |
+| Live context distillation | This plugin, new | After each turn, classify decisions, constraints, conventions, preferences, and facts into memory, and retire distilled memories by evidence and budget | The turn archive and the verification and curation passes (shipped) | `memory.distill.enabled`, off by default |
 
 ### Command output management design
 
@@ -1024,6 +1037,93 @@ Tier M completion, about five days more (eight total): the windowed index,
 `xerj_out search` and `ingest`, mirroring host results, the large-result hint,
 and the integration suite.
 
+### Live context distillation design
+
+A session produces knowledge that outlives it: a decision taken, a constraint
+the user stated, a convention the code follows. Compaction is not the moment
+that knowledge appears, and waiting for it loses most of it. This feature reads
+the turn's own prompt and answer after the answer exists, writes the durable
+sentences to memory, and retires distilled memories that no longer hold.
+
+It is not compaction: no message is read, reordered, summarised, or removed,
+and the window the model sees is untouched.
+
+#### Classification of an item
+
+The class decides whether an item may ever be pruned. Relevance decides nothing:
+a decision from last month is true whether or not this turn needed it.
+
+| Class | Examples | Promotion | Retirement |
+|---|---|---|---|
+| Decision | "use SQLite, not Postgres" | An explicit statement, or a cited artifact | Supersede on contradiction; never on relevance |
+| Constraint | "no new runtime dependencies" | Explicit statement, re-asserted facts strengthen it | Supersede; stale when its evidence vanishes |
+| Convention | naming, layout, error shape | Two consistent instances, or one explicit statement | Merge near-duplicates, then supersede |
+| Fact | "the sweep runs hourly" | Needs a `path:line` or tool-result citation | Stale when the path or symbol disappears |
+| Preference | "terse replies, no check-ins" | Explicit user statement only, `user` namespace | Supersede only |
+| Task state | current goal, open question | Session-scoped, short TTL | Expire at the end of the session |
+| Observation | command output, a stack trace | Never stored here; the archive and index hold it | Not applicable |
+
+#### Judges
+
+One write path, two judges, chosen by `memory.distill.judge`.
+
+- **`heuristic`** (shipped): a local filter. It strips fenced code, splits the
+  turn into sentences, rejects questions, hedges, plans, and internal markers,
+  and matches one cue set per class. A `path:line`, a config key, or a version
+  adds 0.08 to the score; `memory.distill.minConfidence` (55) is the floor and
+  `memory.distill.maxPerTurn` (3) the cap. No network, no model, no cost.
+- **`model`** (seam shipped, call pending): the same candidates go to the
+  current model, one bounded call each, which answers keep/reject and may
+  refine the class and score. Selecting it before the call is wired falls back
+  to the heuristic and says so at debug level once per turn.
+
+Both write the same metadata: `source: distill:<judge>`, `confidence`, `origin`
+(prompt or answer), `topic`, and the session id. The id is the text hash, so a
+repeated turn is idempotent.
+
+#### Retirement
+
+Retirement is by evidence and budget, in this order: a distilled memory whose
+cited path or symbol is gone is marked stale; a duplicate is flagged by curation;
+past `memory.distill.maxPerProject` (200) the lowest-confidence, oldest
+distilled memories are removed. Explicit memories are never touched, and a
+distilled memory is never removed because a retrieval did not select it.
+
+#### Telemetry: cost and effect
+
+Each judge is measured separately, so the expensive route can be judged on
+evidence.
+
+| Record | Carries | Answers |
+|---|---|---|
+| `memory.distill` (`phase: extract`) | `judge`, `candidates`, `promoted`, `duplicates`, `rejected`, duration | What did the judge cost, and how many memories did it produce |
+| `memory.distill` (`phase: retire`) | `retired`, duration | What did the sweep remove |
+| `memory.recall` | `hits`, `distilled` | How many recalled memories came from distillation |
+
+`xerj_telemetry op=memory.distill` and `op=memory.recall` report the counts and
+durations; the report adds one line, `distilled N memories (heuristic A, model
+B) · recalled R`, which is the effectiveness pair: promoted against recalled.
+A judge is worth keeping when its `promoted` is useful and its recall share is
+non-zero; the model route ships only with a measured delta against the
+heuristic on the same corpus.
+
+#### Tests
+
+Heuristic: decisions, constraints, conventions, preferences, and cited facts
+are accepted; questions, hedges, plans, and fenced code are rejected; priority
+runs decision before constraint; a sentence repeated across prompt and answer
+counts once; `maxPerTurn` and `minConfidence` bind. Model seam: an absent model
+falls back with the label it actually used; a supplied judge can reject. Capture:
+a short turn still distills. Retirement: the lowest-confidence oldest go first
+and explicit memories are never in the set. Telemetry: the distill and recall
+records sum into the report block.
+
+#### Effort
+
+Heuristic, retirement, telemetry, and tests: about four hours, shipped. The
+model judge is a further half day plus a precision measurement before it is
+recommended.
+
 ## Tier L: three to six weeks, high to medium suitability
 
 | Item | Source | What it does | Risk | Gate |
@@ -1147,6 +1247,7 @@ measured; they include tests and the commits that carry them. A status of
 | Fact mining from the compaction window | M | Not started | — | Deferred by the user. Two routes: a heuristic pass over the same window (patterns for decisions, constraints, config keys, commands that worked) at about 2 h, or one model call bounded by a token budget at about 3 to 4 h. Needs a precision measurement before it defaults on, a `derived` memory kind, and reuse of the stale flag; gated by `memory.extract`, off by default |
 | Post-compaction rehydration | M | Done | 2.0 h | `src/rehydrate.ts` builds the block from the three newest citations, re-reading a 24-line window inside the project root and capping the result at `context.rehydrateTokens` (600); `session.compaction.ended` snapshots the working set, the `model.request` hook suppresses the summariser's own call, and a fresh retrieval with hits supersedes the recall. Ten module tests and six hook tests |
 | History search | M | Done | 1.0 h | `archive/index.ts` bulk-loads one document per turn into `<prefix>-archive-docs`, idempotent by session and ordinal, with a manifest so a pruned turn leaves the index; the archive is now a search prefix and its own dataset row; five module tests |
+| Live context distillation | M | In progress | 4.0 h | `src/memory/distill.ts`: five classes, heuristic judge, idempotent promotion with `source: distill:heuristic` and `confidence`, budget retirement, `memory.distill` and `memory.recall` telemetry with a report line. Model judge is a seam that falls back until wired; 11 distill tests, one capture test, one config test, one report test |
 | Command output management | M | Done | 5.0 h | `src/cmd/{store,runner,corpus,service}.ts` plus `xerj_run` and `xerj_out`: two files per command under `.xerj/cmd/`, a manifest for exit codes, windowed plain-text index, debounced ingest, two caps (256 MiB files, 32 MiB index), host-result mirroring, the context block and the large-result hint. 21 unit tests across three suites and 2 integration tests; 1101 unit tests pass |
 | LSP pool | L | Not started | — | Gated by `analysis.lsp.enabled` |
 | Server installer | L | Not started | — | — |

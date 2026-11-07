@@ -364,6 +364,32 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: Live context distillation shipped behind `memory.distill.enabled`
+  (off). After each turn the plugin classifies sentences from that turn's own
+  prompt and answer as decision, constraint, convention, preference, or fact,
+  and writes the ones that clear `minConfidence` (55) to memory. It never reads
+  the message window: the compaction hook remains the only place that does.
+  Questions, hedges, plans, and fenced code are rejected, and a `path:line` or
+  config key raises the score. A short turn counts too, because distillation
+  runs before the 400-character turn-capture floor.
+
+  Two judges share the write path. `heuristic` is the local filter and costs
+  nothing; `model` is a seam that falls back to the heuristic with a debug line
+  until the model call is wired. Every memory carries `source: distill:<judge>`
+  and `confidence`, so the two can be compared later.
+
+  Retirement is by evidence and budget, never by relevance: the hourly sweep
+  keeps `maxPerProject` (200) distilled memories, removing the lowest
+  confidence and then the oldest; verification marks stale citations and
+  curation flags duplicates. Explicit memories are never touched.
+
+  Telemetry separates the judges: a `memory.distill` span carries `judge`,
+  `candidates`, `promoted`, `duplicates`, `rejected`, and duration, a second
+  carries `phase: retire` and `retired`, and `memory.recall` carries `distilled`.
+  The report adds `distilled N memories (heuristic A, model B) · recalled R`.
+  The heuristic judge's cost is a few dozen microseconds per turn; the model
+  route will be measured against it on the same corpus. 1158 unit tests pass.
+
 - 2026-11-06: README rewritten around what each feature does and how it works.
   It now has a table of contents with subsection links and a back-to-top link at
   the end of every top-level section (23 of them, verified against the heading

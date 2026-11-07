@@ -193,6 +193,23 @@ export interface MemoryOptions {
   readonly captureTurns: boolean;
   /** Age and size caps for automatic summaries. Explicit memories never expire. */
   readonly retain: MemoryRetainOptions;
+  /** Turn live context into typed memories, and retire what stops being true. */
+  readonly distill: DistillOptions;
+}
+
+export interface DistillOptions {
+  readonly enabled: boolean;
+  /**
+   * `heuristic` is the cheap local filter; `model` asks the current model to
+   * judge a candidate. `model` needs a host model and is the expensive route.
+   */
+  readonly judge: "heuristic" | "model";
+  /** Minimum score a candidate needs to become a memory, as a percentage. */
+  readonly minConfidence: number;
+  /** Candidates promoted from one turn. */
+  readonly maxPerTurn: number;
+  /** Distilled memories kept in the project before the oldest go. */
+  readonly maxPerProject: number;
 }
 
 export interface StatsOptions {
@@ -360,6 +377,13 @@ export const DEFAULT_CONFIG: Config = {
     enabled: true,
     captureTurns: true,
     retain: { days: 0, maxCount: 0, maxBytes: 2 * 1024 ** 3 },
+    distill: {
+      enabled: false,
+      judge: "heuristic",
+      minConfidence: 55,
+      maxPerTurn: 3,
+      maxPerProject: 200,
+    },
   },
   stats: { enabled: true, bytesPerToken: 4, maxBaselineBytes: 128 * 1024 },
   cmd: {
@@ -410,6 +434,7 @@ export function loadConfig(
   const sysdocs = asObject(root.sysdocs);
   const memory = asObject(root.memory);
   const retain = asObject(memory.retain);
+  const distill = asObject(memory.distill);
   const stats = asObject(root.stats);
   const telemetry = asObject(root.telemetry);
   const cmd = asObject(root.cmd);
@@ -862,6 +887,39 @@ export function loadConfig(
           warnings,
         ),
       },
+      distill: {
+        enabled: readBoolean(
+          distill.enabled,
+          DEFAULT_CONFIG.memory.distill.enabled,
+          "memory.distill.enabled",
+          warnings,
+        ),
+        judge: readJudge(distill.judge, warnings),
+        minConfidence: readInteger(
+          distill.minConfidence,
+          DEFAULT_CONFIG.memory.distill.minConfidence,
+          0,
+          100,
+          "memory.distill.minConfidence",
+          warnings,
+        ),
+        maxPerTurn: readInteger(
+          distill.maxPerTurn,
+          DEFAULT_CONFIG.memory.distill.maxPerTurn,
+          1,
+          50,
+          "memory.distill.maxPerTurn",
+          warnings,
+        ),
+        maxPerProject: readInteger(
+          distill.maxPerProject,
+          DEFAULT_CONFIG.memory.distill.maxPerProject,
+          10,
+          100_000,
+          "memory.distill.maxPerProject",
+          warnings,
+        ),
+      },
     },
     stats: {
       enabled: readBoolean(stats.enabled, DEFAULT_CONFIG.stats.enabled, "stats.enabled", warnings),
@@ -1134,6 +1192,15 @@ function readBoolean(value: unknown, fallback: boolean, key: string, warnings: s
   if (typeof value === "boolean") return value;
   warnings.push(`${key} must be a boolean; using ${fallback}`);
   return fallback;
+}
+
+function readJudge(value: unknown, warnings: string[]): "heuristic" | "model" {
+  if (value === undefined) return DEFAULT_CONFIG.memory.distill.judge;
+  if (value === "heuristic" || value === "model") return value;
+  warnings.push(
+    `memory.distill.judge must be "heuristic" or "model"; using ${DEFAULT_CONFIG.memory.distill.judge}`,
+  );
+  return DEFAULT_CONFIG.memory.distill.judge;
 }
 
 function readString(value: unknown, fallback: string | null): string | null {

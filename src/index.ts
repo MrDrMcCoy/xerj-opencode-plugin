@@ -91,6 +91,7 @@ import { curateMemories } from "./memory/curate.ts";
 import { verifyMemories } from "./memory/verify.ts";
 import { sampleProcess } from "./process-stats.ts";
 import { startRetention } from "./memory/retain.ts";
+import { startDistillRetention } from "./memory/distill.ts";
 import { migrateMemoryIndex, migrateProjectStorage } from "./memory/migrate.ts";
 import { RemoteSpool } from "./remote/spool.ts";
 import { BrainGraph } from "./search/brains.ts";
@@ -1682,6 +1683,19 @@ export default Plugin.define({
 
       if (runtime.memory) {
         startRetention(runtime.memory, config.memory.retain, shutdown.signal, logger);
+        if (config.memory.distill.enabled) {
+          startDistillRetention({
+            memory: runtime.memory,
+            maxPerProject: config.memory.distill.maxPerProject,
+            logger,
+            signal: shutdown.signal,
+            measure: (body) =>
+              telemetry.span("memory.distill", body, (retired) => ({
+                phase: "retire",
+                retired,
+              })),
+          });
+        }
       }
     };
 
@@ -1825,6 +1839,10 @@ export default Plugin.define({
             logger,
             prompts,
             onAnswer: (sessionID, text) => void archive?.append(sessionID, "assistant", text),
+            distill: config.memory.distill.enabled
+              ? { config: config.memory.distill }
+              : undefined,
+            measure: (op, body, meta) => telemetry.span(op, body, meta),
           });
         }
       }
@@ -2036,6 +2054,13 @@ function formatReport(report: TelemetryReport): string {
 
   return [
     `operations (${report.rows.length} types)`,
+    ...(report.distill.promoted === 0 && report.distill.recalled === 0
+      ? []
+      : [
+          `distilled ${report.distill.promoted} memories ` +
+            `(heuristic ${report.distill.heuristic}, model ${report.distill.model}) · ` +
+            `recalled ${report.distill.recalled}`,
+        ]),
     ...report.rows.map(
       (row) =>
         `  ${row.op}  ${row.count}x · p50 ${duration(row.p50)} · ` +

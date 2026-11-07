@@ -35,6 +35,7 @@ export const OP_TYPES = [
   "memory.forget",
   "memory.curate",
   "memory.verify",
+  "memory.distill",
   "hook.prompt",
   "hook.context",
   "hook.tool",
