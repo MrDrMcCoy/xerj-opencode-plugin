@@ -36,7 +36,11 @@ function stubHost(projectRoot: string, options: Record<string, unknown> = {}): S
 
   const ctx = {
     // Telemetry writes to the real data root; these tests must not pollute it.
-    options: { telemetry: { enabled: false }, ...options },
+    options: {
+      telemetry: { enabled: false },
+      memory: { distill: { enabled: false } },
+      ...options,
+    },
     location: {
       directory: projectRoot,
       project: { canonical: projectRoot },

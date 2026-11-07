@@ -120,12 +120,15 @@ setting, not a build flag: the same published package carries the capability.
 | `hub.enabled` | `false` | Register `xerj_ask` and the hub commands |
 | `hub.network` | `false` | Allow `xerj ask` to reach the catalogue and download packs; when false only already-cached packs answer |
 | `cmd.enabled` | `true` | Register `xerj_run` and `xerj_out`, and maintain the command-output corpus. The one open gate; see its design section |
-| `memory.distill.enabled` | `false` | Turn finished turns into typed memories and retire distilled ones past their budget |
-| `memory.distill.judge` | `heuristic` | `heuristic` is the free local filter; `model` asks the current model per candidate; `local` runs the downloaded jevos CPU model |
+| `memory.distill.enabled` | `true` | Turn finished turns into typed memories and retire distilled ones past their budget. The local judge is the default, so the first run downloads the jevos model |
+| `memory.distill.judge` | `local` | `local` runs the downloaded jevos CPU model; `heuristic` is the free local filter; `model` asks the current model per candidate |
 
 Defaults are closed because each capability adds something a retrieval plugin
 should not impose on its own: 52 to 100 MB of grammars, a process holding
 hundreds of megabytes, an open port, or traffic to a remote catalogue. The
+local distillation judge is the one open default: it is local, bounded, and
+the user asked for it; `memory.distill.enabled: false` removes the download and
+the server. The
 plugin's contract is that nothing blocks `setup`, and a closed gate keeps
 that true.
 
@@ -147,7 +150,7 @@ started, no port is opened, and no network call is made.
 | `analysis.lsp.enabled` | Detects the project's languages, then resolves a server for each: `servers[language]`, then the project's `node_modules/.bin`, then `PATH`, then the plugin's own cache. If none is found and `autoInstall` is true, it installs a pinned server into `<data root>/lsp/<language>/<version>/`, probes it with `--version`, and uses it. No toolchain check runs first; a language with no known server logs once and stays unanalysed |
 | `share.enabled` | Nothing until `xerj_share` is invoked. The tool then prints the address and expiry before it accepts a request |
 | `hub.enabled` | The cached catalogue only. `hub.network` adds downloads; until then, a missing pack reports which key would fetch it |
-| `memory.distill.enabled` | Nothing until a turn finishes. The turn's own prompt and answer are classified locally, the qualifying sentences are written to memory, and the hourly sweep retires the lowest-confidence distilled ones past the budget. No model call, no window read. `judge: "local"` additionally downloads the jevos binary and its 630 MB model once, checksum-verified, into `<data root>/jev/`, and keeps a loopback server until `local.idleMs` |
+| `memory.distill.enabled` | Nothing until the first turn finishes. The turn's own prompt and answer are classified locally, the qualifying sentences are written to memory, and the hourly sweep retires the lowest-confidence distilled ones past the budget. No model call, no window read. The default `judge: "local"` downloads the jevos binary and its 630 MB model once, checksum-verified, into `<data root>/jev/`, and keeps a loopback server until `local.idleMs` |
 | `cmd.enabled` (already on) | Nothing until a command runs. `xerj_run` then creates `<project>/.xerj/cmd/` on first use, writes the command and its output, and indexes the text without embedding it. Turning it off removes the tools, the suggestion, and the directory on the next start |
 
 Two rules follow from the table:
@@ -220,7 +223,7 @@ Four safety rules for an install:
 | `xerj_share` | A listener | Tool not registered |
 | `xerj_ask` | The hub catalogue | Tool not registered; with `hub.enabled` open and `hub.network` closed, only cached packs answer |
 | `xerj_run`, `xerj_out` | `cmd.enabled` (open by default) | Tools not registered, no `cmd/` directory is created, and no suggestion is injected |
-| Live context distillation | `memory.distill.enabled` | No judge runs, no distilled memory is written, no retirement sweep runs; recall and `xerj_remember` are unchanged |
+| Live context distillation | `memory.distill.enabled: false` | No judge runs, no distilled memory is written, no retirement sweep runs; recall and `xerj_remember` are unchanged |
 | The local judge | `memory.distill.judge` = `local` | Nothing is downloaded, no server is started, and the heuristic answers |
 | Retrieval, injection, memory, docs corpora | Nothing gated | Identical with every gate closed |
 
@@ -826,7 +829,7 @@ tests 2.5 h.
 | Fact mining from the compaction window | Magic Context, reduced | Turn the same window into durable memories; heuristic first, one bounded model call as the second route | A precision measurement | `memory.extract`, off by default |
 | Post-compaction rehydration | This plugin, defect-driven | After the host compacts, re-inject two or three passages from the session's own working set before the next prompt arrives, under a separate budget and a `<xerj-recall>` marker | The dedupe reset (shipped) | `context.rehydrate`, on by default, capped by `context.rehydrateTokens` (600) |
 | Command output management | This plugin, new | Keep every long command's text in `.xerj/cmd/`, index it cheaply, and give the model `xerj_run` and `xerj_out` instead of `head`/`tail`/`grep` over a terminal | None | `cmd.enabled`, on by default |
-| Live context distillation | This plugin, new | After each turn, classify decisions, constraints, conventions, preferences, and facts into memory, and retire distilled memories by evidence and budget | The turn archive and the verification and curation passes (shipped) | `memory.distill.enabled`, off by default |
+| Live context distillation | This plugin, new | After each turn, classify decisions, constraints, conventions, preferences, and facts into memory, and retire distilled memories by evidence and budget | The turn archive and the verification and curation passes (shipped) | `memory.distill.enabled`, on by default with the local judge |
 
 ### Command output management design
 
@@ -1079,8 +1082,8 @@ One write path, three judges, chosen by `memory.distill.judge`.
   answers a JSON verdict (`keep`, `kind`, `score`). An unusable answer, a
   timeout, a missing host model, or a candidate past the call cap keeps the
   heuristic verdict, so a transient failure never loses a memory.
-- **`local`** (shipped): the downloaded jevos v5 OpenVINO INT8 model on the
-  CPU, with no endpoint and no network after the install. `src/jev/` owns the
+- **`local`** (default, shipped): the downloaded jevos v5 OpenVINO INT8 model
+  on the CPU, with no endpoint and no network after the install. `src/jev/` owns the
   whole lifetime: `release.ts` (asset names and `SHA256SUMS.txt`), `manager.ts`
   (verified download of `bin/` and `model/`, staged and renamed), `supervisor.ts`
   (one loopback server, attach, idle stop), and `judge.ts` (the request). The
@@ -1156,7 +1159,21 @@ positive (6 of 8 with the sentence first, 3 of 8 with it last).
 adds about 1.6 s, and later judgements take about 190 ms on four threads. The
 server is started with `--ctx 512 --state-cache 0` because the state is one
 sentence; that keeps the resident set at about 1.2 GB instead of 2.1 GB. The
-model file is 630 MB, so the weights set the floor.
+model file is 630 MB, so the weights set the floor. Because it is on by
+default, `memory.distill.enabled: false` is the way to avoid the download
+entirely.
+
+**Tuning telemetry.** Every judgement writes one `memory.distill.judge` op
+record: the model's score and verdict, the heuristic's kind and score, the
+final kind, the origin, the threshold, the session, the outcome, and up to
+`telemetry.maxText` characters of the sentence (redacted and clipped). It
+lands in `ops.ndjson` beside every other operation, so it rotates at 8 MiB with
+four rotations, is bounded by the 128 MiB store cap, and needs no new file or
+timer. `bun run tune:local` reads all rotated files, filters one project prefix
+on request, prints the keep rate, mean score by verdict, a score histogram,
+and the latest borderline samples, and writes `judge-samples.jsonl` for
+off-line labeling. The labelled eval and the live corpus therefore use the
+same shape, which is what makes a wording or threshold change comparable.
 
 **Failure modes.** An unsupported platform (anything but Linux x64, macOS
 arm64, Windows x64), a failed or offline install, a server that does not answer
@@ -1340,7 +1357,7 @@ measured; they include tests and the commits that carry them. A status of
 | Fact mining from the compaction window | M | Not started | — | Deferred by the user. Two routes: a heuristic pass over the same window (patterns for decisions, constraints, config keys, commands that worked) at about 2 h, or one model call bounded by a token budget at about 3 to 4 h. Needs a precision measurement before it defaults on, a `derived` memory kind, and reuse of the stale flag; gated by `memory.extract`, off by default |
 | Post-compaction rehydration | M | Done | 2.0 h | `src/rehydrate.ts` builds the block from the three newest citations, re-reading a 24-line window inside the project root and capping the result at `context.rehydrateTokens` (600); `session.compaction.ended` snapshots the working set, the `model.request` hook suppresses the summariser's own call, and a fresh retrieval with hits supersedes the recall. Ten module tests and six hook tests |
 | History search | M | Done | 1.0 h | `archive/index.ts` bulk-loads one document per turn into `<prefix>-archive-docs`, idempotent by session and ordinal, with a manifest so a pruned turn leaves the index; the archive is now a search prefix and its own dataset row; five module tests |
-| Live context distillation | M | Done | 10.0 h | `src/memory/distill.ts`: five classes, heuristic and model judges behind one write path, idempotent promotion with `source: distill:<judge>` and `confidence`, budget retirement, `memory.distill`/`memory.recall` telemetry with a report line and per-judge calls/chars. The model judge caps calls per turn, clips the turn, times out, and falls back. 16 distill tests, a capture test, config tests, and a report test. A golden set of 8 labeled memory sentences plus 7 sentences that must never be promoted: 8/8 recalled and classified, 0 false positives. The measurement harness is `bun run eval:distill` (heuristic always, local with `DISTILL_EVAL_JEVOS_URL`, model with an explicit OpenAI-compatible endpoint); the model delta is not yet recorded. The local jevos judge (`src/jev/`): checksum-verified install of the binary and the 630 MB model, one shared loopback server with attach and idle stop, a contrastive keep question at 7/8 recall on the labeled set and 2/10 report noise (from 3/10), and a heuristic fallback on every failure path. 21 new unit tests across release, judge, manager, and supervisor, plus an end-to-end install run against the real assets |
+| Live context distillation | M | Done | 10.0 h | `src/memory/distill.ts`: five classes, heuristic and model judges behind one write path, idempotent promotion with `source: distill:<judge>` and `confidence`, budget retirement, `memory.distill`/`memory.recall` telemetry with a report line and per-judge calls/chars. The model judge caps calls per turn, clips the turn, times out, and falls back. 16 distill tests, a capture test, config tests, and a report test. A golden set of 8 labeled memory sentences plus 7 sentences that must never be promoted: 8/8 recalled and classified, 0 false positives. The measurement harness is `bun run eval:distill` (heuristic always, local with `DISTILL_EVAL_JEVOS_URL`, model with an explicit OpenAI-compatible endpoint); the model delta is not yet recorded. The local jevos judge (`src/jev/`) is the default: checksum-verified install of the binary and the 630 MB model, one shared loopback server with attach and idle stop, a contrastive keep question at 7/8 recall on the labeled set and 2/10 report noise (from 3/10), and a heuristic fallback on every failure path. Every judgement is a `memory.distill.judge` telemetry record, and `bun run tune:local` turns the live store into a labelled JSONL corpus. 24 new unit tests across release, judge, manager, supervisor, distill, and the tuning report, plus an end-to-end install run against the real assets |
 | Command output management | M | Done | 5.0 h | `src/cmd/{store,runner,corpus,service}.ts` plus `xerj_run` and `xerj_out`: two files per command under `.xerj/cmd/`, a manifest for exit codes, windowed plain-text index, debounced ingest, two caps (256 MiB files, 32 MiB index), host-result mirroring, the context block and the large-result hint. 21 unit tests across three suites and 2 integration tests; 1101 unit tests pass |
 | LSP pool | L | Not started | — | Gated by `analysis.lsp.enabled` |
 | Server installer | L | Not started | — | — |

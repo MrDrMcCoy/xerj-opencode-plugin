@@ -39,7 +39,8 @@
     "prepack": "bun run build:tui && bun run build:mcp",
     "eval": "bun scripts/eval.ts",
     "build:mcp": "bun scripts/build-mcp.ts",
-    "eval:distill": "bun scripts/eval-distill.ts"
+    "eval:distill": "bun scripts/eval-distill.ts",
+    "tune:local": "bun scripts/tune-local.ts"
   },
   "devDependencies": {
     "@opencode/theme": "^2.2.5",

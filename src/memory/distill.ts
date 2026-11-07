@@ -44,6 +44,28 @@ export interface DistillTurnInput {
   readonly logger: Logger;
   /** Present when the model judge is wired; absent falls back to heuristic. */
   readonly judgeModel?: ModelJudge;
+  /** Receives one sample per judged candidate, for tuning telemetry. */
+  readonly onJudge?: (sample: JudgeSample) => void;
+}
+
+/**
+ * One candidate's journey through the judge. `verdict` is null when the judge
+ * failed or was unavailable and the heuristic decided instead.
+ */
+export interface JudgeSample {
+  readonly judge: JudgeMode;
+  readonly verdict: JudgeVerdict | null;
+  readonly text: string;
+  readonly origin: Candidate["origin"];
+  readonly heuristicKind: MemoryKind;
+  readonly heuristicScore: number;
+  readonly kind: MemoryKind;
+  readonly score: number;
+  readonly threshold: number;
+  readonly outcome: "promoted" | "duplicate" | "rejected";
+  readonly sessionID: string;
+  /** Wall time of the judge call; absent when the heuristic decided. */
+  readonly judgeMs?: number;
 }
 
 export interface DistillSummary {
@@ -234,6 +256,8 @@ export async function distillTurn(input: DistillTurnInput): Promise<DistillSumma
     let score = candidate.score;
     let kind = candidate.kind;
     let judged = false;
+    let judgedVerdict: JudgeVerdict | null = null;
+    let judgeMs: number | undefined;
 
     if (
       used !== "heuristic" &&
@@ -241,6 +265,7 @@ export async function distillTurn(input: DistillTurnInput): Promise<DistillSumma
       calls < input.config.modelMaxCalls
     ) {
       calls += 1;
+      const started = performance.now();
       const verdict = await input.judgeModel(candidate, {
         prompt: input.prompt,
         answer: input.answer,
@@ -254,13 +279,38 @@ export async function distillTurn(input: DistillTurnInput): Promise<DistillSumma
         score = verdict.score ?? score;
         kind = verdict.kind ?? kind;
         judged = true;
+        judgedVerdict = verdict;
+        judgeMs = performance.now() - started;
       }
     }
+
+    const emit = (outcome: JudgeSample["outcome"]): void => {
+      if (input.onJudge === undefined) return;
+      try {
+        input.onJudge({
+          judge: used,
+          verdict: judgedVerdict,
+          text: candidate.text,
+          origin: candidate.origin,
+          heuristicKind: candidate.kind,
+          heuristicScore: candidate.score,
+          kind,
+          score,
+          threshold,
+          outcome,
+          sessionID: input.sessionID,
+          ...(judgeMs === undefined ? {} : { judgeMs }),
+        });
+      } catch (error) {
+        input.logger.debug("judge telemetry callback failed", String(error));
+      }
+    };
 
     // A judge answers on its own scale, so its score only gates when the
     // verdict fell back to the heuristic.
     if (!kept || (!judged && score < threshold)) {
       rejected += 1;
+      emit("rejected");
       continue;
     }
 
@@ -283,10 +333,16 @@ export async function distillTurn(input: DistillTurnInput): Promise<DistillSumma
 
     if (result === null) {
       rejected += 1;
+      emit("rejected");
       continue;
     }
-    if (result.created) promoted += 1;
-    else duplicates += 1;
+    if (result.created) {
+      promoted += 1;
+      emit("promoted");
+    } else {
+      duplicates += 1;
+      emit("duplicate");
+    }
   }
 
   return {

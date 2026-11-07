@@ -1912,7 +1912,25 @@ export default Plugin.define({
               void jevos.ensure();
               localJudge = async (candidate, turn) => {
                 const supervisor = jevos!;
-                const base = await supervisor.ensure();
+                // A first install can take minutes; a turn must not wait for
+                // it. Fall back to the heuristic and let the install finish.
+                const base = await new Promise<string | null>((resolve) => {
+                  const timer = setTimeout(
+                    () => resolve(null),
+                    local.timeoutMs,
+                  );
+                  timer.unref?.();
+                  void supervisor.ensure().then(
+                    (url) => {
+                      clearTimeout(timer);
+                      resolve(url);
+                    },
+                    () => {
+                      clearTimeout(timer);
+                      resolve(null);
+                    },
+                  );
+                });
                 if (base === null) throw new Error("the jevos server is unavailable");
                 supervisor.touch();
                 try {
@@ -1944,7 +1962,35 @@ export default Plugin.define({
             captureSummary: config.memory.captureTurns,
             onAnswer: (sessionID, text) => void archive?.append(sessionID, "assistant", text),
             distill: config.memory.distill.enabled
-              ? { config: config.memory.distill, judgeModel: chosenJudge }
+              ? {
+                  config: config.memory.distill,
+                  judgeModel: chosenJudge,
+                  onJudge: (sample) =>
+                    telemetry.record(
+                      "memory.distill.judge",
+                      sample.judgeMs ?? 0,
+                      sample.verdict !== null,
+                      {
+                        judge: sample.judge,
+                        configured: config.memory.distill.judge,
+                        verdict:
+                          sample.verdict === null
+                            ? "fallback"
+                            : sample.verdict.keep
+                              ? "keep"
+                              : "drop",
+                        score: sample.verdict?.score ?? null,
+                        heuristicKind: sample.heuristicKind,
+                        heuristicScore: sample.heuristicScore,
+                        kind: sample.kind,
+                        outcome: sample.outcome,
+                        origin: sample.origin,
+                        text: sample.text,
+                        threshold: sample.threshold,
+                        session: sample.sessionID,
+                      },
+                    ),
+                }
               : undefined,
             measure: (op, body, meta) => telemetry.span(op, body, meta),
           });

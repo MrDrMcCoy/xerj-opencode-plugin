@@ -12,6 +12,7 @@ import type { Logger } from "../log.ts";
 import {
   distillTurn,
   type DistillSummary,
+  type JudgeSample,
   type ModelJudge,
 } from "./distill.ts";
 import type { MemoryStore } from "./store.ts";
@@ -57,6 +58,7 @@ export interface TurnCaptureOptions {
   readonly distill?: {
     readonly config: Config["memory"]["distill"];
     readonly judgeModel?: ModelJudge;
+    readonly onJudge?: (sample: JudgeSample) => void;
   };
   /** Times the distill run for telemetry. */
   readonly measure?: <T>(
@@ -226,6 +228,7 @@ async function maybeDistill(
       config: distill.config,
       logger: options.logger,
       judgeModel: distill.judgeModel,
+      onJudge: distill.onJudge,
     });
 
   try {

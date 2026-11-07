@@ -187,7 +187,7 @@ describe("plugin setup end to end", () => {
       },
       node: { port: 9830 + Math.floor(Math.random() * 40) },
       remote: { enabled: true },
-      memory: { enabled: true },
+      memory: { enabled: true, distill: { enabled: false } },
     });
 
     const cleanup = (await plugin.setup(host.ctx as never)) as () => void;

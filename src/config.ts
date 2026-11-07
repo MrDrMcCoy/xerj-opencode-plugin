@@ -409,8 +409,8 @@ export const DEFAULT_CONFIG: Config = {
     captureTurns: true,
     retain: { days: 0, maxCount: 0, maxBytes: 2 * 1024 ** 3 },
     distill: {
-      enabled: false,
-      judge: "heuristic",
+      enabled: true,
+      judge: "local",
       minConfidence: 55,
       maxPerTurn: 3,
       maxPerProject: 200,

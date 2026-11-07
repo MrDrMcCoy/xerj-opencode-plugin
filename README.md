@@ -309,8 +309,8 @@ This is the complete set with its defaults, in
             "maxBytes": 2147483648       // 2 GiB
           },
           "distill": {                   // typed memory from live turns
-            "enabled": false,            // one gate; off by default
-            "judge": "heuristic",        // or "model", the expensive route
+            "enabled": true,             // on; the local model downloads once
+            "judge": "local",            // CPU model; "model" or "heuristic"
             "minConfidence": 55,         // percentage a candidate needs
             "maxPerTurn": 3,             // memories promoted per turn
             "maxPerProject": 200,        // distilled memories kept
@@ -421,7 +421,7 @@ The same entry works with a checkout path instead of the package name; see
 | `memory.retain.days` | Days an automatic summary is kept; `0` (default) means unlimited. |
 | `memory.retain.maxCount` | Summaries kept regardless of age; `0` disables the count cap. |
 | `memory.retain.maxBytes` | Bytes of summary text kept; `0` disables the size cap. |
-| `memory.distill.enabled` | Turn live turns into typed memories and retire what stops being true. Off by default. |
+| `memory.distill.enabled` | Turn live turns into typed memories and retire what stops being true. On by default; the first run downloads the jevos model. |
 | `memory.distill.judge` | `heuristic` (the local filter), `model` (one bounded call per candidate, using the host's model), or `local` (the downloaded jevos CPU model). |
 | `memory.distill.minConfidence` | Percentage a candidate needs to become a memory. |
 | `memory.distill.maxPerTurn` | Memories promoted from one turn. |
@@ -688,8 +688,8 @@ copied into the node's data directory on setup when the destination is empty.
 
 ### Distillation
 
-`memory.distill.enabled` turns finished turns into typed memories without
-touching the model's window. After each answer the plugin classifies a few
+`memory.distill.enabled` (on by default) turns finished turns into typed
+memories without touching the model's window. After each answer the plugin classifies a few
 sentences from that turn as a decision, constraint, convention, preference, or
 fact, scores them, and stores the ones that clear `minConfidence`. A
 `path:line`, a config key, or a version raises the score; a question, a hedge,
@@ -710,7 +710,8 @@ jevos CPU model described below. The judge is stored on every memory as
 
 #### The local judge
 
-`judge: "local"` needs no endpoint and no network after the first run. The
+`judge: "local"` is the default and needs no endpoint and no network after
+the first run. The
 plugin downloads the jevos v5 OpenVINO INT8 model (about 630 MB) and its
 binary once into `<data root>/jev/`, checks both against the release
 `SHA256SUMS.txt`, and starts a loopback server. The download runs in the
@@ -735,10 +736,20 @@ state is the sentence alone.
 The model is small on purpose. It runs on the CPU, the first call after a
 start takes about 1.5 s and later calls about 200 ms on four threads, and the
 server holds about 1.2 GB resident with the context and state cache kept to
-one short sentence. `local.path` points at a pre-installed
-directory holding `bin/jev` and `model/` when the machine already has one;
-`local.port` is the loopback port the plugin attaches to or starts on;
-`local.threads` sets the OpenVINO worker count, and 0 uses every logical CPU.
+one short sentence. `local.path` points at a pre-installed directory holding
+`bin/jev` and `model/` when the machine already has one; `local.port` is the
+loopback port the plugin attaches to or starts on; `local.threads` sets the
+OpenVINO worker count, and 0 uses every logical CPU.
+
+Every judgement also writes one `memory.distill.judge` record to local
+telemetry: the model's score and verdict, the heuristic's kind and score, the
+final kind, the origin, and the outcome. The record holds up to 160 characters
+of the sentence, redacted and clipped the same way as every other telemetry
+string, and lives under the usual 128 MiB cap and rotation. `bun run tune:local`
+reads every rotated ops file, prints the keep rate, mean scores by verdict, a
+score histogram, and the latest borderline samples, and writes one JSONL row
+per judgement to `~/.cache/opencode/xerj-tune/judge-samples.jsonl` for labeling
+and comparison.
 
 Retirement is by evidence, not by relevance. A decision stays true whether or
 not this turn needed it, so distilled memories are retired by budget (keep the
@@ -756,8 +767,10 @@ E`, with a judge's count omitted while it is zero.
 
 The measurement harness is `bun run eval:distill`. It prints each judge's
 recall, false positives, class accuracy, and how many labeled progress reports
-it keeps, so a wording change is compared on the same two fronts. `DISTILL_EVAL_JEVOS_URL` points it at a running jevos server and
-prints the local judge's figures; `DISTILL_EVAL_URL`, `DISTILL_EVAL_MODEL`, and
+it keeps, so a wording change is compared on the same two fronts. The
+`bun run tune:local` report covers the live corpus instead of the labeled one.
+`DISTILL_EVAL_JEVOS_URL` points it at a running jevos server and prints the
+local judge's figures; `DISTILL_EVAL_URL`, `DISTILL_EVAL_MODEL`, and
 `DISTILL_EVAL_KEY` do the same for an OpenAI-compatible chat endpoint. A script
 cannot borrow the host's model, which is why that endpoint is explicit; the
 plugin's own judge uses the host model when `judge` is `model`.

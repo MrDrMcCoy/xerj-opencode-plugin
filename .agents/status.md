@@ -289,10 +289,11 @@ test/unit/*.test.ts    pure-function tests
 
 ## Work in progress
 
-The local distillation judge is implemented and needs a restart to load. With
-`memory.distill.judge: "local"`, setup starts a background install of the
-jevos binary and its 630 MB OpenVINO INT8 model under `<data root>/jev/`, then
-keeps one loopback server for the installation. Each candidate is one request
+The local distillation judge is the default and needs a restart to load.
+Distillation is on by default with `memory.distill.judge: "local"`, so setup
+starts a background install of the jevos binary and its 630 MB OpenVINO INT8
+model under `<data root>/jev/`, then keeps one loopback server for the
+installation. Each candidate is one request
 with the sentence as the state, one contrastive keep question, and a five-way
 kind choice. Live against the model: 10 of 11 durable sentences kept and 9 of
 10 archived progress reports rejected, cold start 4.5 s, first judgement
@@ -300,7 +301,9 @@ kind choice. Live against the model: 10 of 11 durable sentences kept and 9 of
 that does not answer, a slow judgement) keeps the heuristic verdict. Next:
 restart OpenCode with `judge: "local"` set and confirm the install lands, the
 first turn falls back until it finishes, the log names the server port, and
-`xerj_telemetry op=memory.distill` reports `local` promotions.
+`xerj_telemetry op=memory.distill` reports `local` promotions. Every
+judgement is also one `memory.distill.judge` record; `bun run tune:local`
+prints the live keep rate and score histogram and writes a JSONL corpus.
 
 Local telemetry is implemented (Tier S, done). Every operation, boot phase,
 crash, restart, service-state transition, and CPU/RSS sample lands in bounded
@@ -377,6 +380,28 @@ publish, and live TUI verification remain.
   expected, z-score, and score. Warm-up buckets are not flagged.
 
 ## Log
+
+- 2026-11-06: The local judge is now the default: live-context distillation is
+  on (`memory.distill.enabled: true`) and `memory.distill.judge` is `local`.
+  A setup therefore starts the jevos install in the background on first run;
+  `memory.distill.enabled: false` removes the download and the server, and
+  `local.path` skips the download when the model is already on disk. The
+  judge's first turn does not wait for the install: the supervisor race is
+  capped by `local.timeoutMs`, so the heuristic answers until the server is
+  up.
+
+  Every judgement now writes a `memory.distill.judge` telemetry record with
+  the model's score and verdict, the heuristic's kind and score, the final
+  kind, the origin, the threshold, the session, the outcome, and up to 160
+  characters of the redacted sentence. It shares the existing ops log,
+  rotation, 128 MiB cap, and flush timer, so there is no new file or process.
+  `bun run tune:local` reads every rotated ops file, filters by project prefix
+  on request, prints the keep rate, mean score by verdict, a score histogram,
+  and the latest borderline samples, and writes one JSONL row per judgement to
+  `~/.cache/opencode/xerj-tune/judge-samples.jsonl`. Unit tests cover the
+  parser, the summary, and one tuning record per candidate; the setup and
+  integration fixtures disable distillation so tests never fetch the model.
+  1200 unit tests pass and typecheck is clean. Nothing is pushed or released.
 
 - 2026-11-06: The local distillation judge shipped behind
   `memory.distill.judge: "local"` (still off by default). The plugin downloads

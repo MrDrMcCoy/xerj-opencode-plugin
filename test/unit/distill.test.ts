@@ -6,6 +6,7 @@ import {
   extractSentences,
   makeModelJudge,
   retireDistilled,
+  type JudgeSample,
 } from "../../src/memory/distill.ts";
 import type { MemoryStore } from "../../src/memory/store.ts";
 
@@ -125,6 +126,50 @@ describe("distilling a turn", () => {
       logger,
     });
     expect(summary.promoted).toBe(2);
+  });
+
+  test("emits one tuning record per judged candidate", async () => {
+    const { memory } = fakeStore();
+    const samples: JudgeSample[] = [];
+    await distillTurn({
+      memory,
+      prompt: "",
+      answer: "We decided to use SQLite. We decided to use WAL for the journal.",
+      sessionID: "s1",
+      config: { ...config, judge: "model" },
+      logger,
+      judgeModel: async () => ({ keep: true, score: 0.8, kind: "decision" }),
+      onJudge: (sample) => samples.push(sample),
+    });
+
+    expect(samples).toHaveLength(2);
+    expect(samples[0]).toMatchObject({
+      judge: "model",
+      verdict: { keep: true },
+      heuristicKind: "decision",
+      kind: "decision",
+      outcome: "promoted",
+      sessionID: "s1",
+    });
+    expect(samples[0]!.score).toBeCloseTo(0.8);
+    expect(typeof samples[0]!.judgeMs).toBe("number");
+  });
+
+  test("records a rejected candidate with no verdict when the judge is absent", async () => {
+    const { memory } = fakeStore();
+    const samples: JudgeSample[] = [];
+    await distillTurn({
+      memory,
+      prompt: "",
+      answer: "The collector must never open a port unless share.enabled is true.",
+      sessionID: "s1",
+      config: { ...config, judge: "local", minConfidence: 99 },
+      logger,
+      onJudge: (sample) => samples.push(sample),
+    });
+
+    expect(samples).toHaveLength(1);
+    expect(samples[0]).toMatchObject({ judge: "heuristic", verdict: null });
   });
 
   test("reports a repeat as a duplicate rather than creating one", async () => {

@@ -331,10 +331,10 @@ describe("git history indexing", () => {
 });
 
 describe("memory distillation", () => {
-  test("off by default, with the heuristic judge", () => {
+  test("on by default, with the local judge", () => {
     expect(DEFAULT_CONFIG.memory.distill).toEqual({
-      enabled: false,
-      judge: "heuristic",
+      enabled: true,
+      judge: "local",
       minConfidence: 55,
       maxPerTurn: 3,
       maxPerProject: 200,
@@ -396,12 +396,12 @@ describe("memory distillation", () => {
     expect(warnings.every((warning) => warning.includes("memory.distill.local"))).toBe(true);
   });
 
-  test("an unknown judge warns and keeps the heuristic", () => {
+  test("an unknown judge warns and keeps the default", () => {
     const { config, warnings } = loadConfig({
       memory: { distill: { judge: "magic" } },
     });
 
-    expect(config.memory.distill.judge).toBe("heuristic");
+    expect(config.memory.distill.judge).toBe("local");
     expect(warnings.some((warning) => warning.includes("memory.distill.judge"))).toBe(true);
   });
 });
