@@ -422,7 +422,7 @@ The same entry works with a checkout path instead of the package name; see
 | `memory.retain.maxCount` | Summaries kept regardless of age; `0` disables the count cap. |
 | `memory.retain.maxBytes` | Bytes of summary text kept; `0` disables the size cap. |
 | `memory.distill.enabled` | Turn live turns into typed memories and retire what stops being true. Off by default. |
-| `memory.distill.judge` | `heuristic` (the local filter) or `model` (one bounded call per candidate, using the host's model). |
+| `memory.distill.judge` | `heuristic` (the local filter), `model` (one bounded call per candidate, using the host's model), or `local` (the downloaded jevos CPU model). |
 | `memory.distill.minConfidence` | Percentage a candidate needs to become a memory. |
 | `memory.distill.maxPerTurn` | Memories promoted from one turn. |
 | `memory.distill.maxPerProject` | Distilled memories kept; the lowest-confidence, oldest go first. |
