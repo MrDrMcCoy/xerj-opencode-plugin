@@ -728,9 +728,9 @@ durable fact" wording accepted 24 of 40 candidates mined from this project's
 own turn archive, most of them progress reports ("completed the archive",
 "wrote the tests", "version 0.7.0"). The contrastive wording keeps 10 of those
 40 and accepts 7 of the 8 labeled memories. On the labeled report set it cuts
-noise from 3 of 10 to 2 of 10, so it is a report filter, not a noise filter:
-the heuristic drops questions, hedges, and code before a judge sees a
-candidate. Sending the turn around the sentence lowered every score, so the
+noise from 3 of 10 to 1 of 10 at the default 0.20 floor, so it is a report
+filter, not a noise filter: the heuristic drops questions, hedges, and code
+before a judge sees a candidate. Sending the turn around the sentence lowered every score, so the
 state is the sentence alone.
 
 The model is small on purpose. It runs on the CPU, the first call after a
