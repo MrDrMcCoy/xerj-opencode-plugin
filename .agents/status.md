@@ -388,6 +388,39 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-07: Second audit pass. Fixed: `readProjectFile` accepted a path
+  that escaped the project (`../../.ssh/id_rsa`), which `xerj_imports`,
+  `xerj_inspect`, and the LSP inspect path could reach; it now resolves the
+  path and refuses anything outside the root, and the LSP path uses the same
+  helper for the boundary and size cap. `CmdService.ingest` resolved the path
+  for its boundary check and then read the caller's original string, so a
+  relative ingest depended on the server's working directory. An invalid
+  `index.workers` returned the minimum instead of the engine default. A
+  reindex now rebuilds the indexers when a failed bootstrap left them null,
+  and the URL-change restart catches a stop failure.
+
+  New tests: the walk skip list, root boundary, and size cap; relative and
+  absolute ingest; `index.workers` fallback and clamping; `noteNodeCrash`
+  dedupe; the jevos supervisor start/health/stop path. Coverage is 90.7%
+  lines and 84.9% functions; 1,328 unit tests (1 skip) and 14 integration
+  tests pass.
+
+  New open findings:
+  `xerj_find` compiles a model-supplied regex and runs it on the main thread
+  with no deadline; a catastrophic-backtracking pattern can hang the plugin,
+  and the file's comment claiming it "refuses a code block that would take
+  longer than a turn" is false. A worker with a deadline or a nested-quantifier
+  rejection is the fix.
+  `telemetry.report` parses the whole ops log (up to about 40 MB with four
+  rotations) on a status poll; the 5-second cache means a 30-second TUI poll
+  pays it. The rings and rollups exist so the report need not scan the log.
+  `writePrefs` uses one `<file>.xerj-tmp` name for every writer, so two
+  plugin instances can race on the rename.
+  `readProjectFile` is lexical: a symlink inside the project pointing outside
+  is followed. A `realpath` check on the direct-call paths would close that.
+  `recordedNodeCrashes` is an unbounded module-level Set, one key per crash.
+  `searchAst` accumulates the full `ast-grep` output without a byte cap.
+
 - 2026-11-07: The audit findings are addressed. `stopNode` now proves the
   port owner before signalling a pid, so a reused pid is left alone. The LSP
   pool records a per-project, per-language pidfile, sweeps a stale one only
