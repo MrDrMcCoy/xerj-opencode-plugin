@@ -489,6 +489,18 @@ export class McpHost {
     return {
       pluginVersion: PLUGIN_VERSION,
       updatedAt: Date.now(),
+      // The standalone MCP host has no dreamer.
+      dreamer: {
+        enabled: false,
+        running: false,
+        lastRunAt: null,
+        nextRunAt: null,
+        checked: 0,
+        stale: 0,
+        merged: 0,
+        flagged: 0,
+        contributions: 0,
+      },
       node: {
         phase: this.runtime === null ? "disabled" : "ready",
         baseUrl: this.client?.baseUrl ?? null,

@@ -50,6 +50,19 @@ export interface DreamerResult {
   readonly reason?: string;
 }
 
+/** What the sidebar and panel need, without reading the state file. */
+export interface DreamerSnapshot {
+  readonly enabled: boolean;
+  readonly running: boolean;
+  readonly lastRunAt: number | null;
+  /** The interval boundary, not the idle deadline. */
+  readonly nextRunAt: number | null;
+  readonly lastResult: DreamerResult | null;
+  readonly runs: number;
+  /** Primers or corrections the dreamer's children stored. */
+  readonly contributions: number;
+}
+
 const STATE_FILE = "dreamer.json";
 const DENY: DreamerSession["permissions"] = [
   { action: "edit", resource: "*", effect: "deny" },
@@ -62,11 +75,41 @@ const DENY: DreamerSession["permissions"] = [
 export class Dreamer {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private lastRun = 0;
+  private lastResult: DreamerResult | null = null;
+  private runs = 0;
+  private contributions = 0;
   private loaded = false;
   private running = false;
   private readonly children = new Set<string>();
 
   constructor(private readonly options: DreamerOptions) {}
+
+  /** The figures the sidebar and panel show. Cheap: no file or node read. */
+  snapshot(): DreamerSnapshot {
+    return {
+      enabled: this.options.config.enabled,
+      running: this.running,
+      lastRunAt: this.lastRun > 0 ? this.lastRun : null,
+      nextRunAt:
+        this.lastRun > 0
+          ? this.lastRun + this.options.config.intervalMs
+          : null,
+      lastResult: this.lastResult,
+      runs: this.runs,
+      contributions: this.contributions,
+    };
+  }
+
+  /** True while one of this dreamer's child sessions is still running. */
+  ownsChild(sessionID: string): boolean {
+    return this.children.has(sessionID);
+  }
+
+  /** A dreamer child stored a new primer; count it and persist the total. */
+  noteContribution(): void {
+    this.contributions += 1;
+    void this.save();
+  }
 
   /** Registers the idle hook and loads the last-run time. */
   async register(ctx: Plugin.Context): Promise<void> {
@@ -164,6 +207,9 @@ export class Dreamer {
       merged,
       flagged,
     };
+    this.lastResult = result;
+    if (result.ran) this.runs += 1;
+    await this.save();
     this.options.record?.(result);
     return result;
   }
@@ -190,10 +236,18 @@ export class Dreamer {
     try {
       const value = JSON.parse(
         await readFile(join(this.options.stateDirectory, STATE_FILE), "utf8"),
-      ) as { lastRun?: unknown };
+      ) as {
+        lastRun?: unknown;
+        lastResult?: unknown;
+        runs?: unknown;
+        contributions?: unknown;
+      };
       if (typeof value.lastRun === "number" && Number.isFinite(value.lastRun)) {
         this.lastRun = value.lastRun;
       }
+      if (isCount(value.runs)) this.runs = value.runs;
+      if (isCount(value.contributions)) this.contributions = value.contributions;
+      if (isDreamerResult(value.lastResult)) this.lastResult = value.lastResult;
     } catch {
       // No state yet.
     }
@@ -207,13 +261,39 @@ export class Dreamer {
       });
       await writeFile(
         join(this.options.stateDirectory, STATE_FILE),
-        `${JSON.stringify({ lastRun: this.lastRun }, null, 2)}\n`,
+        `${JSON.stringify(
+          {
+            lastRun: this.lastRun,
+            runs: this.runs,
+            contributions: this.contributions,
+            ...(this.lastResult === null ? {} : { lastResult: this.lastResult }),
+          },
+          null,
+          2,
+        )}\n`,
         { mode: 0o600 },
       );
     } catch (error) {
       this.options.logger.debug("could not save the dreamer state", String(error));
     }
   }
+}
+
+function isCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+function isDreamerResult(value: unknown): value is DreamerResult {
+  if (typeof value !== "object" || value === null) return false;
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.ran === "boolean" &&
+    (record.child === null || typeof record.child === "string") &&
+    isCount(record.checked) &&
+    isCount(record.stale) &&
+    isCount(record.merged) &&
+    isCount(record.flagged)
+  );
 }
 
 export function parseModel(

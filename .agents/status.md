@@ -388,6 +388,17 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-07: The sidebar has a Dreamer section. It shows the last run (age
+  and checked memories), the next interval boundary, the memories waiting for
+  the next run (stale plus duplicate flags), and the primers stored so far.
+  The details panel carries the full last result. `dreamer.json` now keeps the
+  last result, the run count, and the contribution count. A dreamer child's
+  `xerj_remember` is tagged `dreamer: true` and increments the total; the
+  counter starts with this change, so the primer stored before it is not
+  counted. `StatusSnapshot.dreamer` and its RPC schema carry the block, and
+  the `dreamer` section flag defaults true. 1,342 unit tests (1 skip) and 14
+  integration tests pass; typecheck clean.
+
 - 2026-11-07: `cmd.blockPipes` (off by default) registers an
   `execute.before` hook. With the key on, a host `bash`/`shell` call whose
   command pipes to head, tail, grep, sed, awk, or cut is rejected with a

@@ -60,6 +60,7 @@ import {
   type BrainStatus,
   type CorpusHealth,
   type DatasetStatus,
+  type DreamerStatus,
   type StatusSnapshot,
 } from "./rpc.ts";
 import { PrjdocsIndexer, type PrjdocsSummary } from "./prjdocs/index.ts";
@@ -499,6 +500,21 @@ export default Plugin.define({
       };
     };
 
+    const dreamerStat = (): DreamerStatus => {
+      const current = dreamer?.snapshot() ?? null;
+      return {
+        enabled: current?.enabled ?? config.memory.dreamer.enabled,
+        running: current?.running ?? false,
+        lastRunAt: current?.lastRunAt ?? null,
+        nextRunAt: current?.nextRunAt ?? null,
+        checked: current?.lastResult?.checked ?? 0,
+        stale: current?.lastResult?.stale ?? runtime.staleMemories,
+        merged: current?.lastResult?.merged ?? 0,
+        flagged: current?.lastResult?.flagged ?? 0,
+        contributions: current?.contributions ?? 0,
+      };
+    };
+
     const snapshot = async (): Promise<StatusSnapshot> => {
       // A failed install or node start used to leave the plugin degraded for
       // the life of the process. A status call is a cheap retry trigger; the
@@ -579,6 +595,7 @@ export default Plugin.define({
           stale: 0,
           ...(tuningView === null ? {} : { tuning: tuningView }),
         },
+        dreamer: dreamerStat(),
         brains: brainStatus(runtime.brain, runtime.brains),
         corpora: baseCorpora,
         // The memory check needs the node, which this base path has not

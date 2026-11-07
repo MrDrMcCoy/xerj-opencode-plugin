@@ -1,7 +1,7 @@
 // Presentation only: every function here turns a status snapshot into text.
 // No I/O, no RPC, so the TUI stays thin and the formatting stays testable.
 
-import type { JobStatus, StatusSnapshot } from "../rpc.ts";
+import type { DreamerStatus, JobStatus, StatusSnapshot } from "../rpc.ts";
 import { stateGlyph } from "../telemetry/state.ts";
 
 export interface PanelSection {
@@ -11,6 +11,17 @@ export interface PanelSection {
 
 const BYTE_UNITS = ["B", "KB", "MB", "GB", "TB"] as const;
 const THOUSAND = 1000;
+const EMPTY_DREAMER: DreamerStatus = {
+  enabled: false,
+  running: false,
+  lastRunAt: null,
+  nextRunAt: null,
+  checked: 0,
+  stale: 0,
+  merged: 0,
+  flagged: 0,
+  contributions: 0,
+};
 
 export function formatBytes(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return "0 B";
@@ -163,7 +174,14 @@ const JOBS_IN_ROW = 2;
 export function sidebarView(
   snapshot: StatusSnapshot,
   now: number,
-  sections: { corpora: boolean; session: boolean; savings: boolean; runtime: boolean; health: boolean },
+  sections: {
+    corpora: boolean;
+    session: boolean;
+    dreamer: boolean;
+    savings: boolean;
+    runtime: boolean;
+    health: boolean;
+  },
 ): SidebarView {
   const index = snapshot.index;
   const usage = snapshot.usage;
@@ -236,6 +254,42 @@ export function sidebarView(
             ? ` · degraded ${formatDuration(state.today.degradedMs)}`
             : ""),
       },
+    ],
+  };
+
+  const dreamer = snapshot.dreamer ?? EMPTY_DREAMER;
+  const waiting = dreamer.stale + dreamer.flagged;
+  const dreamerSection: SidebarSectionView = {
+    title: "Dreamer",
+    rows: [
+      {
+        label: "last",
+        value: !dreamer.enabled
+          ? "off"
+          : dreamer.lastRunAt === null
+            ? "never"
+            : `${formatAge(now, dreamer.lastRunAt)} · ${formatCount(dreamer.checked)} checked`,
+        tone: dreamer.stale > 0 ? "warn" : undefined,
+      },
+      {
+        label: "next",
+        value: !dreamer.enabled
+          ? "off"
+          : dreamer.nextRunAt === null
+            ? "after idle"
+            : dreamer.nextRunAt <= now
+              ? "ready"
+              : `in ${formatDuration(dreamer.nextRunAt - now)}`,
+      },
+      {
+        label: "waiting",
+        value:
+          waiting === 0
+            ? "none"
+            : `${formatCount(dreamer.stale)} stale · ${formatCount(dreamer.flagged)} dup`,
+        tone: waiting > 0 ? "warn" : undefined,
+      },
+      { label: "primers", value: formatCount(dreamer.contributions) },
     ],
   };
 
@@ -336,6 +390,7 @@ export function sidebarView(
       stateSection,
       ...(sections.corpora ? [corpora] : []),
       ...(sections.session ? [session] : []),
+      ...(sections.dreamer ? [dreamerSection] : []),
       ...(sections.savings ? [savings] : []),
       ...(sections.runtime ? [runtime] : []),
       ...(sections.health ? [health] : []),
@@ -635,6 +690,31 @@ export function panelSections(snapshot: StatusSnapshot, now: number): PanelSecti
                   : ` · F1 ${formatPercent(memory.tuning.f1)}`),
             ]),
       ],
+    },
+    {
+      title: "Dreamer",
+      lines: (() => {
+        const dreamer = snapshot.dreamer ?? EMPTY_DREAMER;
+        if (!dreamer.enabled) return ["disabled"];
+        const waiting = dreamer.stale + dreamer.flagged;
+        return [
+          dreamer.lastRunAt === null
+            ? "no runs yet"
+            : `last run ${formatAge(now, dreamer.lastRunAt)} · ` +
+              `${formatCount(dreamer.checked)} checked · ` +
+              `${formatCount(dreamer.stale)} stale · ` +
+              `${formatCount(dreamer.merged)} merged · ` +
+              `${formatCount(dreamer.flagged)} flagged`,
+          dreamer.nextRunAt === null
+            ? "next run after the next idle period"
+            : dreamer.nextRunAt <= now
+              ? "next run is due; it starts after an idle period"
+              : `next run in ${formatDuration(dreamer.nextRunAt - now)}`,
+          `${formatCount(dreamer.contributions)} ` +
+            `${dreamer.contributions === 1 ? "primer" : "primers"} stored · ` +
+            `${formatCount(waiting)} waiting`,
+        ];
+      })(),
     },
     {
       title: "Usage",

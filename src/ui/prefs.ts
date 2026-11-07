@@ -17,6 +17,7 @@ const FILE_NAME = "tui-preferences.jsonc";
 export interface SidebarSectionFlags {
   readonly corpora: boolean;
   readonly session: boolean;
+  readonly dreamer: boolean;
   readonly savings: boolean;
   readonly runtime: boolean;
   readonly health: boolean;
@@ -38,7 +39,14 @@ export const DEFAULT_PREFS: SidebarPrefs = {
   collapsed: null,
   headerLabel: "XERJ",
   showVersion: true,
-  sections: { corpora: true, session: true, savings: true, runtime: true, health: true },
+  sections: {
+    corpora: true,
+    session: true,
+    dreamer: true,
+    savings: true,
+    runtime: true,
+    health: true,
+  },
 };
 
 /** The file both sibling plugins use, honouring their overrides. */
@@ -102,6 +110,7 @@ export function resolvePrefs(root: Record<string, unknown>): SidebarPrefs {
     sections: {
       corpora: bool(sections.corpora, true),
       session: bool(sections.session, true),
+      dreamer: bool(sections.dreamer, true),
       savings: bool(sections.savings, true),
       runtime: bool(sections.runtime, true),
       health: bool(sections.health, true),

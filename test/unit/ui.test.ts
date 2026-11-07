@@ -110,6 +110,17 @@ function snapshot(overrides: Partial<StatusSnapshot> = {}): StatusSnapshot {
         f1: 0.88,
       },
     },
+    dreamer: {
+      enabled: true,
+      running: false,
+      lastRunAt: NOW - 60_000,
+      nextRunAt: NOW + 60_000,
+      checked: 70,
+      stale: 5,
+      merged: 2,
+      flagged: 1,
+      contributions: 3,
+    },
     brains: [],
     disk: { engineBytes: 1024, logBytes: 2048 },
     map: [],
@@ -276,6 +287,7 @@ describe("panelSections", () => {
       "Node load",
       "Telemetry",
       "Memory",
+      "Dreamer",
       "Usage",
       "Counters",
       "Top cited",
@@ -287,6 +299,16 @@ describe("panelSections", () => {
     expect(body).toContain("src/a.ts ×3");
     expect(body).toContain("9 index runs · 7 injections");
     expect(body).toContain("warn: retry");
+  });
+
+  test("the panel Dreamer block reports the last run and contributions", () => {
+    const sections = panelSections(snapshot(), NOW);
+    const dreamer = sections.find((section) => section.title === "Dreamer");
+
+    expect(dreamer?.lines[0]).toContain("70 checked");
+    expect(dreamer?.lines[1]).toContain("next run in");
+    expect(dreamer?.lines[2]).toContain("3 primers stored");
+    expect(dreamer?.lines[2]).toContain("6 waiting");
   });
 
   test("does not present shared watcher ownership as a state", () => {
@@ -686,9 +708,11 @@ describe("status output schema", () => {
     expect(delivered.memory.stale).not.toBeUndefined();
     expect(delivered.memory.tuning).not.toBeUndefined();
     expect(delivered.embeddings).not.toBeUndefined();
+    expect(delivered.dreamer).not.toBeUndefined();
     expect(() => sidebarView(delivered, NOW, {
       corpora: true,
       session: true,
+      dreamer: true,
       savings: true,
       runtime: true,
       health: true,
@@ -732,6 +756,7 @@ describe("sidebarView", () => {
   const all = {
     corpora: true,
     session: true,
+    dreamer: true,
     savings: true,
     runtime: true,
     health: true,
@@ -833,6 +858,7 @@ describe("sidebarView", () => {
       "State",
       "Corpora",
       "Session",
+      "Dreamer",
       "Savings",
       "Runtime",
       "Health",
@@ -843,6 +869,22 @@ describe("sidebarView", () => {
     expect(savings?.rows.map((row) => row.label)).toEqual(["saved", "cost", "net", "returned"]);
   });
 
+  test("the Dreamer section reports its last run, queue, and contributions", () => {
+    const view = sidebarView(snapshot(), NOW, all);
+    const dreamer = view.sections.find((section) => section.title === "Dreamer");
+
+    expect(dreamer?.rows.map((row) => row.label)).toEqual([
+      "last",
+      "next",
+      "waiting",
+      "primers",
+    ]);
+    expect(dreamer?.rows[0]?.value).toContain("70 checked");
+    expect(dreamer?.rows[1]?.value).toContain("in");
+    expect(dreamer?.rows[2]?.value).toBe("5 stale · 1 dup");
+    expect(dreamer?.rows[3]?.value).toBe("3");
+  });
+
   test("a disabled section is omitted", () => {
     const view = sidebarView(snapshot(), NOW, { ...all, savings: false, health: false });
 
@@ -850,6 +892,7 @@ describe("sidebarView", () => {
       "State",
       "Corpora",
       "Session",
+      "Dreamer",
       "Runtime",
     ]);
   });

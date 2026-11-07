@@ -794,3 +794,57 @@ describe("xerj_dreamer tool", () => {
     expect(disabled.content).toContain("disabled");
   });
 });
+
+describe("dreamer contributions", () => {
+  test("a dreamer child's remember is tagged and counted", async () => {
+    const saved: Array<Record<string, unknown>> = [];
+    const notes: number[] = [];
+    const dreamer = {
+      ownsChild: (id: string) => id === "child-1",
+      noteContribution: () => notes.push(1),
+    };
+    const memory = {
+      remember: async (input: Record<string, unknown>) => {
+        saved.push(input);
+        return { id: "m1", created: true };
+      },
+    };
+    const tools = buildTools({
+      config: DEFAULT_CONFIG,
+      projectRoot: process.cwd(),
+      getArchive: () => null,
+      ledger: {} as never,
+      logger: {
+        debug() {},
+        info() {},
+        warn() {},
+        error() {},
+        entries: async () => [],
+        flush: async () => {},
+      },
+      getClient: () => null,
+      getSearch: () => null,
+      getMemory: () => memory as never,
+      getSpool: () => null,
+      getAnomaly: () => null,
+      hub: HUB_STUB,
+      treeSitter: TREE_STUB,
+      code: CODE_STUB,
+      share: SHARE_STUB,
+      lsp: LSP_STUB,
+      notes: NOTES_STUB,
+      getDreamer: () => dreamer as never,
+      snapshot: async () => snapshot(),
+    });
+    const remember = tools.find((tool) => tool.name === "remember");
+
+    await remember?.execute({ text: "primer" }, { sessionID: "child-1" });
+    expect(saved[0]?.metadata).toMatchObject({ dreamer: true });
+    expect(notes).toHaveLength(1);
+
+    // A normal session is not tagged or counted.
+    await remember?.execute({ text: "fact" }, { sessionID: "parent" });
+    expect(saved[1]?.metadata).toBeUndefined();
+    expect(notes).toHaveLength(1);
+  });
+});

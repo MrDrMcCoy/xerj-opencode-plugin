@@ -689,7 +689,16 @@ export function buildTools(options: ToolOptions): ReadonlyArray<{
         const memory = options.getMemory();
         if (!memory) return unavailable();
 
-        const saved = await memory.remember({ ...args, sessionID: tool.sessionID });
+        // A dreamer child's primer is a dreamer contribution; tag it and keep
+        // the running total the sidebar shows.
+        const dreamer = options.getDreamer?.() ?? null;
+        const dreamerChild = dreamer?.ownsChild(tool.sessionID) ?? false;
+        const saved = await memory.remember({
+          ...args,
+          sessionID: tool.sessionID,
+          ...(dreamerChild ? { metadata: { dreamer: true } } : {}),
+        });
+        if (dreamerChild && saved.created) dreamer?.noteContribution();
         return {
           content: saved.created ? `Remembered as ${saved.id}.` : `Already remembered as ${saved.id}.`,
           metadata: { xerj: { memory: saved.id, created: saved.created } },

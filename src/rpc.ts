@@ -56,6 +56,20 @@ export interface MemoryStatus {
   readonly tuning?: TuningStatus;
 }
 
+export interface DreamerStatus {
+  readonly enabled: boolean;
+  readonly running: boolean;
+  readonly lastRunAt: number | null;
+  /** The interval boundary; the idle deadline is separate. */
+  readonly nextRunAt: number | null;
+  readonly checked: number;
+  readonly stale: number;
+  readonly merged: number;
+  readonly flagged: number;
+  /** Primers or corrections the dreamer's children stored. */
+  readonly contributions: number;
+}
+
 export interface TuningStatus {
   readonly threshold: number;
   readonly autotuned: boolean;
@@ -258,6 +272,8 @@ export interface StatusSnapshot {
   readonly config: ConfigStatus;
   readonly usage: UsageStatus;
   readonly memory: MemoryStatus;
+  /** The idle dreamer's last run, next boundary, and contributions. */
+  readonly dreamer: DreamerStatus;
   readonly brains: ReadonlyArray<BrainStatus>;
   readonly corpora: ReadonlyArray<CorpusHealth>;
   /** Bytes on disk for the engine data and the node log. */
@@ -419,6 +435,17 @@ const definition = {
           },
           ["tuning"],
         ),
+        dreamer: object({
+          enabled: { type: "boolean" },
+          running: { type: "boolean" },
+          lastRunAt: { type: ["number", "null"] },
+          nextRunAt: { type: ["number", "null"] },
+          checked: { type: "number" },
+          stale: { type: "number" },
+          merged: { type: "number" },
+          flagged: { type: "number" },
+          contributions: { type: "number" },
+        }),
         brains: {
           type: "array",
           items: object({

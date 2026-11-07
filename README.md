@@ -1249,14 +1249,15 @@ off the edge.
 
 The sections are State (the service state, running jobs, today's dwell), Corpora
 (one row per corpus with its error), Session (queries, hits, injected turns,
-prompts skipped as noise), Savings (saved, cost, net, returned), Runtime (CPU
-and RSS, embedding state, sessions), and Health (warnings, last run, error).
+prompts skipped as noise), Dreamer (last run, next interval, memories waiting,
+and primers stored), Savings (saved, cost, net, returned), Runtime (CPU and
+RSS, embedding state, sessions), and Health (warnings, last run, error).
 
 Every command is also in the palette.
 
 | Command | What it does |
 | --- | --- |
-| `/xerj` | Open the details panel: node, binary, index, corpora, datasets, memory, usage, counters, top cited files, and health. |
+| `/xerj` | Open the details panel: node, binary, index, corpora, datasets, memory, dreamer, usage, counters, top cited files, and health. |
 | `/xerj status` | Same as `/xerj`. |
 | `/xerj reindex` | Run an incremental pass over the project and report the record count. |
 | `/xerj dreamer` | Verify and curate memory, then start the dreamer child now. |
