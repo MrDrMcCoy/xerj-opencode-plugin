@@ -404,10 +404,11 @@ publish, and live TUI verification remain.
   against a loopback tarball (good pack, hash mismatch, no `out/`),
   `detectRuntime` branch selection, `/proc` and `ps` process counters, the
   sampler's `forget`, the real tree-sitter parser (skipped without the pack),
-  and the bootstrap retry with a mocked clock. Coverage is 89.2% lines and
-  84.1% functions; `bunfig.toml` enforces 85/80 and CI runs `--coverage`.
+  the bootstrap retry with a mocked clock, and the jevos install against a
+  fixture release served on loopback. Coverage is 89.8% lines and 84.1%
+  functions; `bunfig.toml` enforces 85/80 and CI runs `--coverage`.
   `package-lock.json` is removed, `watch:tui` and a README note close the
-  stale-bundle gap. 1,313 unit tests (1 skip) and 14 integration tests pass;
+  stale-bundle gap. 1,315 unit tests (1 skip) and 14 integration tests pass;
   typecheck clean. The structural split of `src/index.ts` and
   `src/tools/search.ts` remains a separate refactor; it is a readability
   issue, not a correctness one.
