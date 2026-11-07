@@ -655,6 +655,12 @@ path, key, or symbol it names no longer exists, and never deletes it. Curation
 drops an exact duplicate of an automatic summary and flags other repeats as
 `duplicateOf`, leaving the decision to the model or the user.
 
+A memory index built for one embed mode is refused by a node running another.
+The plugin backs the index up and resets it only when its recorded backend
+differs from the configured mode; when the backend matches, the index is left
+in place with a warning, because the node is probably running another mode and
+resetting would cost the whole store for a transient fault.
+
 Memory written before project storage moved out of the global data root is
 copied into the node's data directory on setup when the destination is empty.
 

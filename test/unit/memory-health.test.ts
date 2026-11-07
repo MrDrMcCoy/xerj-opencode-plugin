@@ -90,6 +90,52 @@ describe("memory index health", () => {
     expect(await readFile(join(indexDir, "xerj_meta.json"), "utf8")).toBe("old");
   });
 
+  test("an index built for this mode but unreadable is kept", async () => {
+    const name = `.xerj-memory-${namespace}`;
+    const indexDir = join(nodeDir, "data", name);
+    await mkdir(indexDir, { recursive: true });
+    await writeFile(
+      join(indexDir, "embedding_execution.json"),
+      JSON.stringify({ version: 3, backend: "neural" }),
+    );
+    await writeFile(join(indexDir, "xerj_meta.json"), "old");
+    const { client, deleted } = stubClient([{ index: name, health: "red" }], false);
+
+    const recovered = await recoverMemoryIndex({
+      client,
+      nodeDir,
+      namespace,
+      backend: "neural",
+    });
+
+    // The node answering is probably in another embed mode, not the index
+    // damaged; resetting would cost the whole store for a transient fault.
+    expect(recovered).toBe(false);
+    expect(deleted).toEqual([]);
+    expect(await readFile(join(indexDir, "xerj_meta.json"), "utf8")).toBe("old");
+  });
+
+  test("an index built for another mode is replaced", async () => {
+    const name = `.xerj-memory-${namespace}`;
+    const indexDir = join(nodeDir, "data", name);
+    await mkdir(indexDir, { recursive: true });
+    await writeFile(
+      join(indexDir, "embedding_execution.json"),
+      JSON.stringify({ version: 3, backend: "neural" }),
+    );
+    const { client, deleted } = stubClient([{ index: name, health: "red" }], false);
+
+    const recovered = await recoverMemoryIndex({
+      client,
+      nodeDir,
+      namespace,
+      backend: "lexical",
+    });
+
+    expect(recovered).toBe(true);
+    expect(deleted).toEqual([name]);
+  });
+
   test("a missing index is not created up front", async () => {
     const { client, deleted, created } = stubClient([]);
 

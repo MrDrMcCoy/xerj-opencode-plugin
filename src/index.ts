@@ -1675,6 +1675,7 @@ export default Plugin.define({
         client: activeClient,
         nodeDir,
         namespace: memoryNamespace(projectRoot),
+        backend: config.index.neural ? "neural" : "lexical",
         logger,
       }).catch((error: unknown) => {
         logger.warn("could not check the memory index", String(error));

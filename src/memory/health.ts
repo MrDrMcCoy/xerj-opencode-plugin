@@ -4,7 +4,7 @@
 // Memory cannot be rebuilt from the corpus, so the files are copied aside
 // before the index is dropped; the next remember creates a fresh one.
 
-import { cp, stat } from "node:fs/promises";
+import { cp, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { XerjClient } from "../node/client.ts";
 import type { Logger } from "../log.ts";
@@ -23,6 +23,8 @@ export async function recoverMemoryIndex(options: {
   readonly nodeDir: string;
   readonly namespace: string;
   readonly logger?: Logger;
+  /** The mode this plugin expects the node to run, from the config. */
+  readonly backend?: "neural" | "lexical";
 }): Promise<boolean> {
   const { client, nodeDir, namespace, logger } = options;
   const name = `${MEMORY_INDEX_PREFIX}${namespace}`;
@@ -30,6 +32,23 @@ export async function recoverMemoryIndex(options: {
   const match = indices.find((entry) => entry.index === name);
   if (!match || match.health === HEALTHY) return false;
   if (await answers(client, name)) return false;
+
+  // A correctly-moded index that the node refuses usually means the node is
+  // running another embed mode, not that the store is damaged. Keeping it
+  // costs a recall that still fails; resetting costs every memory in it.
+  const recorded = await recordedBackend(nodeDir, name);
+  if (
+    recorded !== null &&
+    options.backend !== undefined &&
+    recorded === options.backend
+  ) {
+    logger?.warn(
+      "memory index cannot be read; leaving it in place",
+      `it was built for ${recorded}, so the node is probably running another embed mode. ` +
+        `Start the node with the same mode, or delete ${join(BACKUP_DIR, UNREADABLE_BACKUP, name)} if it is corrupt`,
+    );
+    return false;
+  }
 
   await backupIndex(nodeDir, name);
   await client.deleteIndex(name).catch((error: unknown) => {
@@ -67,6 +86,25 @@ async function answers(client: XerjClient, name: string): Promise<boolean> {
     return true;
   } catch {
     return false;
+  }
+}
+
+async function recordedBackend(
+  nodeDir: string,
+  name: string,
+): Promise<"neural" | "lexical" | null> {
+  const text = await readFile(
+    join(nodeDir, "data", name, "embedding_execution.json"),
+    "utf8",
+  ).catch(() => null);
+  if (text === null) return null;
+  try {
+    const parsed = JSON.parse(text) as { backend?: unknown };
+    return parsed.backend === "neural" || parsed.backend === "lexical"
+      ? parsed.backend
+      : null;
+  } catch {
+    return null;
   }
 }
 

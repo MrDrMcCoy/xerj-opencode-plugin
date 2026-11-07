@@ -275,10 +275,11 @@ test/unit/*.test.ts    pure-function tests
    as damage, backed the index up to `embed-backup/unreadable/`, and deleted
    it. The backup was intact, was restored in place, and vector recall answers
    again with all 47 memories. The repair now requires a failed query rather
-   than a non-green health reading. Still open: attaching a node in another
-   embed mode remains destructive, because the node does not report its mode
-   over HTTP and the config is the only mode the plugin knows. Until that is
-   fixed, do not point a running node at another mode's data dir.
+   than a non-green health reading, and it keeps a correctly-moded index in
+   place: when the index's recorded backend equals `index.neural`, the plugin
+   warns instead of resetting, because that combination usually means the node
+   is in another mode. The node still cannot serve the index until it runs the
+   right mode, but the store is no longer destroyed by the wrong one.
 3. Publish the next release when the user asks. `v0.7.0` is released and
    `npm` serves it. `publish.yml` stages when the token requires it; approve
    the staged version at npmjs.com.
@@ -363,6 +364,16 @@ publish, and live TUI verification remain.
   expected, z-score, and score. Warm-up buckets are not flagged.
 
 ## Log
+
+- 2026-11-06: The memory-index reset no longer destroys a correctly-moded
+  store. `recoverMemoryIndex` reads `embedding_execution.json` before acting:
+  when the recorded backend equals `index.neural`, an unreadable index is left
+  in place with a warning naming the likely cause (the node is running another
+  mode) and the backup path to use if it is genuinely corrupt. The index is
+  still backed up and reset when the recorded backend differs from the config,
+  which is the mode-change case the repair exists for. Two tests cover both
+  directions; the pre-existing behavior is unchanged when the metadata is
+  missing.
 
 - 2026-11-06: Two follow-ups on distillation. Turn capture and distillation
   were coupled: the listener only started when `memory.captureTurns` was true,
