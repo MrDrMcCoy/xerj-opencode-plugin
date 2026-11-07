@@ -115,6 +115,22 @@ export interface SidebarRow {
   readonly tone?: "ok" | "warn" | "bad";
 }
 
+/** A row stays inline only when label, gap, and value fit this many cells. */
+export const SIDEBAR_COMPACT_WIDTH = 34;
+
+/** Stacked rows put the value on its own wrapped line. */
+export type SidebarRowLayout = "inline" | "stacked";
+
+/**
+ * Guards the sidebar against a variable-length value squeezing the label:
+ * a row that does not fit the compact width moves its value to the next line.
+ */
+export function sidebarRowLayout(row: SidebarRow): SidebarRowLayout {
+  return row.label.length + row.value.length + 2 > SIDEBAR_COMPACT_WIDTH
+    ? "stacked"
+    : "inline";
+}
+
 export interface SidebarSectionView {
   readonly title: string;
   readonly rows: ReadonlyArray<SidebarRow>;

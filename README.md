@@ -1240,6 +1240,9 @@ Collapsed, it shows the header and the summary rows: `Index`, `Saved`, and
 `Memory`, plus `Jobs` while something is running. Clicking the header toggles
 the state, and the choice is remembered in the shared
 `tui-preferences.jsonc` under the `xerj` key, beside other plugins' keys.
+A row whose label and value exceed the compact width moves the value to its
+own line and wraps it; a long warning or value cannot push the fixed label
+off the edge.
 
 The sections are State (the service state, running jobs, today's dwell), Corpora
 (one row per corpus with its error), Session (queries, hits, injected turns,

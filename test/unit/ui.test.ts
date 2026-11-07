@@ -8,6 +8,7 @@ import {
   formatTokens,
   panelSections,
   sidebarLines,
+  sidebarRowLayout,
   sidebarView,
 } from "../../src/ui/format.ts";
 
@@ -692,6 +693,15 @@ describe("status output schema", () => {
       health: true,
     })).not.toThrow();
     expect(() => panelSections(delivered, NOW)).not.toThrow();
+  });
+});
+
+describe("sidebar row guards", () => {
+  test("short rows stay inline and long rows stack", () => {
+    expect(sidebarRowLayout({ label: "Memory", value: "2" })).toBe("inline");
+    expect(
+      sidebarRowLayout({ label: "Corpora", value: "error · " + "x".repeat(80) }),
+    ).toBe("stacked");
   });
 });
 

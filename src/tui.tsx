@@ -7,7 +7,13 @@
 import { createSignal } from "solid-js";
 import { Plugin } from "@opencode/plugin/tui";
 import { PLUGIN_VERSION, XerjRpc, type StatusSnapshot } from "./rpc.ts";
-import { panelSections, sidebarLines, sidebarView, type SidebarRow } from "./ui/format.ts";
+import {
+  panelSections,
+  sidebarLines,
+  sidebarRowLayout,
+  sidebarView,
+  type SidebarRow,
+} from "./ui/format.ts";
 import {
   completionNotices,
   EMPTY_NOTICE_STATE,
@@ -584,8 +590,12 @@ export default Plugin.define({
         if (snapshot === null) {
           return (
             <box flexDirection="column">
-              <text fg={context.theme.text.muted}>{state.lines[0]}</text>
-              <text fg={context.theme.text.faint}>{state.lines[1] ?? ""}</text>
+              <text width="100%" wrapMode="char" fg={context.theme.text.muted}>
+                {state.lines[0]}
+              </text>
+              <text width="100%" wrapMode="char" fg={context.theme.text.faint}>
+                {state.lines[1] ?? ""}
+              </text>
             </box>
           );
         }
@@ -603,12 +613,31 @@ export default Plugin.define({
               ? context.theme.text.feedback.warning.base
               : context.theme.text.muted;
 
-        const row = (entry: SidebarRow) => (
-          <box width="100%" flexDirection="row" justifyContent="space-between">
-            <text fg={context.theme.text.muted}>{entry.label}</text>
-            <text fg={toneColor(entry.tone)}>{entry.value}</text>
-          </box>
-        );
+        const row = (entry: SidebarRow) => {
+          const layout = sidebarRowLayout(entry);
+          if (layout === "stacked") {
+            return (
+              <box width="100%" flexDirection="column">
+                <text fg={context.theme.text.muted}>{entry.label}</text>
+                <text
+                  width="100%"
+                  wrapMode="char"
+                  fg={toneColor(entry.tone)}
+                >
+                  {entry.value}
+                </text>
+              </box>
+            );
+          }
+          return (
+            <box width="100%" flexDirection="row" justifyContent="space-between">
+              <text fg={context.theme.text.muted}>{entry.label}</text>
+              <text flexShrink={1} wrapMode="word" fg={toneColor(entry.tone)}>
+                {entry.value}
+              </text>
+            </box>
+          );
+        };
 
         // Plain conditionals and `.map` rather than `Show`/`For`: the render
         // bodies are pure functions of a signal, and plain JavaScript is both
@@ -636,7 +665,11 @@ export default Plugin.define({
                 paddingRight={1}
                 backgroundColor={context.theme.background.raised.base}
               >
-                <text fg={context.theme.text.base}>
+                <text
+                  width="100%"
+                  wrapMode="word"
+                  fg={context.theme.text.base}
+                >
                   <b>
                     {collapsed() ? "▶ " : "▼ "}
                     {prefs.headerLabel}
@@ -647,13 +680,21 @@ export default Plugin.define({
 
             {/* A failing corpus stays visible in both views. */}
             {trouble === null ? null : (
-              <text fg={context.theme.text.feedback.warning.base}>⚠ {trouble}</text>
+              <text
+                width="100%"
+                wrapMode="char"
+                fg={context.theme.text.feedback.warning.base}
+              >
+                ⚠ {trouble}
+              </text>
             )}
 
             {collapsed()
               ? view.collapsed.map(row)
               : [
-                  <text fg={context.theme.text.muted}>{view.badge}</text>,
+                  <text width="100%" wrapMode="word" fg={context.theme.text.muted}>
+                    {view.badge}
+                  </text>,
                   ...(prefs.showVersion
                     ? [<text fg={context.theme.text.faint}>{`v${view.version}`}</text>]
                     : []),
@@ -729,7 +770,9 @@ export default Plugin.define({
                 <box flexDirection="column" marginBottom={1}>
                   <text fg={context.theme.text.base}>{section.title}</text>
                   {section.lines.map((line) => (
-                    <text fg={context.theme.text.muted}>{line}</text>
+                    <text width="100%" wrapMode="word" fg={context.theme.text.muted}>
+                      {line}
+                    </text>
                   ))}
                 </box>
               ))}

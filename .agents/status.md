@@ -388,6 +388,16 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-07: The sidebar guards variable-length text. A row whose label and
+  value exceed `SIDEBAR_COMPACT_WIDTH` (34 cells) moves the value to its own
+  line and wraps it, so an error, path, or job summary cannot squeeze the
+  label. The state badge, failure line, empty-state lines, and panel lines wrap
+  at the container width; grouped values wrap on character boundaries so a
+  long unbroken token cannot overflow. `sidebarRowLayout` is pure and tested,
+  and the render test asserts a long corpus error produces a wrapped element.
+  Two new render/layout tests; 1273 unit tests pass, typecheck clean. Nothing
+  is pushed or released.
+
 - 2026-11-07: Telemetry now carries per-operation and per-feature cost.
   Every span records `cpuMs` from `process.cpuUsage()`, RSS before and after
   with the delta, and the process peak, in addition to wall time. The report

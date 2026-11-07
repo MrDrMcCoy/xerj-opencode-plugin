@@ -277,6 +277,20 @@ function findHandler(tree: unknown, name: string): unknown {
   );
 }
 
+function containsProp(tree: unknown, key: string, value: unknown): boolean {
+  if (typeof tree !== "object" || tree === null) return false;
+  if (Array.isArray(tree)) return tree.some((child) => containsProp(child, key, value));
+  const element = tree as {
+    props?: Record<string, unknown>;
+    children?: unknown[];
+  };
+  if (element.props?.[key] === value) return true;
+  return (
+    containsProp(element.props?.children, key, value) ||
+    containsProp(element.children ?? [], key, value)
+  );
+}
+
 function textOf(tree: unknown): string {
   if (typeof tree === "string" || typeof tree === "number") return String(tree);
   if (typeof tree === "function") return "";
@@ -311,6 +325,33 @@ describe("TUI render bodies", () => {
     expect(tree).toContain("skipped");
     expect(tree).toContain("error · timed out");
     expect(tree).toContain("/xerj for details");
+    dispose();
+  });
+
+  test("a long value stacks and wraps instead of squeezing its label", async () => {
+    const plugin = TuiPlugin as unknown as {
+      setup: (context: unknown) => Promise<() => void>;
+    };
+    const longError = `error · ${"upstream timed out ".repeat(12)}`;
+    const dispose = await plugin.setup(
+      makeHost({
+        status: async () => ({
+          ...SNAPSHOT,
+          corpora: [
+            {
+              ...SNAPSHOT.corpora[0]!,
+              error: longError,
+            },
+          ],
+        }),
+      }),
+    );
+    await flush();
+
+    const sidebar = slots.filter((slot) => slot.append === "sidebar.content").at(-1);
+    const tree = sidebar?.render();
+    expect(containsProp(tree, "wrapMode", "word")).toBe(true);
+    expect(textOf(tree)).toContain("upstream timed out");
     dispose();
   });
 
