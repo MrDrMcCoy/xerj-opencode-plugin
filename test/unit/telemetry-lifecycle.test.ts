@@ -10,7 +10,11 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Logger } from "../../src/log.ts";
-import { BootTracker, CrashKind } from "../../src/telemetry/lifecycle.ts";
+import {
+  BootTracker,
+  CrashKind,
+  noteNodeCrash,
+} from "../../src/telemetry/lifecycle.ts";
 import { TelemetryStore } from "../../src/telemetry/store.ts";
 
 const logger: Logger = {
@@ -166,6 +170,25 @@ describe("BootTracker", () => {
 
     expect(await store.takeCrashedBoot()).toBeNull();
     expect(await readdir(state)).toEqual(["boot-live.json"]);
+    await store.close();
+  });
+
+  test("a stale node pidfile records one crash, a live one none", async () => {
+    const { store, directory } = await makeStore("node-crash");
+    const nodeDir = join(directory, "node");
+    await mkdir(nodeDir, { recursive: true });
+
+    await writeFile(join(nodeDir, "node.pid"), String(process.pid));
+    expect(await noteNodeCrash(store, nodeDir, logger)).toBeNull();
+
+    await writeFile(join(nodeDir, "node.pid"), "999999997");
+    expect(await noteNodeCrash(store, nodeDir, logger)).toBe(999999997);
+    // The same pid is recorded once, even if a second ensure sees it.
+    expect(await noteNodeCrash(store, nodeDir, logger)).toBeNull();
+
+    await store.flush();
+    const text = await readFile(join(directory, "ops.ndjson"), "utf8");
+    expect(text).toContain("\"op\":\"lifecycle.crash\"");
     await store.close();
   });
 

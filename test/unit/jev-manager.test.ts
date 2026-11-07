@@ -327,3 +327,62 @@ describe("jevos install", () => {
     }
   }, 30_000);
 });
+
+describe("jevos supervisor start and stop", () => {
+  test.skipIf(process.platform === "win32")(
+    "starts a server, reports its URL, and stops it",
+    async () => {
+      const root = await tempDir();
+      const installDir = join(root, "install");
+      await mkdir(installDir, { recursive: true });
+      const serverScript = join(installDir, "server.ts");
+      await writeFile(
+        serverScript,
+        [
+          "const args = process.argv.slice(2);",
+          "const index = args.indexOf('--port');",
+          "const port = Number(args[index + 1]);",
+          "Bun.serve({ port, fetch: (request) =>",
+          "  new URL(request.url).pathname === '/health'",
+          "    ? Response.json({ status: 'ready', model_files: {} })",
+          "    : new Response('ok') });",
+          "setInterval(() => {}, 1000);",
+        ].join("\n"),
+      );
+      const wrapper = join(installDir, "fake-jev.sh");
+      await writeFile(
+        wrapper,
+        `#!/bin/sh\nexec "${process.execPath}" "${serverScript}" "$@"\n`,
+      );
+      await chmod(wrapper, 0o755);
+
+      const supervisor = new JevosSupervisor({
+        install: async () => ({
+          root: installDir,
+          binary: wrapper,
+          modelDir: installDir,
+          version: "jevos-v5",
+          target: "linux-x64",
+        }),
+        port: 0,
+        threads: null,
+        logger,
+        logPath: join(root, "jev.log"),
+        idleMs: 60_000,
+        startupTimeoutMs: 10_000,
+        probeTimeoutMs: 500,
+        stopGraceMs: 2_000,
+      });
+
+      const url = await supervisor.ensure();
+      expect(url).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+      const pid = supervisor.pid;
+      expect(pid).not.toBeNull();
+
+      await supervisor.stop();
+      expect(() => process.kill(pid!, 0)).toThrow();
+      expect(supervisor.url).toBeNull();
+    },
+    30_000,
+  );
+});
