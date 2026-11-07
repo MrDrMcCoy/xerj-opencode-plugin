@@ -956,6 +956,19 @@ export default Plugin.define({
         const result = await runtime.search.search(args.query);
         return { text: result.text, hits: result.hits.length, bytes: result.bytes };
       },
+      // The UI half has no filesystem access; its own log lines land in the
+      // telemetry ring so a sidebar fault leaves evidence behind.
+      uiLog: async (input: unknown) => {
+        counters.noteRpc();
+        runtime.lifecycle?.touch();
+        const args = (typeof input === "object" && input !== null ? input : {}) as {
+          level?: unknown;
+          message?: unknown;
+          detail?: unknown;
+        };
+        telemetry.noteUi(args);
+        return {};
+      },
       // Compaction belongs to the host; this only asks for it now instead of
       // waiting for the harness to decide. Nothing is rewritten here.
       wrapup: async (input: unknown) => {

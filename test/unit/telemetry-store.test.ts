@@ -140,6 +140,82 @@ describe("TelemetryStore", () => {
     await built.close();
   });
 
+  test("UI lines land in their own ring and are clipped and redacted", async () => {
+    const built = await store({ samplesPerType: 3, maxText: 160 });
+
+    built.noteUi({ level: "debug", message: "sidebar render", detail: "collapsed=false" });
+    built.noteUi({
+      level: "error",
+      message: "sidebar render failed",
+      detail: `token ghp_${"a".repeat(36)} at the end`,
+    });
+    built.noteUi({ level: "verbose", message: "unknown level is info" });
+    built.noteUi({ level: "info", message: "   " });
+    await built.flush();
+
+    const lines = (
+      await readFile(join(built.directory, "rings", "ui.sidebar.ndjson"), "utf8")
+    )
+      .split("\n")
+      .filter((line) => line.length > 0);
+    expect(lines).toHaveLength(3);
+
+    const records = lines.map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(records[0]).toMatchObject({
+      level: "debug",
+      message: "sidebar render",
+      prefix: "xop-demo-12345678",
+      instance: "boot-a",
+    });
+    expect(records[1]?.level).toBe("error");
+    expect(String(records[1]?.detail)).not.toContain("a".repeat(36));
+    expect(String(records[1]?.detail)).toContain("[redacted]");
+    expect(records[2]?.level).toBe("info");
+
+    await built.close();
+  });
+
+  test("UI ring keeps only the newest lines", async () => {
+    const built = await store({ samplesPerType: 2 });
+    for (let index = 0; index < 5; index += 1) {
+      built.noteUi({ level: "debug", message: `render ${index}` });
+    }
+    await built.flush();
+
+    const lines = (
+      await readFile(join(built.directory, "rings", "ui.sidebar.ndjson"), "utf8")
+    )
+      .split("\n")
+      .filter((line) => line.length > 0);
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toContain("render 4");
+    await built.close();
+  });
+
+  test("UI lines are dropped when telemetry is off", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "xerj-tel-"));
+    scratch.push(directory);
+    const off = new TelemetryStore({
+      directory,
+      prefix: "xop-demo-12345678",
+      instance: "boot-a",
+      enabled: false,
+      maxBytes: 1024,
+      samplesPerType: 8,
+      rotateBytes: 1024,
+      rotations: 1,
+      flushMs: 1000,
+      maxText: 160,
+      logger,
+      bootMs: () => 0,
+    });
+    await off.init();
+    off.noteUi({ level: "error", message: "sidebar render failed" });
+    await off.flush();
+    expect(await readdir(join(directory)).catch(() => [])).toEqual([]);
+    await off.close();
+  });
+
   test("rotates the operation log and keeps one older file", async () => {
     const built = await store({ rotateBytes: 300, rotations: 1 });
     for (let index = 0; index < 20; index += 1) {

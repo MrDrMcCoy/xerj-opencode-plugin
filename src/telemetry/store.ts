@@ -30,6 +30,7 @@ import {
   type SampleRecord,
   type ServiceState,
   type StateDwell,
+  type UiRecord,
 } from "./types.ts";
 
 export interface TelemetryStoreOptions {
@@ -120,6 +121,11 @@ export const EMPTY_REPORT: TelemetryReport = {
 };
 
 const QUEUE_LIMIT = 5_000;
+const UI_LEVELS = new Set(["debug", "info", "warn", "error"]);
+const UI_MESSAGE_CHARS = 200;
+const UI_DETAIL_CHARS = 1_500;
+/** The UI ring's file name under `rings/`. */
+export const UI_RING = "ui.sidebar";
 const SWEEP_INTERVAL_MS = 10 * 60_000;
 const SIZE_CACHE_MS = 60_000;
 const STALE_LOCK_MS = 60_000;
@@ -146,6 +152,7 @@ export class TelemetryStore {
 
   private readonly queue: OpRecord[] = [];
   private readonly samples: SampleRecord[] = [];
+  private readonly ui: UiRecord[] = [];
   private readonly ringQueue = new Map<string, OpRecord[]>();
   private readonly cache = new Map<string, { at: number; bytes: number }>();
   private rollup: RollupDelta = emptyRollup();
@@ -273,6 +280,40 @@ export class TelemetryStore {
     this.push(record);
   }
 
+  /**
+   * One line the UI half reported. It is not an operation: there is no
+   * duration and no outcome, so it stays out of ops.ndjson and the rollup and
+   * lands in its own ring. Text is clipped and redacted like every other
+   * caller-supplied string.
+   */
+  noteUi(record: {
+    readonly level?: unknown;
+    readonly message?: unknown;
+    readonly detail?: unknown;
+  }): void {
+    if (!this.enabled || this.broken) return;
+
+    const level = UI_LEVELS.has(record.level as string)
+      ? (record.level as UiRecord["level"])
+      : "info";
+    const message = redactClip(String(record.message ?? ""), UI_MESSAGE_CHARS).trim();
+    if (message.length === 0) return;
+    const detail =
+      record.detail === undefined || record.detail === null
+        ? undefined
+        : redactClip(String(record.detail), UI_DETAIL_CHARS).trim();
+
+    this.ui.push({
+      at: Date.now(),
+      level,
+      message,
+      prefix: this.options.prefix,
+      instance: this.options.instance,
+      ...(detail === undefined || detail.length === 0 ? {} : { detail }),
+    });
+    if (this.ui.length > QUEUE_LIMIT) this.ui.shift();
+  }
+
   /** One CPU and RSS sample; the sampler owns the cadence. */
   sample(record: SampleRecord): void {
     if (!this.enabled || this.broken) return;
@@ -316,7 +357,7 @@ export class TelemetryStore {
 
   async flush(): Promise<void> {
     if (!this.enabled || this.broken) return;
-    if (this.queue.length === 0 && this.samples.length === 0) {
+    if (this.queue.length === 0 && this.samples.length === 0 && this.ui.length === 0) {
       if (Date.now() - this.lastSweep > SWEEP_INTERVAL_MS) await this.sweep();
       return;
     }
@@ -463,6 +504,7 @@ export class TelemetryStore {
   private async drainQueues(): Promise<void> {
     const records = this.queue.splice(0, this.queue.length);
     const samples = this.samples.splice(0, this.samples.length);
+    const ui = this.ui.splice(0, this.ui.length);
     const rings = new Map(this.ringQueue);
     this.ringQueue.clear();
     const rollup = this.rollup;
@@ -479,6 +521,13 @@ export class TelemetryStore {
 
     for (const [op, entries] of rings) {
       await this.writeRing(op, entries);
+    }
+
+    if (ui.length > 0) {
+      await this.writeRingLines(
+        UI_RING,
+        ui.map((entry) => `${JSON.stringify(entry)}\n`).join(""),
+      );
     }
 
     if (samples.length > 0 && this.owner) {
@@ -529,13 +578,21 @@ export class TelemetryStore {
     op: string,
     entries: ReadonlyArray<OpRecord>,
   ): Promise<void> {
-    const path = join(this.options.directory, "rings", `${op}.ndjson`);
-    const limit = Math.max(1, this.options.samplesPerType);
-    const added = entries.map((entry) => `${JSON.stringify(entry)}\n`).join("");
+    await this.writeRingLines(
+      op,
+      entries.map((entry) => `${JSON.stringify(entry)}\n`).join(""),
+    );
+  }
 
-    // Only the owner rewrites a ring, so two instances appending at once can
-    // never truncate each other's samples. A non-owner appends and leaves the
-    // compaction to the owner's next flush.
+  /**
+   * One bounded file of JSON lines. Only the owner rewrites a ring, so two
+   * instances appending at once can never truncate each other's samples; a
+   * non-owner appends and leaves the compaction to the owner's next flush.
+   */
+  private async writeRingLines(name: string, added: string): Promise<void> {
+    const path = join(this.options.directory, "rings", `${name}.ndjson`);
+    const limit = Math.max(1, this.options.samplesPerType);
+
     if (!this.owner) {
       await appendFile(path, added, { mode: 0o600 }).catch(() => {});
       return;

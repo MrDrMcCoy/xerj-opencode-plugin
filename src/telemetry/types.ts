@@ -156,6 +156,17 @@ export interface SampleRecord {
   readonly threads: number | null;
 }
 
+/** One line the UI half reported about itself, kept in `rings/ui.sidebar`. */
+export interface UiRecord {
+  readonly at: number;
+  readonly level: "debug" | "info" | "warn" | "error";
+  readonly message: string;
+  /** Project prefix and instance, so two open locations stay apart. */
+  readonly prefix?: string;
+  readonly instance?: string;
+  readonly detail?: string;
+}
+
 /** The boot marker that tells a clean shutdown from a crash. */
 export interface BootMarker {
   readonly bootId: string;

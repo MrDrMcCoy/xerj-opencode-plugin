@@ -165,6 +165,7 @@ describe("server setup wiring", () => {
         "search",
         "status",
         "sysdocs",
+        "uiLog",
         "wrapup",
       ]);
 

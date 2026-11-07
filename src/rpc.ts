@@ -561,6 +561,19 @@ const definition = {
         bytes: { type: "number" },
       }),
     },
+    // The TUI half never writes files. It reports what it did and what broke
+    // here, and the server half appends it to `rings/ui.sidebar`.
+    uiLog: {
+      input: valueSchema(
+        {
+          level: { type: "string", enum: ["debug", "info", "warn", "error"] },
+          message: { type: "string" },
+          detail: { type: "string" },
+        },
+        ["level", "detail"],
+      ),
+      output: valueSchema({}),
+    },
   },
   events: {
     updated: {

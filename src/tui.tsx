@@ -6,7 +6,7 @@
 
 import { createSignal } from "solid-js";
 import { Plugin } from "@opencode/plugin/tui";
-import { XerjRpc, type StatusSnapshot } from "./rpc.ts";
+import { PLUGIN_VERSION, XerjRpc, type StatusSnapshot } from "./rpc.ts";
 import { panelSections, sidebarLines, sidebarView, type SidebarRow } from "./ui/format.ts";
 import {
   DEFAULT_PREFS,
@@ -19,6 +19,12 @@ import {
 const PANEL_NAME = "xerj.stats";
 const FALLBACK_POLL_MS = 30_000;
 const SEARCH_CLIP = 6_000;
+/** UI log lines kept before the oldest is dropped. */
+const UI_LOG_LIMIT = 80;
+const UI_TEXT_CHARS = 200;
+const UI_DETAIL_CHARS = 1_500;
+
+type UiLevel = "debug" | "info" | "warn" | "error";
 /** A busy turn emits several updates; one render per burst is enough. */
 const REFRESH_DEBOUNCE_MS = 150;
 /** The TUI half has no log ring; a failed preference write is invisible. */
@@ -66,21 +72,59 @@ export default Plugin.define({
     // Elapsed figures on a running job are read from this clock; the ticker
     // below moves it once a second only while something is running.
     const [clock, setClock] = createSignal(Date.now());
+
+    // The TUI cannot touch the filesystem, so its own log lines go over RPC to
+    // the telemetry ring. They are buffered here and flushed on a status read,
+    // a toggle, a failure, and teardown; when the sidebar is the thing that
+    // broke, that flush is the only evidence left behind.
+    const uiLog: Array<{ level: UiLevel; message: string; detail?: string }> = [];
+    const noteUi = (level: UiLevel, message: string, detail?: string): void => {
+      uiLog.push({
+        level,
+        message: message.slice(0, UI_TEXT_CHARS),
+        ...(detail === undefined ? {} : { detail: detail.slice(0, UI_DETAIL_CHARS) }),
+      });
+      if (uiLog.length > UI_LOG_LIMIT) uiLog.shift();
+    };
+    const flushUi = async (): Promise<void> => {
+      while (uiLog.length > 0) {
+        const entry = uiLog[0];
+        try {
+          await rpc().uiLog(entry, at());
+        } catch {
+          // The server is gone or the RPC is not loaded; keep the buffer for
+          // the next attempt instead of spinning on it.
+          return;
+        }
+        uiLog.shift();
+      }
+    };
+
+    noteUi("info", "tui setup started", `version ${PLUGIN_VERSION}`);
     void readPrefs()
       .then((loaded) => {
         prefs = loaded;
         setCollapsed(seedCollapsed(loaded));
+        noteUi(
+          "debug",
+          "preferences loaded",
+          `collapsed=${seedCollapsed(loaded)} label=${loaded.headerLabel}`,
+        );
+        void flushUi();
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         // A broken shared prefs file must not stop the sidebar from rendering.
+        noteUi("warn", "could not read preferences", describe(error));
       });
 
     const toggleCollapsed = (): void => {
       const next = !collapsed();
       setCollapsed(next);
+      noteUi("debug", "sidebar collapsed", String(next));
       if (prefs.rememberCollapsed) {
         void writePrefs({ collapsed: next }, silentLogger);
       }
+      void flushUi();
     };
 
     const abort = new AbortController();
@@ -126,17 +170,25 @@ export default Plugin.define({
         });
         runningJobs = snapshot.state.jobs?.length ?? 0;
         setClock(Date.now());
+        noteUi(
+          "debug",
+          "status received",
+          `phase=${snapshot.node.phase} state=${snapshot.state.name} jobs=${runningJobs} corpora=${snapshot.corpora.length}`,
+        );
         resubscribe();
+        await flushUi();
       } catch (error) {
         const reason = describe(error);
         runningJobs = 0;
         unsubscribeEvents();
+        noteUi("warn", "status failed", reason);
         update((draft) => {
           draft.snapshot = null;
           draft.reason = reason;
           draft.lines = ["XERJ  ○ offline", reason];
           draft.ready = false;
         });
+        await flushUi();
       } finally {
         inFlight = false;
       }
@@ -448,10 +500,13 @@ export default Plugin.define({
       ],
     }));
 
-    const detachSidebar = context.ui.slot({
-      append: "sidebar.content",
-      render: () => {
+    const renderSidebar = () => {
         const snapshot = state.snapshot;
+        noteUi(
+          "debug",
+          "sidebar render",
+          `collapsed=${collapsed()} snapshot=${snapshot === null ? "none" : "ok"}`,
+        );
         if (snapshot === null) {
           return (
             <box flexDirection="column">
@@ -462,6 +517,11 @@ export default Plugin.define({
         }
 
         const view = sidebarView(snapshot, clock(), prefs.sections);
+        noteUi(
+          "debug",
+          "sidebar view",
+          `badge="${view.badge}" rows=${view.collapsed.length} sections=${view.sections.length}`,
+        );
         const toneColor = (tone: SidebarRow["tone"]) =>
           tone === "bad"
             ? context.theme.text.feedback.error.base
@@ -536,6 +596,31 @@ export default Plugin.define({
                 ]}
           </box>
         );
+    };
+
+    const detachSidebar = context.ui.slot({
+      append: "sidebar.content",
+      render: () => {
+        // A render body that throws takes the whole block down on the host,
+        // where nothing is logged. Log the inputs and the failure, then show a
+        // plain line the renderer can always place.
+        try {
+          return renderSidebar();
+        } catch (error) {
+          const detail = stackOf(error);
+          noteUi("error", "sidebar render failed", detail);
+          void flushUi();
+          return (
+            <box flexDirection="column" paddingLeft={1} paddingRight={1}>
+              <text fg={context.theme.text.feedback.error.base}>
+                XERJ sidebar error
+              </text>
+              <text fg={context.theme.text.muted}>
+                {(detail.split("\n")[0] ?? "render failed").slice(0, 160)}
+              </text>
+            </box>
+          );
+        }
       },
     });
 
@@ -545,7 +630,22 @@ export default Plugin.define({
         if (input.name !== PANEL_NAME) return null;
 
         const snapshot = state.snapshot;
-        const sections = snapshot ? panelSections(snapshot, clock()) : [];
+        let sections: ReturnType<typeof panelSections>;
+        try {
+          sections = snapshot ? panelSections(snapshot, clock()) : [];
+        } catch (error) {
+          const detail = stackOf(error);
+          noteUi("error", "panel render failed", detail);
+          void flushUi();
+          return (
+            <box flexDirection="column">
+              <text fg={context.theme.text.feedback.error.base}>XERJ panel error</text>
+              <text fg={context.theme.text.muted}>
+                {(detail.split("\n")[0] ?? "render failed").slice(0, 160)}
+              </text>
+            </box>
+          );
+        }
 
         return (
           <box flexDirection="column">
@@ -587,6 +687,8 @@ export default Plugin.define({
 
     return () => {
       disposed = true;
+      noteUi("info", "tui disposed");
+      void flushUi();
       abort.abort();
       clearInterval(timer);
       clearInterval(ticker);
@@ -631,6 +733,14 @@ function statusText(
 }
 
 // Short, single-line failure reason for the sidebar and the empty panel.
+/** Message plus stack, so a render fault names the line that threw. */
+function stackOf(error: unknown): string {
+  if (error instanceof Error) {
+    return `${error.message}\n${error.stack ?? ""}`.trim();
+  }
+  return describe(error);
+}
+
 function describe(error: unknown): string {
   // The RPC client rejects with a plain `{ type, message }` object, not an
   // `Error`, so both shapes have to be read.

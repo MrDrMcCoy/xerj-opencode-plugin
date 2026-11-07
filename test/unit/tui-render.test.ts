@@ -160,13 +160,19 @@ interface HostOptions {
 
 function makeHost(options: HostOptions = {}): unknown {
   const alerts: Array<{ title: string; message: string }> = [];
+  const uiLogs: Array<{ level: string; message: string; detail?: string }> = [];
   const status = options.status ?? (async () => SNAPSHOT);
   return {
     alerts,
+    uiLogs,
     get client() {
       return {
         rpc: () => ({
           status: async () => status(),
+          uiLog: async (input: { level: string; message: string; detail?: string }) => {
+            uiLogs.push(input);
+            return {};
+          },
           reindex: async () => ({ queued: true, records: 42 }),
           remember: async () => ({ id: "m1", created: true }),
           search: async () => ({
@@ -361,6 +367,34 @@ describe("TUI render bodies", () => {
     const collapsed = textOf(sidebar?.render());
     expect(collapsed).toContain("Index");
     expect(collapsed).not.toContain("Corpora");
+    dispose();
+  });
+
+  test("a failing sidebar render is logged and replaced by a fallback", async () => {
+    const plugin = TuiPlugin as unknown as {
+      setup: (context: unknown) => Promise<() => void>;
+    };
+    const host = makeHost({
+      // A malformed job list survives the offline check and then throws inside
+      // the view, which is the shape of a host/data mismatch.
+      status: async () => ({
+        ...SNAPSHOT,
+        state: { ...SNAPSHOT.state, jobs: {} as never },
+      }),
+    });
+    const dispose = await plugin.setup(host);
+    await flush();
+
+    const sidebar = slots.filter((slot) => slot.append === "sidebar.content").at(-1);
+    const tree = textOf(sidebar?.render());
+    expect(tree).toContain("XERJ sidebar error");
+
+    await flush();
+    const logs = (host as unknown as { uiLogs: Array<{ level: string; message: string; detail?: string }> }).uiLogs;
+    const failure = logs.find((entry) => entry.message === "sidebar render failed");
+    expect(failure?.level).toBe("error");
+    expect(String(failure?.detail).length).toBeGreaterThan(0);
+    expect(logs.some((entry) => entry.message === "tui setup started")).toBe(true);
     dispose();
   });
 
