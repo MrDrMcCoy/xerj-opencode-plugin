@@ -77,9 +77,9 @@ cited passages instead of whole files. Nothing leaves the machine.
 - **Your own datasets.** `xerj_dataset` lists, creates, and deletes extra
   indexes, and imports or exports them as Elasticsearch-compatible NDJSON
   dumps.
-- **MCP.** The same nineteen retrieval and analysis tools are available to
-  agents that do not run OpenCode, through a standalone `xerj-mcp` server on
-  stdio.
+- **MCP.** The plugin's retrieval, analysis, memory, and command tools are
+  available to agents that do not run OpenCode, through a standalone
+  `xerj-mcp` server on stdio.
 - **Accounting.** `xerj_status` reports queries, hit rate, bytes returned, and
   measured token savings. The sidebar and `/xerj` panel show the same numbers.
 - **Anomaly scoring.** `xerj_anomaly` flags spikes in a numeric metric series
@@ -1580,23 +1580,22 @@ spawns a command over stdio works the same way; point it at `xerj-mcp`.
 
 ### MCP tools
 
-The MCP server exposes nineteen tools, the retrieval and analysis set the
-plugin registers, so a prompt written for one works in the other. The two
-command-output tools stay in the plugin, because the MCP host already carries
-its own runner:
+The MCP server exposes twenty-nine tools, the same retrieval and analysis set
+the plugin registers except `dreamer` and `telemetry`. A prompt written for one
+works in the other:
 
 | Tool | Arguments | What it does |
 | --- | --- | --- |
-| `search` | `query`, `k?`, `max_tokens?` | Cited passages from the project, docs, and memory corpora. |
+| `search` | `query`, `k?`, `max_tokens?` | Cited passages from the project, git, archive, web, external, docs, command, hidden, and brain corpora. |
 | `def` | `symbol`, `k?` | A declaration by name with its signature. |
-| `status` | — | Node, index, corpora, memory, and accounting. |
+| `status` | `full?` | Node, datasets, corpora, memory, process cost, and accounting. |
 | `remember` | `text`, `kind?`, `topic?` | Store a durable fact. |
 | `recall` | `query`, `k?` | Retrieve memories by meaning. |
 | `forget` | `id` | Retract a memory. |
-| `index` | `url?` or `path?` | Index a page or a file from outside the project. |
+| `index` | `url?` or `path?` | Index a page or a file from outside the project. A URL is searchable before the call returns. |
 | `anomaly` | `index`, plus the detection options | Flag spikes in a numeric series. |
 | `dataset` | `action`, `index?`, `path?`, `mapping?`, `force?` | Manage extra indexes and import or export NDJSON dumps. |
-| `reindex` | — | Incremental pass over the project now. |
+| `reindex` | — | One pass over the project, web spool, hidden folders, git history, turn archive, brains, and command log. Waits for the pass. |
 | `sysdocs` | — | Index the machine's man and info pages. |
 | `prjdocs` | `eager?` | Index official docs for what the project uses. |
 | `refs` | `symbol`, `k?` | The declarations that use a symbol. |
@@ -1605,6 +1604,16 @@ its own runner:
 | `ast` | `pattern`, `lang`, `glob?`, `limit?` | Structural search through `ast-grep`, read only. |
 | `find` | `pattern`, `glob?`, `ignore_case?`, `files_only?`, `limit?` | Regex over files, or a glob over paths. |
 | `imports` | `action`, `path?`, `limit?` | Import graph and cycles. |
+| `callers` | `symbol`, `path?` | Direct callers from the language server. |
+| `impact` | `symbol`, `path?`, `depth?` | Callers up to a depth. |
+| `inspect` | `path?`, `top?` | TODO markers, diagnostics, and unused exports. |
+| `complexity` | `top?`, `min_nodes?` | Largest functions and structural duplicates. |
+| `code` | `action`, `corpus?`, `query?` | Query reference corpora. |
+| `ask` | `query`, `corpus?` | Answer from a signed hub pack. |
+| `hub` | `action` | Sync, find, or status the hub catalogue. |
+| `notes` | `action`, `text?`, `id?`, `query?` | Add, list, remove, or search project notes. |
+| `run` | `command`, `timeout_ms?` | Run one command and keep its output in the log. |
+| `out` | `action`, `stem?`, `start?`, `end?`, `query?`, `path?` | List, show, search, or ingest command output. |
 | `expand` | `sessionID`, `start?`, `end?` | The raw text of earlier turns. |
 
 A typical session, in tool-call form:
@@ -1625,16 +1634,25 @@ A call returns MCP text content plus `structuredContent` when the tool has
 machine-readable output (counts, hits, and paths), so a client can show the
 prose or use the numbers.
 
-Settings come from the environment because there are no plugin options:
+The MCP server reads the same options the plugin does: the project's
+`opencode.json`/`opencode.jsonc`, then the global one, looking for this
+plugin's entry. That keeps hidden folders, brains, corpus mode, and the
+capability gates aligned with an OpenCode session on the same project.
+`XERJ_MCP_CONFIG` names a file explicitly; the file can be the plugin options
+object or an `opencode.json`.
 
 | Variable | Meaning |
 | --- | --- |
 | `XERJ_BIN` | Use this XERJ binary and never download one. |
 | `XERJ_STORAGE_ROOT` | Project state directory; defaults to `<project>/.xerj`. |
 | `XERJ_NODE_URL` | Attach to a running node instead of spawning one. |
+| `XERJ_MCP_CONFIG` | Read plugin options from this file instead of discovery. |
 
 The server runs one node per project, exactly as the plugin does, so an
-OpenCode session and an MCP client on the same project share it.
+OpenCode session and an MCP client on the same project share it. The node port
+lock is the same global lock the plugin uses. On exit the node stays up unless
+`node.shutdownOnIdle` is true, so closing the MCP client does not interrupt an
+OpenCode session.
 
 [Back to top](#table-of-contents)
 

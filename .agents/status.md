@@ -388,6 +388,27 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-07: Closed the MCP gaps. The standalone host now reads the project
+  and global `opencode.json` (or `XERJ_MCP_CONFIG`) for the plugin options, so
+  hidden folders, brains, corpus mode, and the capability gates match an
+  OpenCode session. Its search covers the project, git, archive, web,
+  external, system docs, project docs, command, hidden, and brain corpora.
+  `reindex` is a synchronous one-shot over the project, web spool, hidden
+  folders, git history, turn archive, brains, and command log, and returns the
+  real record count. `index` of a URL runs one web pass before it reports
+  success. The MCP exposes `run` and `out`; the hidden indexer and the memory
+  verification, curation, and retention run at boot; the cache-root port lock
+  is shared with the plugin; the node survives an MCP exit unless
+  `node.shutdownOnIdle`; and the tool list is cached so the LSP pool is not
+  rebuilt per call. Status now reports datasets, corpora, docs pages, stale
+  memories, and process cost.
+
+  Tool surface is 29 of the plugin's 31: `dreamer` and `telemetry` remain
+  plugin-only (the first needs a host session, the second is local
+  diagnostics), and the plugin's TUI and prompt hooks have no MCP equivalent.
+  Tests: config discovery, MCP `reindex` → `search`, and the updated tool
+  list. 1,348 unit and 15 integration tests pass; typecheck clean.
+
 - 2026-11-07: The sidebar has a Dreamer section. It shows the last run (age
   and checked memories), the next interval boundary, the memories waiting for
   the next run (stale plus duplicate flags), and the primers stored so far.
