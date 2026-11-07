@@ -714,6 +714,34 @@ describe("sidebarView", () => {
     health: true,
   };
 
+  // A long `today` value used to be appended straight after its label, which
+  // printed `todayready 0s · ...`. The label column is exactly as wide as the
+  // longest label, so a row without a gap has nowhere to put a space.
+  test("the State today row stacks instead of touching its label", () => {
+    const base = snapshot();
+    const view = sidebarView(
+      snapshot({
+        state: {
+          ...base.state,
+          today: {
+            startingMs: 0,
+            readyMs: 0,
+            busyMs: 0,
+            degradedMs: 60_000,
+            stoppedMs: 0,
+          },
+        },
+      }),
+      NOW,
+      all,
+    );
+
+    const state = view.sections.find((section) => section.title === "State");
+    const today = state?.rows.find((row) => row.label === "today");
+    expect(today).toBeDefined();
+    expect(sidebarRowLayout(today!)).toBe("stacked");
+  });
+
   test("collapsed rows name the index, savings and memory", () => {
     const view = sidebarView(snapshot(), NOW, all);
 
