@@ -1840,7 +1840,13 @@ export default Plugin.define({
           logger,
           owns: (sessionID) => prompts.knows(sessionID),
         });
-        if (config.memory.captureTurns) {
+        // The listener has three consumers: the Q/A summary, distillation, and
+        // the turn archive. Any of them running is enough to start it.
+        if (
+          config.memory.captureTurns ||
+          config.memory.distill.enabled ||
+          archive !== null
+        ) {
           const canGenerate =
             typeof ctx.experimental?.generate?.text === "function";
           if (config.memory.distill.enabled && config.memory.distill.judge === "model" && !canGenerate) {
@@ -1869,6 +1875,7 @@ export default Plugin.define({
             signal: shutdown.signal,
             logger,
             prompts,
+            captureSummary: config.memory.captureTurns,
             onAnswer: (sessionID, text) => void archive?.append(sessionID, "assistant", text),
             distill: config.memory.distill.enabled
               ? { config: config.memory.distill, judgeModel }

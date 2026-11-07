@@ -49,6 +49,8 @@ export interface TurnCaptureOptions {
   /** Answers shorter than this are acknowledgements, not knowledge. */
   readonly minChars?: number;
   readonly maxChars?: number;
+  /** Whether the turn's question and answer are stored as one summary. */
+  readonly captureSummary?: boolean;
   /** Receives each answer verbatim for the turn archive. */
   readonly onAnswer?: (sessionID: string, text: string) => void;
   /** Typed memory extraction from the turn; absent leaves it off. */
@@ -181,6 +183,10 @@ async function storeTurn(
   // Distillation sees short turns too: "we decided to use Postgres" is a
   // decision even when the whole answer is one sentence.
   await maybeDistill(prompt, answer, sessionID, options);
+
+  // Distillation is independent of the Q/A summary: a caller can keep typed
+  // memories without keeping a summary of every turn.
+  if (options.captureSummary === false) return;
 
   const minChars = options.minChars ?? TURN_MIN_CHARS;
   if (answer.length < minChars) return;

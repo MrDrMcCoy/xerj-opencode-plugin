@@ -667,7 +667,9 @@ fact, scores them, and stores the ones that clear `minConfidence`. A
 `path:line`, a config key, or a version raises the score; a question, a hedge,
 a plan ("let me check"), or fenced code is never a candidate. It runs after
 `session.execution.succeeded`, so a short turn such as "we decided to use
-SQLite" counts even when it is too short for turn capture.
+SQLite" counts even when it is too short for turn capture. Distillation does not
+require `memory.captureTurns`: a caller can keep typed memories without keeping
+a Q/A summary of every turn, and turn capture can stay on with distillation off.
 
 Two judges share the same write path. `heuristic` is the local filter above and
 costs nothing. `model` asks the host's model about each candidate, one call up

@@ -248,6 +248,38 @@ describe("turn capture", () => {
     expect(distilled?.metadata?.confidence).toBeGreaterThan(0.6);
   });
 
+  test("distills without storing the Q/A summary when turn capture is off", async () => {
+    const prompts = new SessionPrompts();
+    prompts.note("ses_1", "which store should the plugin use");
+    const { store, seen } = stubStore();
+    const controller = new AbortController();
+    startTurnCapture({
+      events: stubEvents([
+        {
+          type: "session.text.ended",
+          data: {
+            sessionID: "ses_1",
+            text: "We decided to use SQLite for the store. " + answer,
+          },
+        },
+        { type: "session.execution.succeeded", data: { sessionID: "ses_1" } },
+      ]),
+      memory: store,
+      signal: controller.signal,
+      logger,
+      prompts,
+      captureSummary: false,
+      distill: {
+        config: { ...DEFAULT_CONFIG.memory.distill, enabled: true },
+      },
+    });
+    await settle();
+    controller.abort();
+
+    expect(seen.some((entry) => entry.kind === "summary")).toBe(false);
+    expect(seen.some((entry) => entry.kind === "decision")).toBe(true);
+  });
+
   test("skips short answers, unknown sessions, and turns without text", async () => {
     const prompts = new SessionPrompts();
     prompts.note("ses_1", "how does the watcher claim ownership");

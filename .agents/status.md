@@ -364,6 +364,20 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: Two follow-ups on distillation. Turn capture and distillation
+  were coupled: the listener only started when `memory.captureTurns` was true,
+  so a project that wanted typed memories without a summary of every turn got
+  neither. The listener now starts when any of its three consumers runs (the
+  Q/A summary, distillation, the turn archive), and `captureSummary` suppresses
+  only the summary. A test covers distillation with capture off.
+
+  The heuristic judge has a golden set: 8 labeled sentences (decisions,
+  constraints, conventions, preferences, facts) and 7 that must never be
+  promoted (questions, hedges, plans, code blocks). It recalls and classifies
+  8/8 with 0 false positives, and the floors are 80% / none so a cue change
+  cannot quietly start storing noise. The model-versus-heuristic measurement on
+  the same set still needs a live model.
+
 - 2026-11-06: The model judge for live-context distillation is implemented.
   `judge: "model"` now sends each cue-bearing candidate through the host's
   model with the turn clipped to 1,200 characters and a 4 s deadline, one call
