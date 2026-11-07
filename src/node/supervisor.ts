@@ -532,6 +532,19 @@ export async function stopNode(nodeDir: string, graceMs = 5_000): Promise<boolea
   const pid = await readNodePid(nodeDir);
   if (pid === null) return false;
 
+  // The pidfile is written only after the node answers, so a missing listener
+  // (or a different owner) means the pid is stale and the kernel may have
+  // reused it. Signalling that pid could hit an unrelated process. On Windows
+  // the port owner cannot be read, so the pidfile stays the best evidence.
+  const port = await readPersistedPort(nodeDir);
+  if (port !== null && process.platform !== "win32") {
+    const owner = await portOwnerPid(port);
+    if (owner !== pid) {
+      await rm(nodePidPath(nodeDir), { force: true }).catch(() => {});
+      return false;
+    }
+  }
+
   if (!isAlive(pid)) {
     await rm(nodePidPath(nodeDir), { force: true }).catch(() => {});
     return false;

@@ -175,6 +175,56 @@ export async function externalBinary(
   return { version, path, upgraded: false };
 }
 
+const INSTALL_LOCK_WAIT_MS = 5 * 60_000;
+// A lock with no readable owner is stale after this; a lock whose pid is gone
+// is stale immediately.
+const INSTALL_LOCK_STALE_MS = 5 * 60_000;
+const INSTALL_LOCK_POLL_MS = 1_000;
+
+/**
+ * Takes the shared install lock and returns its release. The owner pid is
+ * written beside the lock: a crashed install leaves a lock that can be
+ * reclaimed at once instead of blocking the next one for the whole stale
+ * window.
+ */
+export async function acquireInstallLock(
+  root: string,
+  timeoutMs = INSTALL_LOCK_WAIT_MS,
+): Promise<() => Promise<void>> {
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  const lock = join(root, ".install.lock");
+  const deadline = Date.now() + timeoutMs;
+
+  while (true) {
+    try {
+      await mkdir(lock, { recursive: false, mode: 0o700 });
+      await writeFile(join(lock, "pid"), String(process.pid), {
+        mode: 0o600,
+      }).catch(() => {});
+      return async () => {
+        await rm(lock, { recursive: true, force: true }).catch(() => {});
+      };
+    } catch {
+      const owner = Number(
+        await readFile(join(lock, "pid"), "utf8").catch(() => ""),
+      );
+      if (Number.isInteger(owner) && owner > 0 && !isAlive(owner)) {
+        await rm(lock, { recursive: true, force: true }).catch(() => {});
+        continue;
+      }
+      const infoStat = await stat(lock).catch(() => null);
+      if (infoStat !== null && Date.now() - infoStat.mtimeMs > INSTALL_LOCK_STALE_MS) {
+        await rm(lock, { recursive: true, force: true }).catch(() => {});
+        continue;
+      }
+      if (Date.now() > deadline) {
+        throw new BinaryError("another xerj install is still running");
+      }
+      await new Promise((resolve) => setTimeout(resolve, INSTALL_LOCK_POLL_MS));
+    }
+  }
+}
+
 /**
  * Serializes installs into one cache root. Two plugin locations can start at
  * the same time; without this, both download and extract the same archive.
@@ -186,26 +236,7 @@ async function installWithLock(
   logger: Logger,
   timeouts: ResolvedBinaryTimeouts,
 ): Promise<string> {
-  await mkdir(root, { recursive: true, mode: 0o700 });
-  const lock = join(root, ".install.lock");
-  const deadline = Date.now() + 5 * 60_000;
-  while (true) {
-    try {
-      await mkdir(lock, { recursive: false, mode: 0o700 });
-      break;
-    } catch {
-      const infoStat = await stat(lock).catch(() => null);
-      if (infoStat !== null && Date.now() - infoStat.mtimeMs > 10 * 60_000) {
-        await rm(lock, { recursive: true, force: true }).catch(() => {});
-        continue;
-      }
-      if (Date.now() > deadline) {
-        throw new BinaryError("another xerj install is still running");
-      }
-      await new Promise((resolve) => setTimeout(resolve, 1_000));
-    }
-  }
-
+  const release = await acquireInstallLock(root);
   try {
     const existing = await findInstalled(
       root,
@@ -216,7 +247,7 @@ async function installWithLock(
     if (existing !== null && existing.version === version) return existing.path;
     return await install(root, version, info, logger, timeouts);
   } finally {
-    await rm(lock, { recursive: true, force: true }).catch(() => {});
+    await release();
   }
 }
 
@@ -501,3 +532,13 @@ function run(
   });
 }
 
+
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // A process owned by another user exists; the signal is refused.
+    return (error as { code?: unknown }).code === "EPERM";
+  }
+}

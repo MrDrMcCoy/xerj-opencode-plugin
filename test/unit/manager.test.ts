@@ -1,9 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { ensureBinary, BinaryError } from "../../src/binary/manager.ts";
+import {
+  acquireInstallLock,
+  ensureBinary,
+  BinaryError,
+} from "../../src/binary/manager.ts";
 import type { Logger } from "../../src/log.ts";
 import { platformInfoForTarget } from "../../src/platform.ts";
 
@@ -87,4 +91,57 @@ describe("ensureBinary auto tracking", () => {
     expect(requested.some((url) => url.includes("/v9.0.0/"))).toBe(false);
     expect(requested.some((url) => url.includes("/v1.0.0-rc.100/"))).toBe(true);
   });
+});
+
+describe("install lock", () => {
+  let root: string;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "xop-lock-"));
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  test("acquires, records its pid, and releases", async () => {
+    const release = await acquireInstallLock(root, 1_000);
+    expect(await readFile(join(root, ".install.lock", "pid"), "utf8")).toBe(
+      String(process.pid),
+    );
+    await release();
+    expect(
+      await readFile(join(root, ".install.lock", "pid")).catch(() => null),
+    ).toBeNull();
+  });
+
+  test("reclaims a lock whose owner is gone", async () => {
+    const lock = join(root, ".install.lock");
+    await mkdir(lock, { recursive: true });
+    await writeFile(join(lock, "pid"), "999999997");
+
+    const release = await acquireInstallLock(root, 1_000);
+    expect(await readFile(join(lock, "pid"), "utf8")).toBe(String(process.pid));
+    await release();
+  });
+
+  test("reclaims a lock with no pid after the stale window", async () => {
+    const lock = join(root, ".install.lock");
+    await mkdir(lock, { recursive: true });
+    const old = new Date(Date.now() - 6 * 60_000);
+    await utimes(lock, old, old);
+
+    const release = await acquireInstallLock(root, 1_000);
+    await release();
+  });
+
+  test("waits out a live owner and then times out", async () => {
+    const lock = join(root, ".install.lock");
+    await mkdir(lock, { recursive: true });
+    await writeFile(join(lock, "pid"), String(process.pid));
+
+    await expect(acquireInstallLock(root, 100)).rejects.toThrow(
+      /another xerj install/,
+    );
+  }, 5_000);
 });

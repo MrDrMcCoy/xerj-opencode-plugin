@@ -6,9 +6,12 @@
 // `maxServers` run at once.
 
 import { spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { delimiter, join } from "node:path";
+import { basename, delimiter, join } from "node:path";
+import { promisify } from "node:util";
 import type { Logger } from "../../log.ts";
+import { pathHash } from "../../paths.ts";
 import { listProjectFiles, readProjectFile } from "../walk.ts";
 import type { LspOptions } from "../../config.ts";
 import {
@@ -141,7 +144,12 @@ export class LspPool {
     this.timer = null;
     const active = [...this.active.values()];
     this.active.clear();
-    await Promise.all(active.map((entry) => entry.client.stop().catch(() => {})));
+    await Promise.all(
+      active.map(async (entry) => {
+        await entry.client.stop().catch(() => {});
+        await this.forgetPid(entry.language);
+      }),
+    );
   }
 
   private async prepare(
@@ -233,6 +241,7 @@ export class LspPool {
       );
       return null;
     }
+    await this.sweepStale(language, command);
     const client = new LspClient({
       command,
       cwd: this.options.projectRoot,
@@ -251,6 +260,7 @@ export class LspPool {
     if (language === "typescript") await this.openProject(client);
     const active: Active = { client, language, lastUse: Date.now() };
     this.active.set(language, active);
+    await this.recordPid(language);
     this.armIdleTimer();
     this.options.logger.info("language server started", { language });
     return active;
@@ -281,6 +291,56 @@ export class LspPool {
     if (active === undefined) return;
     this.active.delete(language);
     await active.client.stop().catch(() => {});
+    await this.forgetPid(language);
+  }
+
+  /** Pidfile for one project's server in one language. */
+  private pidPath(language: string): string {
+    return join(
+      this.options.root,
+      "pids",
+      `${language}-${pathHash(this.options.projectRoot, 8)}.pid`,
+    );
+  }
+
+  private async recordPid(language: string): Promise<void> {
+    const client = this.active.get(language)?.client;
+    const pid = client?.pid ?? null;
+    if (pid === null) return;
+    const path = this.pidPath(language);
+    await mkdir(join(this.options.root, "pids"), {
+      recursive: true,
+      mode: 0o700,
+    }).catch(() => {});
+    await writeFile(path, `${pid}\n`, { mode: 0o600 }).catch(() => {});
+  }
+
+  private async forgetPid(language: string): Promise<void> {
+    await rm(this.pidPath(language), { force: true }).catch(() => {});
+  }
+
+  /**
+   * A pidfile left by a crashed plugin names a server that no longer has a
+   * client. Signal it only when the process still looks like the command we
+   * started: a pid can be reused by an unrelated process.
+   */
+  private async sweepStale(language: string, command: LspCommand): Promise<void> {
+    const path = this.pidPath(language);
+    const raw = await readFile(path, "utf8").catch(() => null);
+    if (raw === null) return;
+    const pid = Number(raw.trim());
+    if (!Number.isInteger(pid) || pid <= 0) {
+      await rm(path, { force: true }).catch(() => {});
+      return;
+    }
+    if (isAlive(pid) && (await commandMatches(pid, command))) {
+      try {
+        process.kill(pid, "SIGTERM");
+      } catch {
+        // Gone between the check and the signal.
+      }
+    }
+    await rm(path, { force: true }).catch(() => {});
   }
 
   private armIdleTimer(): void {
@@ -580,3 +640,47 @@ function run(
   });
 }
 
+
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // A process owned by another user exists; the signal is refused.
+    return (error as { code?: unknown }).code === "EPERM";
+  }
+}
+
+const execFileAsync = promisify(execFile);
+
+/**
+ * True when the pid's command line still names this language server. The
+ * server may be launched through `node`, so the script argument is checked
+ * too. Windows has no cheap equivalent, so a pid there is left alone.
+ */
+async function commandMatches(
+  pid: number,
+  command: LspCommand,
+): Promise<boolean> {
+  const needles = [basename(command.command)];
+  for (const arg of command.args) {
+    if (!arg.startsWith("-")) needles.push(basename(arg));
+  }
+
+  if (process.platform === "linux") {
+    const raw = await readFile(`/proc/${pid}/cmdline`, "utf8").catch(() => null);
+    if (raw === null) return false;
+    const parts = raw.split("\0").filter((part) => part.length > 0);
+    return needles.some((needle) => parts.some((part) => part.includes(needle)));
+  }
+  if (process.platform === "darwin") {
+    const { stdout } = await execFileAsync("ps", [
+      "-p",
+      String(pid),
+      "-o",
+      "command=",
+    ]).catch(() => ({ stdout: "" }));
+    return needles.some((needle) => stdout.includes(needle));
+  }
+  return false;
+}

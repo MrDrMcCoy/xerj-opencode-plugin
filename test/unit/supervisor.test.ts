@@ -217,6 +217,45 @@ describe("stopNode", () => {
     expect(await stopNode(dir, 2_000)).toBe(true);
     expect(await readNodePid(dir)).toBeNull();
   });
+
+  // A stale pidfile can name a pid the kernel has since reused. The port
+  // owner is the proof that the pid is still the node; without it, a
+  // teardown used to SIGTERM an unrelated process.
+  test("does not signal a pid that no longer owns the port", async () => {
+    const dir = join(root, "stale-stop");
+    await mkdir(dir, { recursive: true });
+    const server = Bun.serve({ port: 0, fetch: () => new Response("x") });
+    const child = spawn("sleep", ["30"], { stdio: "ignore" });
+    try {
+      await persistPort(dir, server.port as number);
+      await writeFile(join(dir, "node.pid"), String(child.pid));
+
+      expect(await stopNode(dir, 500)).toBe(false);
+      expect(() => process.kill(child.pid!, 0)).not.toThrow();
+      expect(await readNodePid(dir)).toBeNull();
+    } finally {
+      server.stop(true);
+      child.kill("SIGKILL");
+    }
+  });
+
+  test("does not signal a pid when the port has no listener", async () => {
+    const dir = join(root, "gone-stop");
+    await mkdir(dir, { recursive: true });
+    const child = spawn("sleep", ["30"], { stdio: "ignore" });
+    try {
+      // The pidfile is only written after the node answers, so a free port
+      // means the recorded node is gone.
+      await persistPort(dir, 9799);
+      await writeFile(join(dir, "node.pid"), String(child.pid));
+
+      expect(await stopNode(dir, 500)).toBe(false);
+      expect(() => process.kill(child.pid!, 0)).not.toThrow();
+      expect(await readNodePid(dir)).toBeNull();
+    } finally {
+      child.kill("SIGKILL");
+    }
+  });
 });
 
 describe("ensureNode", () => {
