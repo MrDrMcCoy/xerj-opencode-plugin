@@ -364,6 +364,18 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: README rewritten around what each feature does and how it works.
+  It now has a table of contents with subsection links and a back-to-top link at
+  the end of every top-level section (23 of them, verified against the heading
+  anchors). New sections cover the project index and its watcher, memory,
+  command output, fetched pages and external files, the analysis tools, and
+  anomaly scoring; the TUI section describes the current collapsible box,
+  state line, jobs row, and completion notices instead of the old four-line
+  block. The tools table lists all 22 plugin tools, the MCP section is renamed
+  to `### MCP tools` and lists its 19, and a duplicated telemetry block under
+  the MCP arguments was removed. `README.md` is 1,302 lines; the config block
+  still parses against `DEFAULT_CONFIG`.
+
 - 2026-11-06: Documentation crawls are rate limited per host, and completions
   now announce themselves. One `HostRateLimiter` is created per docs run and
   shared by every crawl in it, so component guides and the builtin chapters

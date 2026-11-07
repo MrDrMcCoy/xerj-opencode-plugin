@@ -7,6 +7,40 @@ The plugin downloads and manages a XERJ binary, runs a private node on loopback,
 keeps a project index current with a filesystem watcher, and gives the model
 cited passages instead of whole files. Nothing leaves the machine.
 
+## Table of contents
+
+- [What it does](#what-it-does)
+- [Requirements](#requirements)
+- [Install](#install)
+  - [From a local checkout](#from-a-local-checkout)
+- [Where the config goes](#where-the-config-goes)
+- [Configuration](#configuration)
+  - [Local telemetry](#local-telemetry)
+- [How the project index works](#how-the-project-index-works)
+- [How retrieval works](#how-retrieval-works)
+  - [Measuring a change](#measuring-a-change)
+- [Memory](#memory)
+- [Command output](#command-output)
+- [Fetched pages and external files](#fetched-pages-and-external-files)
+- [Tools](#tools)
+- [Analysis tools](#analysis-tools)
+- [TUI](#tui)
+  - [Completion notices](#completion-notices)
+- [Project documentation](#project-documentation)
+  - [Eager mode](#eager-mode)
+- [System documentation](#system-documentation)
+- [Extra indexes and dumps](#extra-indexes-and-dumps)
+- [Anomaly scoring](#anomaly-scoring)
+- [Standalone MCP server](#standalone-mcp-server)
+  - [Client setup](#client-setup)
+  - [Arguments](#arguments)
+  - [MCP tools](#mcp-tools)
+- [Releasing](#releasing)
+- [Data locations](#data-locations)
+- [Limitations](#limitations)
+- [Development](#development)
+- [License](#license)
+
 ## What it does
 
 - **Search.** `xerj_search` returns passages with `path:line` citations, not
@@ -34,12 +68,27 @@ cited passages instead of whole files. Nothing leaves the machine.
 - **Your own datasets.** `xerj_dataset` lists, creates, and deletes extra
   indexes, and imports or exports them as Elasticsearch-compatible NDJSON
   dumps.
-- **MCP.** The same twelve tools are available to agents that do not run
-  OpenCode, through a standalone `xerj-mcp` server on stdio.
+- **MCP.** The same nineteen retrieval and analysis tools are available to
+  agents that do not run OpenCode, through a standalone `xerj-mcp` server on
+  stdio.
 - **Accounting.** `xerj_status` reports queries, hit rate, bytes returned, and
   measured token savings. The sidebar and `/xerj` panel show the same numbers.
 - **Anomaly scoring.** `xerj_anomaly` flags spikes in a numeric metric series
   using XERJ's on-demand detector. It is batch scoring, not monitoring.
+- **Command output.** `xerj_run` keeps a command's output under `.xerj/cmd/`
+  and returns a receipt; `xerj_out` lists what ran, shows an exact line range,
+  or searches it, so a long log is read by range instead of by `head` and
+  `tail`.
+- **Code navigation.** `xerj_refs`, `xerj_outline`, `xerj_zoom`, `xerj_find`,
+  `xerj_ast`, and `xerj_imports` answer "where is this used", "what does this
+  file declare", and "what imports this" without a language server.
+- **Local telemetry.** Every operation, boot, crash, and process sample goes
+  into bounded local files, and `xerj_telemetry` reports them. Nothing is sent
+  anywhere.
+- **A live sidebar.** The TUI shows the service state, corpora, memory, savings,
+  and jobs, and announces a finished index or docs run with a toast.
+
+[Back to top](#table-of-contents)
 
 ## Requirements
 
@@ -51,6 +100,8 @@ cited passages instead of whole files. Nothing leaves the machine.
 
 Only Linux x86_64 has been exercised end to end. The other release targets are
 selected, downloaded, and probed for execution, but not tested in CI.
+
+[Back to top](#table-of-contents)
 
 ## Install
 
@@ -118,6 +169,8 @@ creates `<project>/.xerj`, and builds the project index in the background.
 config files that were read, which is the quickest way to confirm the entry was
 picked up.
 
+[Back to top](#table-of-contents)
+
 ## Where the config goes
 
 OpenCode reads two config documents and applies them in order:
@@ -137,6 +190,8 @@ global config directory, which is why the examples above name
 opencode debug config        # prints every config source with its path
 opencode debug paths         # prints the global config, data, cache, state dirs
 ```
+
+[Back to top](#table-of-contents)
 
 ## Configuration
 
@@ -382,64 +437,87 @@ The same entry works with a checkout path instead of the package name; see
 
 ### Local telemetry
 
-The plugin measures its own cost. Every operation, boot phase, crash, restart, service-state transition, and CPU/RSS sample goes into bounded NDJSON files under `/telemetry` at the XERJ data root. The files are local to this machine, the plugin has no network path for them, and `telemetry.enabled: false` leaves no trace. `xerj_telemetry` reports operation counts, p50 and p95 split by idle and busy, the last ten boots with setup, ready, and indexed figures, crash and restart counts, the day's dwell split, and each XERJ process's CPU and RSS. The sidebar badge distinguishes `ready` from `busy` from `degraded` from `starting` from `stopped`.
+The plugin measures its own cost. Every operation, boot phase, crash, restart,
+service-state transition, and CPU/RSS sample goes into bounded NDJSON files
+under `telemetry/` at the XERJ data root:
 
-## Tools
+```
+ops.ndjson            every operation, newest last; rotates at 8 MiB, 4 kept
+rings/<type>.ndjson   the last 256 samples of one operation type
+samples/<date>.ndjson one CPU/RSS line per XERJ process every 15 s
+rollup/<date>/        per-instance counters and dwell time for one day
+state/boot-<id>.json  this process's boot marker; removed on a clean stop
+```
 
-| Tool | Input | Use |
-|---|---|---|
-| `xerj_search` | `query`, `k?`, `max_tokens?` | Find passages before reading files. |
-| `xerj_def` | `symbol`, `k?` | Find a declaration by name. |
-| `xerj_status` | — | Node, index, memory, and accounting state. |
-| `xerj_remember` | `text`, `kind?`, `topic?` | Store a durable fact. |
-| `xerj_recall` | `query`, `k?` | Retrieve memories by meaning. |
-| `xerj_forget` | `id` | Retract a memory. |
-| `xerj_index` | `url?` or `path?` | Index a page or external file now. |
-| `xerj_anomaly` | `index`, `time_field?`, `function?`, `field?`, `bucket_span?`, `threshold?` | Score a metric series and return flagged buckets. |
-| `xerj_dataset` | `action` (`list`, `describe`, `create`, `delete`, `export`, `import`), `index?`, `path?`, `mapping?`, `force?`, `pageSize?`, `batchSize?` | Manage extra indexes and move data in or out as an Elasticsearch-compatible NDJSON dump. |
-| `xerj_reindex` | — | Run an incremental pass over the project, fetched pages, and hidden folders now. |
-| `xerj_sysdocs` | — | Index this machine's man and info pages; unchanged pages are skipped and vanished ones pruned. |
-| `xerj_prjdocs` | `eager?` | Index official docs for the project's languages, frameworks, and cloud APIs at the versions it uses. |
-| `xerj_expand` | `sessionID`, `start?`, `end?` | Return the raw text of earlier turns, including the window a compaction replaced. |
-| `xerj_run` | `command`, `timeout_ms?` | Run one command with its output kept under `.xerj/cmd/`. Returns the exit code, sizes, and a stem; never the output. |
-| `xerj_out` | `action` (`list`, `show`, `search`, `ingest`), `stem?`, `start?`, `end?`, `query?`, `k?`, `limit?`, `path?`, `command?` | List recent commands, read an exact line range, search the corpus, or ingest a file a command wrote. |
+The files are local to this machine, the plugin has no network path for them,
+and `telemetry.enabled: false` leaves no trace. Operations are timed at the
+boundary that already exists (tools and RPC generically at registration, the
+index and node services at their own calls), so a tool added later is measured
+without touching it. A record carries the type, duration, outcome, the project
+prefix, the job count at the start (idle or busy), and up to `telemetry.maxText`
+characters of caller text after redaction; error messages are never stored.
 
-The turn archive is one file per session under the project's node directory,
-capped by `context.archiveMaxBytes`. Before the host compacts, the plugin
-appends the messages the summary will replace, so tool output stays available
-to `xerj_expand`.
+`xerj_telemetry` reports operation counts with p50 and p95 split by idle and
+busy, the last ten boots with setup, ready, and indexed figures, crash and
+restart counts, the day's dwell split, and each XERJ process's CPU and RSS with
+the day's peak and growth. A sweep at startup and every ten minutes keeps the
+directory under `telemetry.maxBytes`.
 
-## TUI
+The same five states drive the sidebar badge and the panel: `starting` before
+the node answers, `ready` when it does, `busy` while a long job runs (index,
+docs, install), `degraded` when a corpus is broken or memory is missing, and
+`stopped` after an idle shutdown. `busy` does not mean unready; a query still
+answers during a pass.
 
-The sidebar shows four lines: node state with document and size counts, queries
-with hit rate and prompts the relevance gate skipped, tokens saved, and index
-freshness. Every command is also in the palette.
+[Back to top](#table-of-contents)
 
-| Command | What it does |
-| --- | --- |
-| `/xerj` | Open the details panel: node, binary, index, corpora, datasets, memory, usage, counters, top cited files, and health. |
-| `/xerj status` | Same as `/xerj`. |
-| `/xerj reindex` | Run an incremental pass over the project and report the record count. |
-| `/xerj remember <text>` | Store a durable fact in project memory. |
-| `/xerj search <query>` | Search the index and show cited passages in a dialog. |
-| `/xerj-reindex` | Incremental pass over the project, fetched pages, and hidden folders. |
-| `/xerj-remember <text>` | Store a memory (prompts for the text when empty). |
-| `/xerj-search <query>` | Search and show cited passages (prompts when empty). |
-| `/xerj-prjdocs [eager]` | Index official docs for the project's languages, frameworks, and cloud APIs. Add `eager` for the wider, model-judged crawl. |
-| `/xerj-sysdocs` | Index this machine's man and info pages. |
+## How the project index works
 
-The panel reports, in order: the node, the binary, the index, every corpus, the
-datasets by size with each one's share of the store, the documented frameworks
-with their document and byte counts, the node's CPU and resident memory, whether
-it is building embeddings, memory, usage, counters, the most-cited files, and
-health. The sidebar adds `embedding` while a pass is building vectors.
+The project corpus is the index everything else builds on: code, prose, and
+anything under the project root that the ignores do not exclude. It lives in
+the project's own node under `<project>/.xerj/nodes/<prefix>/data`, namespaced
+by a prefix derived from the canonical project path, so two checkouts of one
+repository are two corpora.
 
-The panel closes three ways: `escape`, the **✕ close** button in its footer, or
-running `/xerj` again.
+`autoindex` builds it. With `index.graph: true` (the default) the corpus is one
+graph: section records, symbol records with `code`, `path:line` fields, and
+reference edges between files. With `index.graph: false` the same files become
+plain section records with no graph.
 
-The TUI talks to the server part over RPC (`status`, `reindex`, `search`,
-`remember`, `sysdocs`, `prjdocs`, and an `updated` event the sidebar follows),
-so the commands work in any OpenCode window on the same project.
+The refresh path follows the mode. A graph cannot use the engine's resident
+watcher, so the plugin watches the tree with `fs.watch(recursive)` behind a
+debounce, runs one-shot incremental passes, and falls back to polling when a
+recursive watch is unavailable or the tree exceeds the watch budget.
+`index.watch: false` leaves the periodic timer as the only trigger. At most one
+pass runs per prefix and at most one is queued, so an edit burst becomes one
+run rather than a dozen.
+
+A pass reconciles additions, edits, deletions, and renames against its journal:
+a deleted file's documents disappear, a rename appears under its new path, and
+an unchanged file costs nothing. `.gitignore`, nested ignores,
+`.git/info/exclude`, and `.xerjignore` apply; `.git`, `.xerj`, build output,
+virtualenvs, and secret-shaped names are always skipped.
+
+Hidden folders are outside autoindex's reach, so `index.hidden` lists folders
+the plugin scans itself and writes with `_bulk` into
+`<prefix>-hidden-docs`, skipping the same secrets and binaries and deleting
+documents whose file vanished. A folder configured in `index.brain` is indexed
+once as its own graph corpus instead.
+
+Four more corpora refresh alongside the project: git history
+(`<prefix>-git-docs`, the newest `index.gitLimit` commits), the turn archive
+(`<prefix>-archive-docs`), command output (`<prefix>-cmd-docs`) when
+`cmd.enabled` is on, and the docs corpora when their commands run. Fetched
+pages, external files, and hidden documents each have their own prefix and
+ingest path, so a failure in one leaves the others alone.
+
+Switching `index.graph` or `index.neural` changes what the engine can open. The
+plugin records the mode under the node directory and, when it changes, drops
+the project corpus and its journal so the next pass rebuilds in the new mode.
+Memory, hidden, web, external, and documentation corpora are not mode-sensitive
+and survive.
+
+[Back to top](#table-of-contents)
 
 ## How retrieval works
 
@@ -519,6 +597,259 @@ Savings are measured, not asserted: the baseline is each cited file's size
 capped at `stats.maxBaselineBytes`, counted once per session. Reading a file
 subtracts the bytes actually read, so a partial read only removes what it
 covered.
+
+[Back to top](#table-of-contents)
+
+## Memory
+
+`xerj_remember` stores one durable fact, decision, preference, fix, or note in
+a per-project namespace (`proj-<slug>-<hash>`), optionally with a topic. The id
+is `sha256(namespace + text)`, so remembering the same text twice is idempotent
+rather than a duplicate. Memory lives in the node's own index
+(`.xerj-memory-<namespace>`), beside the corpus it belongs to.
+
+Recall is blended, not pure vector: `xerj_recall` asks `/_memory` for the
+nearest entries with `recency_weight` (0.2), so a recent decision outranks an
+older nearly-equal one. Kind filtering happens in the plugin, because the
+engine's metadata filters returned nothing on every shape tried against
+`v1.0.0-rc.*`.
+
+Prompt-time recall is separate from search. On a prompt that passes the gate
+the plugin recalls the top three memories, keeps only those that cover half the
+prompt's terms, and injects them under `context.memoryTokens`. A decision
+stored weeks ago can answer a question without a tool call, and an unrelated
+memory is never injected just because it is nearest.
+
+Memory is written from three sources: the tools, a substantive turn whose
+final answer is long enough to be worth reading again
+(`memory.captureTurns`), and the host's compaction summary
+(`session.compaction.ended`). A summary is clipped at 4,000 characters and
+stored once per text, so a repeated event is idempotent.
+
+`xerj_forget` retracts one entry by id. Retention bounds the store:
+`memory.retain.days` (0 means no age limit), `maxCount`, and `maxBytes` apply
+in one hourly sweep, and only automatic summaries expire; explicit memories do
+not.
+
+Two passes keep the store honest. Verification marks a memory stale when a
+path, key, or symbol it names no longer exists, and never deletes it. Curation
+drops an exact duplicate of an automatic summary and flags other repeats as
+`duplicateOf`, leaving the decision to the model or the user.
+
+Memory written before project storage moved out of the global data root is
+copied into the node's data directory on setup when the destination is empty.
+
+[Back to top](#table-of-contents)
+
+## Command output
+
+Long command output is the largest avoidable cost in a session: a model reads
+`head`, then `tail`, then runs the command again to see the middle. With
+`cmd.enabled` (on by default) the plugin keeps the text instead.
+
+```
+<project>/.xerj/cmd/20261106T192233123Z-cmd.txt   the command
+<project>/.xerj/cmd/20261106T192233123Z-out.txt   stdout and stderr, interleaved
+<project>/.xerj/cmd/manifest.json                 exit code, duration, lines, windows
+```
+
+`xerj_run` executes one foreground command, writes the pair, and returns only
+a receipt: exit code, duration, line and byte counts, and the stem. The command
+runs in the project root with a deadline (`cmd.timeoutMs`, 10 minutes) and a
+captured-byte cap (`cmd.maxCommandBytes`, 64 MiB). A timeout kills the process
+group and keeps the partial output, marked. Output is written to a `.part` file
+and renamed on exit, so a reader never sees a half-written log; a `.part` left
+by a crash is recovered on the next start.
+
+`xerj_out` reads it back without paginating a terminal:
+
+| Action | What it returns |
+|---|---|
+| `list` | Recent commands, newest first, with exit code, age, lines, and bytes |
+| `show` | An exact numbered line range from the raw file; no range means the last 100 lines |
+| `search` | Matching windows with `cmd/<stem>-out.txt:<line>` citations and the exit code |
+| `ingest` | Copies a file the agent wrote itself into the directory as a new pair |
+
+The corpus is `<prefix>-cmd-docs`, plain `text`, split into windows of
+`cmd.windowLines` (200) or `cmd.windowBytes` (16 KiB), whichever binds first.
+Nothing is embedded: logs are literal, an error string is an exact term, and
+the lexical leg is the useful one, so the cost stays far below a project pass.
+A file past `cmd.maxFileBytes` (32 MiB) is stored and listed but not parsed.
+
+The model is told about this on its first call: a `<xerj-command-output>` block
+says to run long commands through `xerj_run` and read them with `xerj_out`,
+and that `list` shows what already ran before running something twice. The
+block is re-emitted after a compaction, and a mirrored result past
+`cmd.hintLines` (40) queues one `<xerj-cmd-hint>` line naming the stem. Host
+`bash`/`shell` results are mirrored too (`cmd.mirrorHostResults`), so `list`
+covers commands the wrapper did not run.
+
+Two caps bound the directory: `cmd.maxBytes` (256 MiB) for the pairs and
+`cmd.maxIndexBytes` (32 MiB) for the indexed text. A sweep at startup, after
+every ingest, and hourly deletes the oldest complete stem, files and documents
+together. Only the indexed text is redacted; the raw pair is `0600` inside a
+`0700` directory and never leaves the machine. `cmd.enabled: false` registers
+no tools, creates no directory, and injects nothing.
+
+[Back to top](#table-of-contents)
+
+## Fetched pages and external files
+
+A URL a session reads is a document worth keeping. Any completed tool result
+that carries a `url` and at least 200 characters of text is written to
+`<project>/.xerj/spool/<web prefix>/` as markdown with its source and fetch
+time, and a second index (`xop-web-<hash>`) watches that directory. The same
+URL replaces its earlier file, so a page is refreshed rather than duplicated,
+and yesterday's page is still searchable today. Bodies are redacted (bearer
+tokens, `sk-`/`ghp_`/`xox`/`AKIA` keys, private key blocks, and
+`password`/`token`/`secret` key-value shapes) and bounded by `remote.maxBytes`
+(2 MB). `remote.enabled: false` stops the spool entirely.
+
+A file outside the project is indexed when something reads it. The `read` tool
+names one path; a `bash` or `shell` command is parsed for literal arguments
+that resolve to existing regular files. Both run in the background through
+`_bulk` into `xop-ext-<hash>-docs`, with an mtime-and-size stamp so an unchanged
+file is not re-sent, and a stable id so an edited file replaces its document
+rather than leaving a stale copy. Credential-shaped names and directories
+(`.env*`, `*.pem`, `*.key`, `service.json`, `credentials.json`, `auth.json`,
+`.ssh`, `.aws`, `.gpg`, `.kube`, `.docker`) are refused before the file is
+read.
+
+The shell parser is conservative on purpose: a short option's value is skipped
+(`head -n 20`), and variables, globs, tilde paths, and redirection targets are
+not resolved, because guessing would index files the command never touched.
+
+[Back to top](#table-of-contents)
+
+## Tools
+
+Every tool is namespaced `xerj` and returns cited text plus `metadata.xerj`
+with counts and paths, so accounting and the panel do not parse prose. A tool
+answers from the index; none of them reads a file to answer a question the
+index can answer, and none writes a project file.
+
+| Tool | Input | Use |
+|---|---|---|
+| `xerj_search` | `query`, `k?`, `max_tokens?` | Find passages before reading files. |
+| `xerj_def` | `symbol`, `k?` | Find a declaration by name. |
+| `xerj_refs` | `symbol`, `k?` | The declarations that use a symbol, as `path:line`. |
+| `xerj_outline` | `path`, `k?` | A file's symbols with line numbers. |
+| `xerj_zoom` | `path`, `symbol`, `k?` | One declaration's exact source range. |
+| `xerj_find` | `pattern`, `glob?`, `ignore_case?`, `files_only?`, `limit?` | Regex over files, or a glob over paths. |
+| `xerj_ast` | `pattern`, `lang`, `glob?`, `limit?` | Structural search through `ast-grep`, read only. |
+| `xerj_imports` | `action` (`cycles`, `file`), `path?`, `limit?` | Import graph and cycles without a language server. |
+| `xerj_expand` | `sessionID`, `start?`, `end?` | The raw text of earlier turns, including a compaction window. |
+| `xerj_status` | — | Node, index, corpora, memory, and accounting state. |
+| `xerj_telemetry` | `op?`, `window?`, `sort?`, `limit?` | Local operation timings, boots, crashes, and process cost. |
+| `xerj_remember` | `text`, `kind?`, `topic?` | Store a durable fact. |
+| `xerj_recall` | `query`, `k?` | Retrieve memories by meaning. |
+| `xerj_forget` | `id` | Retract a memory. |
+| `xerj_index` | `url?` or `path?` | Index a page or external file now. |
+| `xerj_run` | `command`, `timeout_ms?` | Run one command with its output kept under `.xerj/cmd/`. |
+| `xerj_out` | `action`, `stem?`, `start?`, `end?`, `query?`, `path?` | List, show, search, or ingest command output. |
+| `xerj_anomaly` | `index`, `time_field?`, `function?`, `field?`, `bucket_span?`, `threshold?` | Score a metric series and return flagged buckets. |
+| `xerj_dataset` | `action`, `index?`, `path?`, `mapping?`, `force?` | Manage extra indexes and NDJSON dumps. |
+| `xerj_reindex` | — | Incremental pass over the project, fetched pages, and hidden folders. |
+| `xerj_sysdocs` | — | Index this machine's man and info pages. |
+| `xerj_prjdocs` | `eager?`, `keywords?` | Index official docs for the project's stack. |
+
+The turn archive is one file per session under the project's node directory,
+capped by `context.archiveMaxBytes`. Before the host compacts, the plugin
+appends the messages the summary will replace, so tool output stays available
+to `xerj_expand`.
+
+[Back to top](#table-of-contents)
+
+## Analysis tools
+
+Seven tools answer code questions from indexed records or a bounded local
+scan, without a language server:
+
+- `xerj_refs` lists the declarations that use a symbol, as `path:line`, from
+  the `code` field of indexed records. Run it before a rename or a signature
+  change instead of grepping the tree.
+- `xerj_outline` lists a file's symbols with line numbers, so a whole-file read
+  can start from the part that matters.
+- `xerj_zoom` returns one declaration's exact source range by name.
+- `xerj_find` runs a regular expression over project files, or a glob over
+  paths, with line numbers. It reads the tree itself, so it sees a file before
+  the index does; secret files are skipped and results are capped.
+- `xerj_ast` runs `ast-grep` when the binary is on `PATH`, matching code by
+  shape with metavariables such as `$A`. It passes the pattern as an argument
+  and never rewrites.
+- `xerj_imports` builds the import graph from the files: cycles, or one file's
+  imports with resolution for relative paths, Python modules, Go paths, and
+  Rust `crate::` paths.
+- `xerj_expand` returns the raw text of earlier turns, including the window a
+  compaction replaced, from the turn archive.
+
+All seven are read-only. The AST tool reports the missing binary rather than
+guessing, and a language it does not know is reported as unresolved, not as an
+import with no files.
+
+[Back to top](#table-of-contents)
+
+## TUI
+
+The sidebar is a bordered box with a collapsible header. Expanded, it reads:
+
+- the header row, `▼ XERJ`;
+- the state line, `● ready` or `◐ busy · indexing · 12s`, with the elapsed time
+  counting up while a job runs;
+- the plugin version;
+- a `⚠` line when a corpus is failing or a warning is recorded;
+- the sections below, each switchable in preferences.
+
+Collapsed, it shows the header and the summary rows: `Index`, `Saved`, and
+`Memory`, plus `Jobs` while something is running. Clicking the header toggles
+the state, and the choice is remembered in the shared
+`tui-preferences.jsonc` under the `xerj` key, beside other plugins' keys.
+
+The sections are State (the service state, running jobs, today's dwell), Corpora
+(one row per corpus with its error), Session (queries, hits, injected turns,
+prompts skipped as noise), Savings (saved, cost, net, returned), Runtime (CPU
+and RSS, embedding state, sessions), and Health (warnings, last run, error).
+
+Every command is also in the palette.
+
+| Command | What it does |
+| --- | --- |
+| `/xerj` | Open the details panel: node, binary, index, corpora, datasets, memory, usage, counters, top cited files, and health. |
+| `/xerj status` | Same as `/xerj`. |
+| `/xerj reindex` | Run an incremental pass over the project and report the record count. |
+| `/xerj remember <text>` | Store a durable fact in project memory. |
+| `/xerj search <query>` | Search the index and show cited passages in a dialog. |
+| `/xerj-reindex` | Incremental pass over the project, fetched pages, and hidden folders. |
+| `/xerj-remember <text>` | Store a memory (prompts for the text when empty). |
+| `/xerj-search <query>` | Search and show cited passages (prompts when empty). |
+| `/xerj-prjdocs [eager]` | Index official docs for the project's languages, frameworks, and cloud APIs. Add `eager` for the wider, model-judged crawl. |
+| `/xerj-sysdocs` | Index this machine's man and info pages. |
+
+The panel reports, in order: the service state and running jobs, the node, the
+binary, the index, every corpus, the datasets by size with each one's share of
+the store, the documented frameworks with their document and byte counts, the
+node's CPU and resident memory, whether it is building embeddings, memory,
+usage, counters, the most-cited files, and health.
+
+The panel closes three ways: `escape`, the **✕ close** button in its footer, or
+running `/xerj` again.
+
+The TUI talks to the server part over RPC (`status`, `reindex`, `search`,
+`remember`, `wrapup`, `sysdocs`, `prjdocs`, `uiLog`, and an `updated` event the
+sidebar follows), so the commands work in any OpenCode window on the same
+project.
+
+### Completion notices
+
+The sidebar announces a finished run once, whoever started it: the first
+project index pass after startup, `/xerj-reindex`, `/xerj-prjdocs`,
+`/xerj-sysdocs`, and an agent-triggered `xerj_prjdocs` or `xerj_sysdocs`. A
+toast names the files and records for the project, or the pages for a docs
+corpus, and a command run from the TUI supplies its richer text (technologies,
+unchanged pages, pruned pages, failures). The first status a TUI sees is the
+baseline, so a corpus built before the session is not announced again.
+
+[Back to top](#table-of-contents)
 
 ## Project documentation
 
@@ -659,6 +990,8 @@ Eager mode is off by default because it costs model calls and network traffic.
 Measured on `docs.solidjs.com` with the heuristic judge: 25 pages and 169 KB in
 9 s, reaching pages three levels below the entry.
 
+[Back to top](#table-of-contents)
+
 ## System documentation
 
 `/xerj-sysdocs` indexes the man and info pages this machine can resolve into
@@ -687,6 +1020,8 @@ deleted from the corpus.
 `body` is plain `text`, not `semantic_text`, so no page is embedded. A machine
 holds thousands of long pages, embedding them with the local model takes hours,
 and reference prose already carries the words people search for.
+
+[Back to top](#table-of-contents)
 
 ## Extra indexes and dumps
 
@@ -719,6 +1054,21 @@ without `_id` get a generated id.
 Indexes the plugin maintains (`xop-*`, `.xerj-*`, `.xerj_*`) are marked
 `managed` in `list`, and `delete` refuses them unless `force` is true: dropping
 one loses a corpus the plugin rebuilds only on a full reindex.
+
+[Back to top](#table-of-contents)
+
+## Anomaly scoring
+
+`xerj_anomaly` flags spikes in a numeric series already indexed. A stable
+detector id is derived from the configuration (`index`, `time_field`,
+`function`, `field`, `bucket_span`), the detector is created or replaced, and
+one `_score` call returns the flagged buckets with `actual`, `expected`,
+`z_score`, and `anomaly_score`. Only flagged buckets are formatted, at most ten.
+
+It is on-demand batch scoring: no datafeed, no timer, no alerting. Call it
+again to score a later window, or point a scheduler at it from outside.
+
+[Back to top](#table-of-contents)
 
 ## Standalone MCP server
 
@@ -783,14 +1133,12 @@ spawns a command over stdio works the same way; point it at `xerj-mcp`.
 | `--url <node url>` | Attach to a running node instead of spawning one. |
 | `--help`, `-h` | Print usage on stderr and exit. |
 
-#### Local telemetry
+### MCP tools
 
-The plugin measures its own cost. Every operation, boot phase, crash, restart, service-state transition, and CPU/RSS sample goes into bounded NDJSON files under `/telemetry` at the XERJ data root. The files are local to this machine, the plugin has no network path for them, and `telemetry.enabled: false` leaves no trace. `xerj_telemetry` reports operation counts, p50 and p95 split by idle and busy, the last ten boots with setup, ready, and indexed figures, crash and restart counts, the day's dwell split, and each XERJ process's CPU and RSS. The sidebar badge distinguishes `ready` from `busy` from `degraded` from `starting` from `stopped`.
-
-## Tools
-
-The MCP server exposes twelve tools, the same set the OpenCode plugin
-registers, so a prompt written for one works in the other:
+The MCP server exposes nineteen tools, the retrieval and analysis set the
+plugin registers, so a prompt written for one works in the other. The two
+command-output tools stay in the plugin, because the MCP host already carries
+its own runner:
 
 | Tool | Arguments | What it does |
 | --- | --- | --- |
@@ -806,6 +1154,13 @@ registers, so a prompt written for one works in the other:
 | `reindex` | — | Incremental pass over the project now. |
 | `sysdocs` | — | Index the machine's man and info pages. |
 | `prjdocs` | `eager?` | Index official docs for what the project uses. |
+| `refs` | `symbol`, `k?` | The declarations that use a symbol. |
+| `outline` | `path`, `k?` | A file's symbols with line numbers. |
+| `zoom` | `path`, `symbol`, `k?` | One declaration's source range. |
+| `ast` | `pattern`, `lang`, `glob?`, `limit?` | Structural search through `ast-grep`, read only. |
+| `find` | `pattern`, `glob?`, `ignore_case?`, `files_only?`, `limit?` | Regex over files, or a glob over paths. |
+| `imports` | `action`, `path?`, `limit?` | Import graph and cycles. |
+| `expand` | `sessionID`, `start?`, `end?` | The raw text of earlier turns. |
 
 A typical session, in tool-call form:
 
@@ -836,6 +1191,8 @@ Settings come from the environment because there are no plugin options:
 The server runs one node per project, exactly as the plugin does, so an
 OpenCode session and an MCP client on the same project share it.
 
+[Back to top](#table-of-contents)
+
 ## Releasing
 
 Pushing a tag that matches `package.json` publishes to npm:
@@ -857,6 +1214,8 @@ that version is already published, and otherwise runs
 `NPM_TOKEN` is read from the `npm` GitHub environment, so the job declares
 `environment: npm` and any protection rules on that environment (required
 reviewers, branch or tag restrictions) apply before it publishes.
+
+[Back to top](#table-of-contents)
 
 ## Data locations
 
@@ -886,6 +1245,8 @@ The node is scoped to the project and stops when the last session closes, after
 survive the stop; the next request restarts the node on the same port with the
 same data.
 
+[Back to top](#table-of-contents)
+
 ## Limitations
 
 - XERJ is pre-1.0. Every call is isolated behind `node/client.ts`, and
@@ -911,6 +1272,8 @@ same data.
   repository with neural embeddings).
 - Anomaly scoring has no datafeed, timer, or alerting.
 
+[Back to top](#table-of-contents)
+
 ## Development
 
 ```bash
@@ -930,6 +1293,10 @@ The repo dogfoods its own plugin through `opencode.json`: `.agents` is indexed
 both as a hidden corpus and as the example brain, which exercises the
 duplicate-collapse path in retrieval.
 
+[Back to top](#table-of-contents)
+
 ## License
 
 Apache-2.0.
+
+[Back to top](#table-of-contents)
