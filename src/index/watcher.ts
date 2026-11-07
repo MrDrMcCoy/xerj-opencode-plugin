@@ -278,10 +278,19 @@ export class CorpusService {
   /**
    * Forgets a run whose index is gone, when its source is gone too. A spool
    * that lost every page leaves the record claiming records nothing wrote.
+   *
+   * The cleared state is a marker object, not `null`: the host's storage can
+   * keep a record written as `null` readable, and then `restore` loads it on
+   * the next start and the first pass restamps it with a fresh timestamp.
    */
   async clearRun(): Promise<void> {
     this.lastRun = null;
-    await this.options.storage.set(this.storageKey, null).catch(() => {});
+    await this.options.storage
+      .set(this.storageKey, { cleared: true })
+      .catch((error: unknown) => {
+        const reason = error instanceof Error ? error.message : String(error);
+        this.options.logger.debug("could not clear the run record", reason);
+      });
     this.options.onChange?.();
   }
 
@@ -749,6 +758,8 @@ export class CorpusService {
     if (typeof stored !== "object" || stored === null) return;
 
     const record = stored as Record<string, unknown>;
+    // A marker written by clearRun: the corpus has no run to report.
+    if (record.cleared === true) return;
     if (typeof record.at !== "number") return;
 
     this.lastRun = {

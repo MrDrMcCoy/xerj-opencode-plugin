@@ -12,11 +12,14 @@ echo '{"doc_kind":"run","generation":1,"records_total":3}'
 sleep 30
 `;
 
-function storage(): KeyValueStorage {
+function storage(options: { ignoreNullWrites?: boolean } = {}): KeyValueStorage {
   const values = new Map<string, unknown>();
   return {
     get: async (key) => values.get(key) ?? null,
     set: async (key, value) => {
+      // The host's storage kept a record written as null readable, which is why
+      // clearRun no longer writes null.
+      if (value === null && options.ignoreNullWrites) return;
       values.set(key, value);
     },
   };
@@ -108,7 +111,7 @@ describe("CorpusService plain runs", () => {
 
     await instance.clearRun();
     expect(instance.snapshot().lastRun).toBeNull();
-    expect(await store.get(key)).toBeNull();
+    expect(await store.get(key)).toEqual({ cleared: true });
   });
 
   test("a no-op pass restamps a stored run", async () => {
@@ -165,7 +168,37 @@ describe("CorpusService plain runs", () => {
     await instance.start();
 
     expect(instance.snapshot().lastRun).toBeNull();
-    expect(await store.get(key)).toBeNull();
+    expect(await store.get(key)).toEqual({ cleared: true });
+  });
+
+  test("a null write the host ignores cannot resurrect the record", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "xerj-clear-null-"));
+    const store = storage({ ignoreNullWrites: true });
+    const key = "index/lastRun:xop-web-55667788";
+    await store.set(key, { at: 1, records: 5, generation: 2 });
+
+    const instance = new CorpusService({
+      binaryPath: fakeBinary("#!/bin/sh\nexit 0\n"),
+      nodeUrl: "http://127.0.0.1:9200",
+      projectRoot,
+      prefix: "xop-web-55667788",
+      stateRoot: join(projectRoot, ".xerj"),
+      config: {
+        ...DEFAULT_CONFIG,
+        index: { ...DEFAULT_CONFIG.index, watch: false, periodicMs: 60_000 },
+      },
+      storage: store,
+      logger,
+    });
+    running.push(instance);
+
+    await instance.clearRun();
+    await instance.start();
+
+    // A pass that finds nothing keeps the record it restored, restamped, so
+    // the clear has to survive as something the restore refuses to load.
+    expect(instance.snapshot().lastRun).toBeNull();
+    expect(await store.get(key)).toEqual({ cleared: true });
   });
 });
 
