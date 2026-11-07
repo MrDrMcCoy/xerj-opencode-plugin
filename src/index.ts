@@ -97,6 +97,7 @@ import { JevosManager } from "./jev/manager.ts";
 import { JevosSupervisor } from "./jev/supervisor.ts";
 import { makeJevosJudge } from "./jev/judge.ts";
 import { Autotuner, type TuningView } from "./jev/autotune.ts";
+import { HubService } from "./hub/service.ts";
 import { jevosTarget, normaliseVersion } from "./jev/release.ts";
 import { migrateMemoryIndex, migrateProjectStorage } from "./memory/migrate.ts";
 import { RemoteSpool } from "./remote/spool.ts";
@@ -1087,6 +1088,12 @@ export default Plugin.define({
     let autotuner: Autotuner | null = null;
     let tuningView: TuningView | null = null;
 
+    const hub = new HubService({
+      config: config.hub,
+      binary: () => runtime.binary?.path ?? null,
+      nodeUrl: () => runtime.node?.baseUrl ?? null,
+      logger,
+    });
     const tools = buildTools({
       config,
       projectRoot,
@@ -1101,6 +1108,7 @@ export default Plugin.define({
       getMemory: () => runtime.memory,
       getSpool: () => runtime.spool,
       getAnomaly: () => runtime.anomaly,
+      hub,
       snapshot,
     });
 

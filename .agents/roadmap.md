@@ -1281,6 +1281,24 @@ default.
 | Dreamer child sessions | Magic Context | Idle-time curation, doc maintenance, primer refresh | `memory.curate` | Memory curation shipped and stable |
 | Notes and smart notes | Magic Context | Deferred intentions with surface conditions | `context.notes` | A scheduler the plugin does not have yet |
 
+### Hub tools design
+
+`xerj_ask` and `xerj_hub` wrap the engine's own hub surface; the plugin never
+downloads, verifies, or unpacks a pack. `xerj ask` reads the signed catalogue,
+routes or takes `--corpus`, pulls the pack once (up to 50 MB), restores its
+snapshot into the plugin's node, and returns `file:line` passages with the
+corpus, pin, age, and licence. `xerj hub find` reads only the cached catalogue;
+`sync` refreshes it; `status` shows packs and the node.
+
+The defaults are closed and private: `hub.enabled: false`,
+`hub.network: false` (so `--offline`), `hub.hosted: "off"`, and the public
+`https://hub.xerj.org`. A change to `hub.url` needs a binary whose embedded key
+matches the catalogue, so a private hub is a build decision, not a config one.
+The cache is `~/.xerj/hub` (4 GB, engine-managed). Exit 3 is a verification
+failure, 4 an ambiguous corpus, 5 a build with no key, and 6 a missing or
+unreachable catalogue; each becomes a readable tool message. `xerj_hub sync` is
+the only network operation and is refused while `hub.network` is off.
+
 ## Deliberate non-goals
 
 | Not doing | Why |
@@ -1377,10 +1395,10 @@ measured; they include tests and the commits that carry them. A status of
 | Import graph and cycles | M | Done | 2.0 h | `analysis/imports.ts` plus `xerj_imports`; relative, Python, Go, and Rust specifiers resolve against project files, unresolved ones are counted; ten module tests and four tool tests |
 | Regex and glob search | M | Done | 1.5 h | `analysis/find.ts` plus `xerj_find`: glob-to-regex with `**` spanning folders, line-numbered matches, secret files skipped, 200-match cap; ten module tests and three tool tests |
 | Structural search (`ast-grep`, read only) | M | Done | 1.0 h | `analysis/ast.ts` plus `xerj_ast`: probes the binary, passes the pattern and glob as arguments, parses `--json=stream`, never rewrites; seven module tests and one tool test |
-| tree-sitter layer, one language | M | Not started | — | Grammar source settled (the pinned `tree-sitter-wasms` pack); work deferred by the user, gate remains closed |
+| tree-sitter layer, one language | M | In progress | — | Deferral lifted 2026-11-07. TypeScript first; grammar source settled (the pinned `tree-sitter-wasms` pack); `analysis.treeSitter.enabled` stays closed |
 | Complexity and duplicates | M | Not started | — | Needs the tree-sitter layer |
 | `xerj_code` | M | Not started | — | The engine has `corpus add/own/build/index/list`; `add` clones a git URL, so this needs network consent and belongs behind a gate like `hub` rather than in an always-on tool |
-| `xerj_ask` and hub packs | M | Not started | — | Gated by `hub.enabled`, `hub.network` |
+| `xerj_ask` and hub packs | M | Done (gated off) | 2.0 h | `src/hub/service.ts` wraps `xerj ask`/`xerj hub`: `--offline` and `--hosted off` when the network is off, `--url` to the plugin node, JSON answer formatting with corpus/pin/licence, exit-code mapping, and `find`/`sync`/`status`. Defaults: `hub.enabled` false, `hub.network` false, `hub.hosted` off, `https://hub.xerj.org`, 1200 tokens, 120 s. Packs, signatures, catalogue, and cache stay in the engine. Seven service/tool tests plus a live cached-pack answer. |
 | Turn archive | M | Done | 1.5 h | `archive/turns.ts`: one NDJSON file per session under `<node dir>/archive`, 4 KB per turn, oldest half dropped past `context.archive.maxBytes`; prompts and answers both archived; eight module tests |
 | `xerj_expand` | M | Done | 0.5 h | Prints `[n] U:`/`[n] A:` for a turn range, or says the archive is off; wired for the plugin and the MCP server |
 | Pre-compaction window archive | M | Done | 1.5 h | `archive/window.ts` flattens text and tool-result bodies from the newest messages (40 or about 200 KB, whichever binds first) into the turn archive behind a `system` marker; media, reasoning, and compaction parts are skipped, message ids are deduped against retries, and only this instance's sessions are captured. Roles gained `tool` and `system`, and `xerj_expand` labels them `T` and `S`. Eleven module tests |

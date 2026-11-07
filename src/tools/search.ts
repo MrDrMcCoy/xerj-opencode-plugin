@@ -18,6 +18,7 @@ import { DatasetService } from "../datasets/service.ts";
 import type { Logger } from "../log.ts";
 import type { SearchService } from "../search/service.ts";
 import type { StatusSnapshot } from "../rpc.ts";
+import type { HubService } from "../hub/service.ts";
 
 export interface ToolOptions {
   readonly config: Config;
@@ -33,6 +34,7 @@ export interface ToolOptions {
   readonly getAnomaly: () => AnomalyService | null;
   /** The raw turn archive; null when archiving is disabled. */
   readonly getArchive: () => TurnArchive | null;
+  readonly hub: HubService;
   readonly snapshot: () => Promise<StatusSnapshot>;
 }
 
@@ -880,6 +882,126 @@ export function buildTools(options: ToolOptions): ReadonlyArray<{
         return {
           content: forgotten ? `Forgot ${args.id}.` : `No memory with id ${args.id}.`,
           metadata: { xerj: { memory: args.id, forgotten } },
+        };
+      },
+    },
+    ...(options.config.hub.enabled ? hubTools(options) : []),
+  ];
+}
+
+const ASK_INPUT = {
+  type: "object",
+  properties: {
+    question: { type: "string", description: "The question, in plain words." },
+    corpus: {
+      type: "string",
+      description: "Skip routing and ask this hub corpus slug.",
+    },
+    mode: {
+      type: "string",
+      enum: ["how", "def", "files"],
+      description: "how (default), an exact definition, or the relevant files.",
+    },
+    symbol: {
+      type: "string",
+      description: "Symbol name when mode is def.",
+    },
+    max_tokens: {
+      type: "number",
+      description: "Answer cap; defaults to hub.maxTokens.",
+    },
+  },
+  required: ["question"],
+  additionalProperties: false,
+} as const;
+
+const HUB_INPUT = {
+  type: "object",
+  properties: {
+    action: {
+      type: "string",
+      enum: ["sync", "find", "status"],
+      description: "sync the catalogue, find corpora, or show cache status.",
+    },
+    query: {
+      type: "string",
+      description: "Question or topic for action=find.",
+    },
+    k: {
+      type: "number",
+      description: "Candidates for action=find (1-25, default 8).",
+    },
+  },
+  required: ["action"],
+  additionalProperties: false,
+} as const;
+
+/** The hub surface; registered only when `hub.enabled` is true. */
+function hubTools(options: ToolOptions): ReadonlyArray<{
+  name: string;
+  description: string;
+  input: unknown;
+  options: { namespace: string };
+  execute: (input: unknown) => Promise<unknown>;
+}> {
+  return [
+    {
+      name: "ask",
+      description:
+        "Ask a signed pre-indexed XERJ hub corpus when the project itself does not cover the topic. The engine pulls the pack once, names the corpus, pinned revision, and licence, and answers with cited passages. Use xerj_hub find first when you are unsure which corpus fits.",
+      input: ASK_INPUT,
+      options: { namespace: "xerj" },
+      execute: async (input) => {
+        const args = input as {
+          question: string;
+          corpus?: string;
+          mode?: "how" | "def" | "files";
+          symbol?: string;
+          max_tokens?: number;
+        };
+        const result = await options.hub.ask({
+          question: args.question,
+          corpus: args.corpus,
+          mode: args.mode,
+          symbol: args.symbol,
+          maxTokens: args.max_tokens,
+        });
+        return {
+          content: result.text,
+          metadata: {
+            xerj: {
+              hub: {
+                ok: result.ok,
+                corpus: result.corpus ?? null,
+                answeredFrom: result.answeredFrom ?? null,
+                cached: result.cached ?? false,
+              },
+            },
+          },
+        };
+      },
+    },
+    {
+      name: "hub",
+      description:
+        "Manage the XERJ hub: sync the signed catalogue (needs hub.network), find corpora that cover a topic from the cached catalogue, or show cache status. Packs themselves are pulled by xerj_ask.",
+      input: HUB_INPUT,
+      options: { namespace: "xerj" },
+      execute: async (input) => {
+        const args = input as {
+          action: "sync" | "find" | "status";
+          query?: string;
+          k?: number;
+        };
+        const result =
+          args.action === "sync"
+            ? await options.hub.sync()
+            : args.action === "find"
+              ? await options.hub.find(args.query ?? "", args.k ?? 8)
+              : await options.hub.status();
+        return {
+          content: result.text,
+          metadata: { xerj: { hub: { ok: result.ok, action: args.action } } },
         };
       },
     },

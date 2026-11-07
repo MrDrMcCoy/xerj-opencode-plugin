@@ -4,6 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_CONFIG } from "../../src/config.ts";
 import { buildTools } from "../../src/tools/search.ts";
+
+const HUB_STUB = {
+  ask: async () => ({ ok: false, text: "hub disabled" }),
+  find: async () => ({ ok: false, text: "hub disabled" }),
+  sync: async () => ({ ok: false, text: "hub disabled" }),
+  status: async () => ({ ok: false, text: "hub disabled" }),
+} as never;
 import type { SearchService } from "../../src/search/service.ts";
 import type { StatusSnapshot } from "../../src/rpc.ts";
 
@@ -52,6 +59,7 @@ function toolFor(
     getMemory: () => (overrides.memory ?? null) as never,
     getSpool: () => (overrides.spool ?? null) as never,
     getAnomaly: () => (overrides.anomaly ?? null) as never,
+    hub: HUB_STUB,
     snapshot: async () => status,
     ledger: {
       recordQuery: async (_session: string, paths: string[], bytes: number, hits: number) => {
@@ -143,6 +151,8 @@ describe("the rest of the tool surface", () => {
       getMemory: () => (overrides.memory ?? null) as never,
       getSpool: () => (overrides.spool ?? null) as never,
       getAnomaly: () => (overrides.anomaly ?? null) as never,
+      hub: HUB_STUB,
+
       snapshot: async () => snapshot(),
       ledger: { recordQuery: async () => {} } as never,
     });
@@ -470,6 +480,8 @@ describe("dataset tool", () => {
       getMemory: () => null,
       getSpool: () => null,
       getAnomaly: () => null,
+      hub: HUB_STUB,
+
       snapshot: async () => ({}) as never,
     }) as never;
   }
@@ -582,6 +594,7 @@ describe("dataset tool export and import", () => {
       getMemory: () => null,
       getSpool: () => null,
       getAnomaly: () => null,
+      hub: HUB_STUB,
       snapshot: async () => ({}) as never,
     });
     const tool = tools.find((candidate) => candidate.name === "dataset");
@@ -630,6 +643,7 @@ describe("dataset tool export and import", () => {
       getMemory: () => null,
       getSpool: () => null,
       getAnomaly: () => null,
+      hub: HUB_STUB,
       snapshot: async () => ({}) as never,
     });
     const tool = tools.find((candidate) => candidate.name === "dataset");

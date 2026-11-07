@@ -364,6 +364,14 @@ This is the complete set with its defaults, in
           "timeoutMs": 600000,          // deadline for one xerj_run
           "hintLines": 40               // a mirrored result past this queues a hint
         },
+        "hub": {                        // signed pre-indexed corpora
+          "enabled": false,             // registers xerj_ask and xerj_hub
+          "network": false,             // cached packs only until true
+          "hosted": "off",              // off, auto, or on
+          "url": "https://hub.xerj.org",// catalogue; key is in the binary
+          "maxTokens": 1200,            // answer cap passed to xerj ask
+          "timeoutMs": 120000           // one hub command
+        },
         "telemetry": {
           "anomaly": false,             // reserved; on-demand tool only
           "enabled": true,              // local files only; never sent
@@ -496,6 +504,12 @@ The same entry works with a checkout path instead of the package name; see
 | `cmd.showTokens` | Output budget for one `xerj_out show`. |
 | `cmd.timeoutMs` | Deadline for one `xerj_run` command. |
 | `cmd.hintLines` | A mirrored command result past this many lines queues one hint for the next turn. |
+| `hub.enabled` | Register `xerj_ask` and `xerj_hub`. Off by default. |
+| `hub.network` | Allow pack and catalogue downloads. When false, only cached packs answer. |
+| `hub.hosted` | `off`, `auto`, or `on`: may a question be sent to the hosted hub? |
+| `hub.url` | Catalogue base URL. The trust key stays the one compiled into the binary. |
+| `hub.maxTokens` | Answer cap passed to `xerj ask`. |
+| `hub.timeoutMs` | Deadline for one hub command, including a pack pull. |
 
 ### Local telemetry
 
@@ -937,11 +951,44 @@ index can answer, and none writes a project file.
 | `xerj_reindex` | — | Incremental pass over the project, fetched pages, and hidden folders. |
 | `xerj_sysdocs` | — | Index this machine's man and info pages. |
 | `xerj_prjdocs` | `eager?`, `keywords?` | Index official docs for the project's stack. |
+| `xerj_ask` | `question`, `corpus?`, `mode?`, `symbol?`, `max_tokens?` | Ask a signed, pre-indexed hub corpus. Registered when `hub.enabled` is on. |
+| `xerj_hub` | `action`, `query?`, `k?` | Sync the catalogue, find corpora, or show cache status. Registered with `hub.enabled`. |
 
 The turn archive is one file per session under the project's node directory,
 capped by `context.archiveMaxBytes`. Before the host compacts, the plugin
 appends the messages the summary will replace, so tool output stays available
 to `xerj_expand`.
+
+[Back to top](#table-of-contents)
+
+## Hub corpora
+
+The engine can answer from signed, pre-indexed corpora that it downloads on
+demand, with no clone and no local indexing. The plugin exposes that surface as
+`xerj_ask` and `xerj_hub` when `hub.enabled` is true. Off by default: the hub is
+public, but the questions and the download are still a deliberate choice.
+
+- `xerj_ask` routes the question to a corpus, or uses `--corpus`, pulls the
+  signed pack once, restores its snapshot into the plugin's node, and returns
+  passages with `file:line`, the corpus, the pinned revision and date, the age,
+  and the licence. `mode` chooses `how` (default), an exact `def`, or the
+  relevant `files`.
+- `xerj_hub` runs `sync` (needs `hub.network`), `find` (cached catalogue only),
+  or `status`. `find` is the way to see which corpus covers a topic before
+  `xerj_ask` pulls anything.
+
+The defaults are the conservative set: `hub.network: false` passes `--offline`,
+so only packs already cached answer; `hub.hosted: "off"` keeps the question on
+this machine; `hub.url` is `https://hub.xerj.org`. The catalogue and packs are
+signed, and the trust key is compiled into the managed binary, so changing
+`hub.url` to a private hub also needs a binary built with that key. The cache is
+`~/.xerj/hub`, capped at 4 GB by the engine, and an automatic pull is limited to
+50 MB.
+
+To use it, set `hub.enabled: true`. With the network still off, run
+`xerj_hub action=sync` after setting `hub.network: true` once, or pull a
+specific pack with the engine CLI. Answers name the licence and the pin, and a
+pack whose licence class is excluded is refused before it is used.
 
 [Back to top](#table-of-contents)
 

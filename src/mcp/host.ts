@@ -27,6 +27,7 @@ import { RemoteSpool } from "../remote/spool.ts";
 import { AnomalyService } from "../telemetry/anomaly.ts";
 import { Ledger, type LedgerSnapshot } from "../stats/ledger.ts";
 import { buildTools, type ToolOptions } from "../tools/search.ts";
+import { HubService } from "../hub/service.ts";
 import { fileStorage } from "./storage.ts";
 import { SysdocIndexer } from "../sysdocs/index.ts";
 import { PrjdocsIndexer } from "../prjdocs/index.ts";
@@ -189,6 +190,12 @@ export class McpHost {
       getMemory: () => this.memory,
       getSpool: () => this.spool,
       getAnomaly: () => this.anomaly,
+      hub: new HubService({
+        config: this.config.hub,
+        binary: () => this.binary?.path ?? null,
+        nodeUrl: () => this.client?.baseUrl ?? null,
+        logger: this.logger,
+      }),
       snapshot: () => this.snapshot(),
     };
 

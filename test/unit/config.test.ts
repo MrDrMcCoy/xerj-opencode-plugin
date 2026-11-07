@@ -330,6 +330,46 @@ describe("git history indexing", () => {
   });
 });
 
+describe("hub", () => {
+  test("off by default, cached only, hosted off", () => {
+    expect(DEFAULT_CONFIG.hub).toEqual({
+      enabled: false,
+      network: false,
+      hosted: "off",
+      url: "https://hub.xerj.org",
+      maxTokens: 1200,
+      timeoutMs: 120000,
+    });
+  });
+
+  test("takes overrides and clamps its numbers", () => {
+    const { config, warnings } = loadConfig({
+      hub: {
+        enabled: true,
+        network: true,
+        hosted: "on",
+        url: " https://example.test ",
+        maxTokens: 1,
+        timeoutMs: 1,
+      },
+    });
+
+    expect(config.hub.enabled).toBe(true);
+    expect(config.hub.network).toBe(true);
+    expect(config.hub.hosted).toBe("on");
+    expect(config.hub.url).toBe("https://example.test");
+    expect(config.hub.maxTokens).toBe(100);
+    expect(config.hub.timeoutMs).toBe(5000);
+    expect(warnings.filter((w) => w.includes("hub."))).toHaveLength(2);
+  });
+
+  test("an unknown hosted value warns and uses off", () => {
+    const { config, warnings } = loadConfig({ hub: { hosted: "maybe" } });
+    expect(config.hub.hosted).toBe("off");
+    expect(warnings.some((w) => w.includes("hub.hosted"))).toBe(true);
+  });
+});
+
 describe("memory distillation", () => {
   test("on by default, with the local judge", () => {
     expect(DEFAULT_CONFIG.memory.distill).toEqual({

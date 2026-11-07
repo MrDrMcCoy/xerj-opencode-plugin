@@ -381,6 +381,22 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-07: `xerj_ask` and `xerj_hub` are implemented behind `hub.enabled`
+  (off). They wrap the engine's own `xerj ask`/`xerj hub`; the plugin holds no
+  pack, signature, or catalogue code. `xerj_ask` passes `--offline` and
+  `--hosted off` when `hub.network` is false, points `--url` at the plugin's
+  node, and formats the JSON answer with corpus, pin, age, licence, hits, and
+  warnings. `xerj_hub` covers `sync`, `find`, and `status`; `sync` is refused
+  while the network is off, and `find` never fetches.
+  Defaults are the accepted set: `hub.enabled: false`, `hub.network: false`,
+  `hub.hosted: "off"`, `https://hub.xerj.org`, 1200 tokens, 120 s. Exit 3/4/5/6
+  map to verification, ambiguity, no public key, and no catalogue messages.
+  Verified live against the managed rc.101 binary and the cached catalogue: a
+  cached pack answered with `retext-intensify · pin 9450bee5 · MIT`, `find`
+  returned candidates, and `status` reported the pack. Seven service/tool tests
+  and three config tests; 1229 unit tests pass, typecheck clean. Nothing is
+  pushed or released.
+
 - 2026-11-07: Window extraction shipped behind `memory.extract` (off). The
   `compaction` hook already sees the messages a summary will replace, so the
   plugin flattens the user and assistant text with the archive's own

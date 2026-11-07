@@ -339,6 +339,22 @@ export interface Config {
   readonly stats: StatsOptions;
   readonly telemetry: TelemetryOptions;
   readonly cmd: CmdOptions;
+  readonly hub: HubOptions;
+}
+
+export interface HubOptions {
+  /** Register xerj_ask and xerj_hub. Off by default. */
+  readonly enabled: boolean;
+  /** Allow pack and catalogue downloads. Cached packs answer when false. */
+  readonly network: boolean;
+  /** May a question be sent to the hosted hub? */
+  readonly hosted: "off" | "auto" | "on";
+  /** Catalogue base URL; the trust key stays the one in the binary. */
+  readonly url: string;
+  /** Answer cap passed to xerj ask. */
+  readonly maxTokens: number;
+  /** Deadline for one hub command. */
+  readonly timeoutMs: number;
 }
 
 export interface LoadedConfig {
@@ -468,6 +484,14 @@ export const DEFAULT_CONFIG: Config = {
     },
   },
   stats: { enabled: true, bytesPerToken: 4, maxBaselineBytes: 128 * 1024 },
+  hub: {
+    enabled: false,
+    network: false,
+    hosted: "off",
+    url: "https://hub.xerj.org",
+    maxTokens: 1_200,
+    timeoutMs: 120_000,
+  },
   cmd: {
     enabled: true,
     suggest: true,
@@ -523,6 +547,7 @@ export function loadConfig(
   const stats = asObject(root.stats);
   const telemetry = asObject(root.telemetry);
   const cmd = asObject(root.cmd);
+  const hub = asObject(root.hub);
 
   const envUrl = env.XERJ_URL?.trim();
 
@@ -1185,6 +1210,40 @@ export function loadConfig(
         warnings,
       ),
     },
+    hub: {
+      enabled: readBoolean(
+        hub.enabled,
+        DEFAULT_CONFIG.hub.enabled,
+        "hub.enabled",
+        warnings,
+      ),
+      network: readBoolean(
+        hub.network,
+        DEFAULT_CONFIG.hub.network,
+        "hub.network",
+        warnings,
+      ),
+      hosted: readHosted(hub.hosted, warnings),
+      url:
+        readString(hub.url, DEFAULT_CONFIG.hub.url)?.trim() ||
+        DEFAULT_CONFIG.hub.url,
+      maxTokens: readInteger(
+        hub.maxTokens,
+        DEFAULT_CONFIG.hub.maxTokens,
+        100,
+        4_000,
+        "hub.maxTokens",
+        warnings,
+      ),
+      timeoutMs: readInteger(
+        hub.timeoutMs,
+        DEFAULT_CONFIG.hub.timeoutMs,
+        5_000,
+        600_000,
+        "hub.timeoutMs",
+        warnings,
+      ),
+    },
     cmd: {
       enabled: readBoolean(cmd.enabled, DEFAULT_CONFIG.cmd.enabled, "cmd.enabled", warnings),
       suggest: readBoolean(cmd.suggest, DEFAULT_CONFIG.cmd.suggest, "cmd.suggest", warnings),
@@ -1437,6 +1496,18 @@ function readBoolean(value: unknown, fallback: boolean, key: string, warnings: s
   if (typeof value === "boolean") return value;
   warnings.push(`${key} must be a boolean; using ${fallback}`);
   return fallback;
+}
+
+function readHosted(
+  value: unknown,
+  warnings: string[],
+): "off" | "auto" | "on" {
+  if (value === undefined) return DEFAULT_CONFIG.hub.hosted;
+  if (value === "off" || value === "auto" || value === "on") return value;
+  warnings.push(
+    `hub.hosted must be "off", "auto", or "on"; using ${DEFAULT_CONFIG.hub.hosted}`,
+  );
+  return DEFAULT_CONFIG.hub.hosted;
 }
 
 function readJudge(
