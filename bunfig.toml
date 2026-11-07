@@ -1,0 +1,5 @@
+# The unit suite is the fast gate; the integration job covers the process and
+# network paths a unit test cannot. Keep the baseline that the current suite
+# already holds, so a change that drops coverage fails CI instead of drifting.
+[test]
+coverageThreshold = { line = 0.85, function = 0.80 }

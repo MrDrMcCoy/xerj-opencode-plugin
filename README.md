@@ -1752,6 +1752,12 @@ The repo dogfoods its own plugin through `opencode.json`: `.agents` is indexed
 both as a hidden corpus and as the example brain, which exercises the
 duplicate-collapse path in retrieval.
 
+The TUI entry is prebuilt because the host loads `dist/tui.js`, not
+`src/tui.tsx`. Run `bun run build:tui` after editing the TUI, or leave
+`bun run watch:tui` running while you work. `prepack` rebuilds it for a
+published package, but a working-tree change is not visible to the host until
+the bundle is rebuilt and the CLI restarts.
+
 [Back to top](#table-of-contents)
 
 ## License

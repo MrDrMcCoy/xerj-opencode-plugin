@@ -36,6 +36,7 @@
     "test:unit": "bun test test/unit",
     "test:integration": "bun test test/integration",
     "build:tui": "bun scripts/build-tui.ts",
+    "watch:tui": "bun --watch scripts/build-tui.ts",
     "prepack": "bun run build:tui && bun run build:mcp",
     "eval": "bun scripts/eval.ts",
     "build:mcp": "bun scripts/build-mcp.ts",
