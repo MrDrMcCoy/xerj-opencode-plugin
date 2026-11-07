@@ -200,9 +200,9 @@ export interface MemoryOptions {
 export interface DistillOptions {
   readonly enabled: boolean;
   /**
-   * `heuristic` is the cheap local filter; `model` asks the current model to
-   * judge a candidate, which needs a host model; `local` runs the downloaded
-   * jevos CPU model.
+   * `local` (the default) runs the downloaded jevos CPU model; `heuristic`
+   * is the cheap local filter; `model` asks the current model to judge a
+   * candidate, which needs a host model.
    */
   readonly judge: "heuristic" | "model" | "local";
   /** Minimum score a candidate needs to become a memory, as a percentage. */
