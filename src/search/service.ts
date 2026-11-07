@@ -149,7 +149,12 @@ export class SearchService {
         ? names.join(",")
         : this.prefixes.map((prefix) => `${prefix}-*`).join(",");
     const fields = pickTextFields(indices);
-    const semanticCapable = names.some((name) => indices[name]?.body === "semantic_text");
+    // A `semantic` query is refused for the whole pattern when any index in it
+    // maps `body` as plain text, so the semantic leg names only the indices
+    // that actually carry vectors.
+    const semanticPattern = names
+      .filter((name) => indices[name]?.body === "semantic_text")
+      .join(",");
 
     // Fetch a wider pool than k: demotion and the context filters can only
     // replace a weak hit when there is something below it to promote.
@@ -186,10 +191,10 @@ export class SearchService {
       : null;
 
     let semantic: LegResult | null = null;
-    if (semanticCapable) {
+    if (semanticPattern.length > 0) {
       try {
         semantic = await this.leg(
-          pattern,
+          semanticPattern,
           { ...base, query: { semantic: { field: "body", query: trimmed, k: pool } } },
           options.signal,
         );

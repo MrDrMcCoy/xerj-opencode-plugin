@@ -135,6 +135,27 @@ describe("search legs", () => {
     expect(result.hits[0]).toMatchObject({ path: "src/a.ts", line: null });
   });
 
+  test("the semantic leg covers only indices whose body is semantic_text", async () => {
+    // A `semantic` query is refused for the whole pattern when one index maps
+    // body as plain text, which used to lose the semantic leg entirely once the
+    // docs and commit corpora joined the search.
+    const client = fakeClient({
+      mappingsResult: {
+        "xop-p-docs": { body: "semantic_text", path: "keyword", start_line: "integer" },
+        "xop-p-prjdocs-docs": { body: "text", title: "keyword" },
+        "xop-p-git-docs": { body: "text", subject: "text" },
+      },
+      searchResults: [{}, {}, {}],
+    });
+    await service(client).search("watcher journal");
+
+    const lexical = client.searches[0]!;
+    const semantic = client.searches.find((call) => "semantic" in (call.body.query as object));
+
+    expect(lexical.index.split(",")).toContain("xop-p-prjdocs-docs");
+    expect(semantic?.index).toBe("xop-p-docs");
+  });
+
   test("stays lexical when body is not semantic_text", async () => {
     const client = fakeClient({
       mappingsResult: { "xop-p-docs": { body: "text", path: "keyword" } },
