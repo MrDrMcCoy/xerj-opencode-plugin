@@ -364,6 +364,15 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-06: The sidebar header carries only the fold arrow and the label.
+  The state badge and the plugin version moved to their own lines at the top
+  of the open block, so the top line no longer changes width as the service
+  moves between ready, busy, and degraded. A collapsed sidebar is the header
+  plus the summary rows, with the `Jobs` row when something is running; the
+  failing-corpus `⚠` line stays visible in both views. Tests cover the
+  expanded and collapsed trees, and the real renderer shows `▼ XERJ`,
+  `◐ busy · indexing · 12s`, `v0.7.0` above the sections.
+
 - 2026-11-06: The sidebar crash is found and fixed. The new fallback and ring
   reported `undefined is not an object (evaluating 'e.process.cpuPercent')`, so
   the failure was upstream of the render: the host rebuilds the `status`
