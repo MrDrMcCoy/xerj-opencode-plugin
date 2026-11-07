@@ -580,3 +580,18 @@ describe("memory distillation", () => {
     expect(warnings.some((warning) => warning.includes("memory.distill.judge"))).toBe(true);
   });
 });
+
+describe("index.workers", () => {
+  test("an invalid value leaves the engine default alone", () => {
+    const { config, warnings } = loadConfig({ index: { workers: "many" } });
+    expect(config.index.workers).toBeNull();
+    expect(warnings.some((w) => w.includes("index.workers"))).toBe(true);
+  });
+
+  test("an out-of-range value is clamped", () => {
+    expect(
+      loadConfig({ index: { workers: 9999 } }).config.index.workers,
+    ).toBe(1024);
+    expect(loadConfig({ index: { workers: 0 } }).config.index.workers).toBe(1);
+  });
+});

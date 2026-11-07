@@ -1906,6 +1906,16 @@ function readOptionalInteger(
   warnings: string[],
 ): number | null {
   if (value === undefined || value === null) return null;
+  // `null` means "use the engine default". A typo used to fall through to
+  // the minimum, which silently pins one worker instead of leaving it alone.
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    !Number.isInteger(value)
+  ) {
+    warnings.push(`${key} must be an integer; using the engine default`);
+    return null;
+  }
   return readInteger(value, min, min, max, key, warnings);
 }
 
