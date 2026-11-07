@@ -1154,7 +1154,9 @@ positive (6 of 8 with the sentence first, 3 of 8 with it last).
 
 **Cost.** Cold server start is about 4.5 s (model load), the first judgement
 adds about 1.6 s, and later judgements take about 190 ms on four threads. The
-resident set stays in the low hundreds of megabytes.
+server is started with `--ctx 512 --state-cache 0` because the state is one
+sentence; that keeps the resident set at about 1.2 GB instead of 2.1 GB. The
+model file is 630 MB, so the weights set the floor.
 
 **Failure modes.** An unsupported platform (anything but Linux x64, macOS
 arm64, Windows x64), a failed or offline install, a server that does not answer

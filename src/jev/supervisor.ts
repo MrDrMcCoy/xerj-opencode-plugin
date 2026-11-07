@@ -129,6 +129,8 @@ export class JevosSupervisor {
 
     mkdirSync(dirname(this.options.logPath), { recursive: true, mode: 0o700 });
     const log = openSync(this.options.logPath, "a", 0o600);
+    // One sentence is the whole state. The default 8192-token context and
+    // 16-slot state cache only cost memory here, so both are kept small.
     const args = [
       "serve",
       "--host",
@@ -137,6 +139,10 @@ export class JevosSupervisor {
       String(port),
       "--model-dir",
       install.modelDir,
+      "--ctx",
+      "512",
+      "--state-cache",
+      "0",
     ];
     if (this.options.threads !== null && this.options.threads > 0) {
       args.push("--threads", String(this.options.threads));

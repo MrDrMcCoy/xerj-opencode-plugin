@@ -734,7 +734,8 @@ state is the sentence alone.
 
 The model is small on purpose. It runs on the CPU, the first call after a
 start takes about 1.5 s and later calls about 200 ms on four threads, and the
-server uses a few hundred megabytes. `local.path` points at a pre-installed
+server holds about 1.2 GB resident with the context and state cache kept to
+one short sentence. `local.path` points at a pre-installed
 directory holding `bin/jev` and `model/` when the machine already has one;
 `local.port` is the loopback port the plugin attaches to or starts on;
 `local.threads` sets the OpenVINO worker count, and 0 uses every logical CPU.

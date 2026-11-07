@@ -400,6 +400,8 @@ publish, and live TUI verification remain.
   durable sentences and rejected 9 of 10 reports. Putting the turn around the
   sentence lowered every score, so the state is the sentence. Cold start is
   4.5 s, the first judgement 1.6 s, later ones about 190 ms on four threads.
+  The server runs with a 512-token context and no state cache, which keeps it
+  at about 1.2 GB resident instead of 2.1 GB.
 
   The install path was run end to end with the real assets served locally:
   download, checksum, extraction, layout, and probe all pass, and a second
