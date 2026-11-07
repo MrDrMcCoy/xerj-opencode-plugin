@@ -128,7 +128,7 @@ describe("install lock", () => {
   test("reclaims a lock with no pid after the stale window", async () => {
     const lock = join(root, ".install.lock");
     await mkdir(lock, { recursive: true });
-    const old = new Date(Date.now() - 6 * 60_000);
+    const old = new Date(Date.now() - 11 * 60_000);
     await utimes(lock, old, old);
 
     const release = await acquireInstallLock(root, 1_000);

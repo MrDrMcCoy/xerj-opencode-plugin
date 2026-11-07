@@ -175,10 +175,11 @@ export async function externalBinary(
   return { version, path, upgraded: false };
 }
 
-const INSTALL_LOCK_WAIT_MS = 5 * 60_000;
-// A lock with no readable owner is stale after this; a lock whose pid is gone
-// is stale immediately.
-const INSTALL_LOCK_STALE_MS = 5 * 60_000;
+// The wait is longer than the stale window so a lock with no readable owner
+// can be reclaimed before the waiter gives up. A lock whose pid is gone is
+// reclaimed immediately, so a crashed install never reaches either bound.
+const INSTALL_LOCK_WAIT_MS = 15 * 60_000;
+const INSTALL_LOCK_STALE_MS = 10 * 60_000;
 const INSTALL_LOCK_POLL_MS = 1_000;
 
 /**
