@@ -16,6 +16,7 @@ const TUI_PAYLOADS: ReadonlyArray<[keyof typeof XerjRpc.methods, unknown]> = [
   ["status", {}],
   ["reindex", {}],
   ["wrapup", {}],
+  ["dreamer", {}],
   ["prjdocs", {}],
   ["prjdocs", { eager: true }],
   ["sysdocs", {}],
@@ -48,6 +49,11 @@ describe("RPC input schemas", () => {
     // schema that demands them rejects the command before the handler runs.
     expect(inputOf("prjdocs").required).toEqual([]);
     expect(validate(inputOf("prjdocs"), {})).toEqual([]);
+  });
+
+  test("dreamer runs without a session id", () => {
+    expect(inputOf("dreamer").required).toEqual([]);
+    expect(validate(inputOf("dreamer"), {})).toEqual([]);
   });
 
   test("wrapup runs without a session id", () => {

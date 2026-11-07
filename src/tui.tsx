@@ -268,6 +268,31 @@ export default Plugin.define({
       }
     };
 
+    const startDreamer = async (): Promise<void> => {
+      try {
+        const result = (await rpc().dreamer({}, at())) as {
+          started?: boolean;
+          detail?: string;
+          checked?: number;
+          stale?: number;
+          merged?: number;
+          flagged?: number;
+        };
+        context.ui.toast.show({
+          message: result.started
+            ? `XERJ dreamer started · ${result.checked ?? 0} checked · ` +
+              `${result.stale ?? 0} stale · ${result.merged ?? 0} merged`
+            : `XERJ dreamer: ${result.detail ?? "did not start"}`,
+          variant: result.started ? "success" : "info",
+        });
+      } catch (error) {
+        context.ui.toast.show({
+          message: `XERJ dreamer failed: ${describe(error)}`,
+          variant: "error",
+        });
+      }
+    };
+
     const reindex = async (): Promise<void> => {
       try {
         // The RPC awaits the pass, so a result means the index is current.
@@ -454,6 +479,7 @@ export default Plugin.define({
             const argument = rest.join(" ").trim();
 
             if (head === "reindex") return reindex();
+            if (head === "dreamer") return startDreamer();
             if (head === "remember") return remember(argument);
             if (head === "search") return search(argument);
 
@@ -481,6 +507,17 @@ export default Plugin.define({
           slash: { name: "xerj-reindex" },
           enabled: () => state.ready,
           run: () => reindex(),
+        },
+        {
+          id: "xerj.dreamer",
+          title: "XERJ dreamer",
+          description:
+            "Run the idle dreamer now: verify and curate memory, then start a child session for a primer",
+          group: "XERJ",
+          palette: true,
+          slash: { name: "xerj-dreamer" },
+          enabled: () => state.ready,
+          run: () => startDreamer(),
         },
         {
           id: "xerj.wrapup",

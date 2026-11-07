@@ -173,6 +173,7 @@ describe("server setup wiring", () => {
       expect(host.sessionHooks).toContain("prompt");
       expect(host.sessionHooks).toContain("context");
       expect(host.rpcMethods.sort()).toEqual([
+        "dreamer",
         "prjdocs",
         "reindex",
         "remember",

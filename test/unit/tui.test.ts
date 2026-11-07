@@ -220,6 +220,18 @@ function makeHost(): Host {
         record("wrapup", options, _input);
         return wrapup();
       },
+      dreamer: async (_input: unknown, options?: CallOptions) => {
+        record("dreamer", options, _input);
+        return {
+          started: true,
+          child: "child-1",
+          detail: "the dreamer started a child session",
+          checked: 4,
+          stale: 1,
+          merged: 0,
+          flagged: 1,
+        };
+      },
       prjdocs: async (_input: unknown, options?: CallOptions) => {
         record("prjdocs", options, _input);
         prjdocsInputs.push(_input);
@@ -619,6 +631,9 @@ describe("tui commands", () => {
     await run("search the watcher");
     expect(host.alerts.at(-1)?.title).toContain("XERJ search");
 
+    await run("dreamer");
+    expect(host.toasts.at(-1)?.message).toContain("dreamer started");
+
     await run("nonsense");
     expect(host.toasts.at(-1)).toEqual({
       message: "Unknown XERJ command: nonsense",
@@ -633,11 +648,12 @@ describe("tui commands", () => {
     await flush();
 
     await byId(host, "xerj.reindex").run();
+    await byId(host, "xerj.dreamer").run();
     await byId(host, "xerj.remember").run("a fact");
     await byId(host, "xerj.search").run("a query");
     dispose();
 
-    for (const method of ["reindex", "remember", "search"]) {
+    for (const method of ["reindex", "dreamer", "remember", "search"]) {
       const call = host.calls.find((entry) => entry.method.startsWith(method));
       expect(call?.options.location?.directory).toBe("/proj");
     }

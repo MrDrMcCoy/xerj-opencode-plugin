@@ -125,6 +125,18 @@ describe("dreamer", () => {
     expect(created).toHaveLength(0);
   });
 
+  test("a manual run bypasses the interval", async () => {
+    const directory = await tempDir();
+    await writeFile(join(directory, "dreamer.json"), JSON.stringify({ lastRun: Date.now() }));
+    const { dreamer: instance, created } = dreamer(directory, {
+      intervalMs: 86_400_000,
+    });
+
+    const result = await instance.runNow("parent-1", true);
+    expect(result.ran).toBe(true);
+    expect(created).toHaveLength(1);
+  });
+
   test("a create failure is recorded, not thrown", async () => {
     const directory = await tempDir();
     const { dreamer: instance } = dreamer(directory, {

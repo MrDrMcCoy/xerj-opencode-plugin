@@ -922,9 +922,10 @@ tokens, and one short primer or correction written with `xerj_remember`; it
 must not touch project files.
 
 `memory.dreamer.model` takes `"provider/model"` and is passed to
-`session.create`; `null` inherits the parent session's model. The run is
-recorded as `memory.dreamer` telemetry and the last run lives in
-`<project>/.xerj/dreamer.json`. A busy project cancels the pending run, and a
+`session.create`; `null` inherits the parent session's model. Run
+`/xerj-dreamer` (or `/xerj dreamer`) to start one now; a manual run bypasses
+the interval. The run is recorded as `memory.dreamer` telemetry and the last
+run lives in `<project>/.xerj/dreamer.json`. A busy project cancels the pending run, and a
 failed child creation is logged without retrying until the next interval.
 
 ### Notes
@@ -1236,9 +1237,11 @@ Every command is also in the palette.
 | `/xerj` | Open the details panel: node, binary, index, corpora, datasets, memory, usage, counters, top cited files, and health. |
 | `/xerj status` | Same as `/xerj`. |
 | `/xerj reindex` | Run an incremental pass over the project and report the record count. |
+| `/xerj dreamer` | Verify and curate memory, then start the dreamer child now. |
 | `/xerj remember <text>` | Store a durable fact in project memory. |
 | `/xerj search <query>` | Search the index and show cited passages in a dialog. |
 | `/xerj-reindex` | Incremental pass over the project, fetched pages, and hidden folders. |
+| `/xerj-dreamer` | Run the idle dreamer now: verify and curate memory, then start a child for a primer. |
 | `/xerj-remember <text>` | Store a memory (prompts for the text when empty). |
 | `/xerj-search <query>` | Search and show cited passages (prompts when empty). |
 | `/xerj-prjdocs [eager]` | Index official docs for the project's languages, frameworks, and cloud APIs. Add `eager` for the wider, model-judged crawl. |

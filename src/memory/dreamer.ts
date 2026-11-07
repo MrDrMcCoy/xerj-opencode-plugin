@@ -88,13 +88,17 @@ export class Dreamer {
   }
 
   /** One run, public so a test and a manual command can drive it. */
-  async runNow(sessionID: string): Promise<DreamerResult> {
+  async runNow(sessionID: string, force = false): Promise<DreamerResult> {
     if (!this.options.config.enabled) return this.result(false, null, "disabled");
     if (this.running || this.options.signal.aborted) {
       return this.result(false, null, "already running");
     }
     await this.load();
-    if (this.lastRun > 0 && Date.now() - this.lastRun < this.options.config.intervalMs) {
+    if (
+      !force &&
+      this.lastRun > 0 &&
+      Date.now() - this.lastRun < this.options.config.intervalMs
+    ) {
       return this.result(false, null, "interval not elapsed");
     }
     const memory = this.options.memory();

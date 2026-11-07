@@ -975,6 +975,8 @@ export default Plugin.define({
         runArchive(),
       );
 
+    let dreamer: Dreamer | null = null;
+
     const handlers = {
       status: async () => {
         counters.noteRpc();
@@ -1038,6 +1040,39 @@ export default Plugin.define({
       },
       // Compaction belongs to the host; this only asks for it now instead of
       // waiting for the harness to decide. Nothing is rewritten here.
+      dreamer: async (input: unknown) => {
+        counters.noteRpc();
+        runtime.lifecycle?.touch();
+        const args = input as { sessionID?: string };
+        const sessionID =
+          args.sessionID ?? runtime.lifecycle?.latestSession() ?? null;
+        const empty = {
+          started: false,
+          child: null,
+          checked: 0,
+          stale: 0,
+          merged: 0,
+          flagged: 0,
+        };
+        if (dreamer === null) {
+          return { ...empty, detail: "the dreamer is disabled" };
+        }
+        if (sessionID === null) {
+          return { ...empty, detail: "no active session" };
+        }
+        const result = await dreamer.runNow(sessionID, true);
+        return {
+          started: result.ran,
+          child: result.child,
+          checked: result.checked,
+          stale: result.stale,
+          merged: result.merged,
+          flagged: result.flagged,
+          detail: result.ran
+            ? "the dreamer started a child session"
+            : (result.reason ?? "the dreamer did not start"),
+        };
+      },
       wrapup: async (input: unknown) => {
         counters.noteRpc();
         runtime.lifecycle?.touch();
@@ -1093,7 +1128,6 @@ export default Plugin.define({
     let jevos: JevosSupervisor | null = null;
     let autotuner: Autotuner | null = null;
     let tuningView: TuningView | null = null;
-    let dreamer: Dreamer | null = null;
 
     const notes = new NoteStore({
       directory: projectStateDir(projectRoot),

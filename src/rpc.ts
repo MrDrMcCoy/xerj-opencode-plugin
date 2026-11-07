@@ -592,6 +592,18 @@ const definition = {
         detail: { type: "string" },
       }),
     },
+    dreamer: {
+      input: valueSchema({ sessionID: { type: "string" } }, ["sessionID"]),
+      output: valueSchema({
+        started: { type: "boolean" },
+        child: { type: ["string", "null"] },
+        detail: { type: "string" },
+        checked: { type: "number" },
+        stale: { type: "number" },
+        merged: { type: "number" },
+        flagged: { type: "number" },
+      }),
+    },
     prjdocs: {
       input: valueSchema(
         {

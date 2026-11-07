@@ -388,6 +388,15 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-07: The dreamer has a manual command. `/xerj-dreamer`, `/xerj
+  dreamer`, and the palette run the RPC `dreamer`, which calls
+  `Dreamer.runNow(sessionID, true)` for the latest session. A manual run
+  bypasses the 24-hour interval; the idle path still honors it. The RPC
+  returns the child id, the verification and curation counts, and a readable
+  reason when it cannot start. The TUI stub and the RPC payload suite cover
+  the call; 1267 unit tests pass, typecheck clean. Nothing is pushed or
+  released.
+
 - 2026-11-07: Dreamer child sessions and notes shipped, both on by default.
   The dreamer registers `experimental.idle`, waits `idleMs` (10 min), runs
   memory verification and curation, then creates a child of the idle session
