@@ -80,9 +80,12 @@ function explicitOptions(
   parsed: Record<string, unknown>,
 ): Record<string, unknown> | null {
   if (isRecord(parsed.options)) return parsed.options;
-  const viaEntry = pluginEntryOptions(parsed);
-  if (viaEntry !== null) return viaEntry;
+  if (isOpenCodeConfig(parsed)) return pluginEntryOptions(parsed);
   return Object.keys(parsed).length > 0 ? parsed : null;
+}
+
+function isOpenCodeConfig(parsed: Record<string, unknown>): boolean {
+  return Array.isArray(parsed.plugins) || Array.isArray(parsed.plugin);
 }
 
 function pluginEntryOptions(
@@ -91,12 +94,9 @@ function pluginEntryOptions(
   const entries = [parsed.plugins, parsed.plugin].flatMap((value) =>
     Array.isArray(value) ? value : [],
   );
-  let fallback: Record<string, unknown> | null = null;
-  let withOptions = 0;
 
   for (const entry of entries) {
     if (!isRecord(entry) || !isRecord(entry.options)) continue;
-    withOptions += 1;
     const pkg = typeof entry.package === "string" ? entry.package : "";
     if (
       pkg === PACKAGE_NAME ||
@@ -105,11 +105,12 @@ function pluginEntryOptions(
     ) {
       return entry.options;
     }
-    if (fallback === null) fallback = entry.options;
   }
 
-  // A config with one object entry is unambiguous; several are not.
-  return withOptions === 1 ? fallback : null;
+  // An unrelated plugin's options must never be read as this plugin's. The
+  // previous single-entry fallback did exactly that in a project that
+  // installed one other plugin.
+  return null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -70,5 +70,7 @@ export function datasetRows(
         bytes: matched.reduce((total, entry) => total + entry.bytes, 0),
       };
     })
-    .filter((dataset) => dataset.docs > 0 || dataset.bytes > 0);
+    // An index that exists but holds no documents is metadata, not a dataset;
+    // listing it as `cmd 0 docs` reads as a corpus that lost its content.
+    .filter((dataset) => dataset.docs > 0);
 }

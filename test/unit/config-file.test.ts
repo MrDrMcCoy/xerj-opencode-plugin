@@ -88,6 +88,43 @@ describe("discoverPluginOptions", () => {
     expect(found.options).toEqual({});
   });
 
+  test("a single unrelated entry is not mistaken for this plugin", async () => {
+    const project = await tempDir();
+    await writeFile(
+      join(project, "opencode.json"),
+      JSON.stringify({
+        plugins: [
+          {
+            package: "@cortexkit/aft-opencode",
+            options: { context: { maxPassages: 3 } },
+          },
+        ],
+      }),
+    );
+
+    const found = discoverPluginOptions(project, {
+      OPENCODE_CONFIG_DIR: join(project, "absent"),
+    });
+    expect(found.source).toBeNull();
+    expect(found.options).toEqual({});
+  });
+
+  test("an explicit opencode config without an entry is refused", async () => {
+    const project = await tempDir();
+    const file = join(project, "opencode.json");
+    await writeFile(
+      file,
+      JSON.stringify({
+        plugins: [{ package: "another-plugin", options: { a: 1 } }],
+      }),
+    );
+
+    const found = discoverPluginOptions(project, { XERJ_MCP_CONFIG: file });
+    expect(found.source).toBeNull();
+    expect(found.options).toEqual({});
+    expect(found.warnings.join(" ")).toContain("XERJ_MCP_CONFIG");
+  });
+
   test("several unrelated entries are ambiguous and use defaults", async () => {
     const project = await tempDir();
     await writeFile(

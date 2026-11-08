@@ -755,7 +755,10 @@ export function buildTools(options: ToolOptions): ReadonlyArray<{
           const text = await response.text();
           const stored = await spool.ingestUrl(args.url, text);
           if (stored) {
-            await options.onSpooledUrl?.().catch(() => {});
+            // The MCP's one-pass web index can fail; surfacing that is
+            // better than reporting a page as indexed when it is only
+            // spooled.
+            await options.onSpooledUrl?.();
           }
           options.getSearch()?.invalidate();
           return stored

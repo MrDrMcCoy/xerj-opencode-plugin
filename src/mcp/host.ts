@@ -237,9 +237,11 @@ export class McpHost {
       getMemory: () => this.memory,
       getSpool: () => this.spool,
       // No resident web watcher in the MCP; one pass makes a fetched page
-      // searchable before the tool reports success.
+      // searchable before the tool reports success. A failed pass is an
+      // error, not a silent success.
       onSpooledUrl: async () => {
-        await this.indexWebOnce();
+        const snapshot = await this.indexWebOnce();
+        if (snapshot?.lastError != null) throw new Error(snapshot.lastError);
       },
       getAnomaly: () => this.anomaly,
       hub: new HubService({

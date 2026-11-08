@@ -848,3 +848,55 @@ describe("dreamer contributions", () => {
     expect(notes).toHaveLength(1);
   });
 });
+
+describe("xerj_index URL pass", () => {
+  test("a failed web pass is not reported as a success", async () => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response("page body", { status: 200 })) as unknown as typeof fetch;
+    try {
+      const tools = buildTools({
+        config: DEFAULT_CONFIG,
+        projectRoot: process.cwd(),
+        getArchive: () => null,
+        ledger: {} as never,
+        logger: {
+          debug() {},
+          info() {},
+          warn() {},
+          error() {},
+          entries: async () => [],
+          flush: async () => {},
+        },
+        getClient: () => null,
+        getSearch: () => null,
+        getMemory: () => null,
+        getSpool: () =>
+          ({
+            ingestUrl: async () => ({ bytes: 10 }),
+            ingestExternalFile: async () => null,
+          }) as never,
+        onSpooledUrl: async () => {
+          throw new Error("web index failed");
+        },
+        getAnomaly: () => null,
+        hub: HUB_STUB,
+        treeSitter: TREE_STUB,
+        code: CODE_STUB,
+        share: SHARE_STUB,
+        lsp: LSP_STUB,
+        notes: NOTES_STUB,
+        snapshot: async () => snapshot(),
+      });
+      const index = tools.find((tool) => tool.name === "index");
+      await expect(
+        index?.execute(
+          { url: "https://example.com/" },
+          { signal: new AbortController().signal },
+        ),
+      ).rejects.toThrow(/web index failed/);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+});
