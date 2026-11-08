@@ -69,6 +69,6 @@
     "web-tree-sitter": "0.25.10"
   },
   "bin": {
-    "xerj-mcp": "./dist/mcp.mjs"
+    "xerj-mcp": "dist/mcp.mjs"
   }
 }
