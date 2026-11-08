@@ -200,6 +200,74 @@ describe("CorpusService plain runs", () => {
     expect(instance.snapshot().lastRun).toBeNull();
     expect(await store.get(key)).toEqual({ cleared: true });
   });
+
+  test("a failed pass names the engine's reason, not just the exit code", async () => {
+    const instance = new CorpusService({
+      binaryPath: fakeBinary(`#!/bin/sh
+echo 'error: autoindex stopped with bulk/backend failures: docs/KERNELS.md: bulk send (request timeout 300s): operation timed out' >&2
+exit 1
+`),
+      nodeUrl: "http://127.0.0.1:9200",
+      projectRoot: mkdtempSync(join(tmpdir(), "xerj-reason-")),
+      prefix: "xop-project-12345678",
+      stateRoot: mkdtempSync(join(tmpdir(), "xerj-data-")),
+      config: {
+        ...DEFAULT_CONFIG,
+        index: { ...DEFAULT_CONFIG.index, watch: false, periodicMs: 60_000 },
+      },
+      storage: storage(),
+      logger,
+    });
+    running.push(instance);
+
+    await instance.start();
+    const error = instance.snapshot().lastError ?? "";
+    expect(error).toContain("exited 1");
+    expect(error).toContain("docs/KERNELS.md");
+    expect(error.length).toBeLessThan(200);
+  });
+
+  test("a later successful pass clears a stale failure", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "xerj-recover-"));
+    const attempts = join(projectRoot, "attempts");
+    const script = `#!/bin/sh
+n=$(cat ${JSON.stringify(attempts)} 2>/dev/null || echo 0)
+n=$((n+1)); echo $n > ${JSON.stringify(attempts)}
+if [ $n -lt 2 ]; then
+  echo "error: autoindex stopped with bulk/backend failures: docs/KERNELS.md: bulk send timed out" >&2
+  exit 1
+fi
+echo '{"doc_kind":"run","generation":1,"records_total":3}'
+`;
+    const instance = new CorpusService({
+      binaryPath: fakeBinary(script),
+      nodeUrl: "http://127.0.0.1:9200",
+      projectRoot,
+      prefix: "xop-project-12345678",
+      stateRoot: join(projectRoot, ".xerj"),
+      config: {
+        ...DEFAULT_CONFIG,
+        // A plain failure does not schedule a retry; the periodic timer is
+        // what reruns, so it has to tick inside the test window.
+        index: { ...DEFAULT_CONFIG.index, watch: false, periodicMs: 400 },
+      },
+      storage: storage(),
+      logger,
+    });
+    running.push(instance);
+
+    await instance.start();
+    expect(instance.snapshot().lastError).toContain("docs/KERNELS.md");
+
+    // The retry lands a run document; the badge must not stay degraded.
+    for (let waited = 0; waited < 10_000; waited += 100) {
+      if (instance.snapshot().lastRun !== null) break;
+      await Bun.sleep(100);
+    }
+    expect(instance.snapshot().lastRun).not.toBeNull();
+    expect(instance.snapshot().lastError).toBeNull();
+    expect(instance.snapshot().state).not.toBe("error");
+  });
 });
 
 describe("CorpusService watch ownership", () => {
@@ -411,7 +479,7 @@ echo '{"doc_kind":"run","generation":1,"records_total":5}'
     // treated as a crash rather than as a clean stop.
     await Bun.sleep(1_500);
 
-    expect(owner.snapshot().lastError).toContain("exited");
+    expect(owner.snapshot().failures).toBeGreaterThanOrEqual(1);
     expect(owner.snapshot().state).not.toBe("idle");
   });
 });

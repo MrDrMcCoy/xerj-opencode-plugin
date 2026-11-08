@@ -113,6 +113,12 @@ export function autoindexArgs(options: AutoindexOptions): ReadonlyArray<string> 
   }
 
   args.push("--max-minutes", String(config.index.maxMinutes));
+
+  // A multi-megabyte document takes the neural embedder minutes; the engine's
+  // 300 s default aborts the pass and every resume re-fails on the same file.
+  if (config.index.bulkTimeoutSecs > 0) {
+    args.push("--bulk-timeout-secs", String(config.index.bulkTimeoutSecs));
+  }
   return args;
 }
 

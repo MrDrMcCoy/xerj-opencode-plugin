@@ -64,6 +64,24 @@ describe("autoindexArgs", () => {
     expect(args[args.indexOf("--max-minutes") + 1]).toBe("3");
   });
 
+  test("the bulk deadline rides along by default and can be disabled", () => {
+    const withDefault = autoindexArgs({
+      layout,
+      nodeUrl: "http://127.0.0.1:9200",
+      config: config(),
+      watch: false,
+    });
+    expect(withDefault[withDefault.indexOf("--bulk-timeout-secs") + 1]).toBe("900");
+
+    const engineDefault = autoindexArgs({
+      layout,
+      nodeUrl: "http://127.0.0.1:9200",
+      config: config({ bulkTimeoutSecs: 0 }),
+      watch: false,
+    });
+    expect(engineDefault).not.toContain("--bulk-timeout-secs");
+  });
+
   test("omits the optional flags when unset", () => {
     const args = autoindexArgs({
       layout,

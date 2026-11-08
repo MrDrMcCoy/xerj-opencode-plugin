@@ -265,7 +265,8 @@ This is the complete set with its defaults, in
           "gitLimit": 500,
           "neural": true,
           "maxBytes": 2147483648,        // 2 GiB first-index ceiling
-          "maxMinutes": 10
+          "maxMinutes": 10,
+          "bulkTimeoutSecs": 900         // per-bulk-write deadline; 0 = engine default
         },
         "remote": {
           "enabled": true,
@@ -468,6 +469,7 @@ The same entry works with a checkout path instead of the package name; see
 | `index.brain` | Folders to index as second brains, e.g. `[".agents"]`. |
 | `index.hidden` | Hidden folders to index as plain documents. Empty means "the docs folders that exist": `.agents`, `.github`, `.claude`. Set a list to choose exactly what is indexed. |
 | `index.hiddenMaxBytes` | Per-file ceiling for hidden documents. |
+| `index.bulkTimeoutSecs` | Deadline for one bulk write to the node, in seconds. The engine's 300 s default aborts a pass when a multi-megabyte document takes longer to embed; the plugin ships 900. `0` keeps the engine default. |
 | `prjdocs.maxTargets` | Documentation sites crawled in one run. Default 40. |
 | `prjdocs.maxPages` | Pages per site; `0` uses the per-source default (8 to 25). |
 | `prjdocs.eager` | Eager mode: no page-type or depth limit, model-judged relevance, and search for unknown technologies. Default `false`. |

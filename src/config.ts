@@ -95,6 +95,13 @@ export interface IndexOptions {
   readonly maxBytes: number;
   /** Upper bound on the measured first-index estimate before asking. */
   readonly maxMinutes: number;
+  /**
+   * Deadline for one bulk write to the node, in seconds. The engine's 300 s
+   * default aborts a pass when a multi-megabyte document takes longer than
+   * that to embed; 900 gives the neural embedder room. 0 keeps the engine
+   * default. The engine clamps to 1..3600.
+   */
+  readonly bulkTimeoutSecs: number;
 }
 
 export interface RemoteOptions {
@@ -484,6 +491,7 @@ export const DEFAULT_CONFIG: Config = {
     neural: true,
     maxBytes: 2 * 1024 ** 3,
     maxMinutes: 10,
+    bulkTimeoutSecs: 900,
   },
   remote: { enabled: true, maxBytes: 2_000_000, fetchTimeoutMs: 10_000 },
   context: {
@@ -848,6 +856,14 @@ export function loadConfig(
         1,
         10_080,
         "index.maxMinutes",
+        warnings,
+      ),
+      bulkTimeoutSecs: readInteger(
+        index.bulkTimeoutSecs,
+        DEFAULT_CONFIG.index.bulkTimeoutSecs,
+        0,
+        3600,
+        "index.bulkTimeoutSecs",
         warnings,
       ),
     },

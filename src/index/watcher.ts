@@ -133,6 +133,27 @@ function isJournalRebind(stderr: string): boolean {
   return stderr.includes("journal at") && stderr.includes(JOURNAL_REBIND_MARKER);
 }
 
+// The badge and the panel render this text; the full stderr tail stays at
+// debug level.
+const REASON_MAX_CHARS = 160;
+
+/**
+ * The engine's own one-line diagnosis for a failed pass, taken from the first
+ * `error:` line of stderr. "autoindex exited 1" alone hid the reason a pass
+ * kept failing — a file whose bulk write outlived the request deadline.
+ */
+function withReason(message: string, stderr: string): string {
+  const line = stderr.split("\n").find((entry) => entry.startsWith("error:"));
+  if (line === undefined) return message;
+  const reason = line
+    .replace(/^error:\s*/, "")
+    // The engine appends resume advice on its own line; the first line names
+    // the file and the cause, which is what a reader needs.
+    .trim();
+  if (reason.length === 0) return message;
+  return `${message}: ${reason.slice(0, REASON_MAX_CHARS)}`;
+}
+
 /**
  * Lists directories worth watching under `root`, or null when the tree is too
  * large for one watch each. Hidden and generated directories are skipped for
@@ -425,6 +446,9 @@ export class CorpusService {
         this.lastRun = run;
         this.runs += 1;
         this.restarts = 0;
+        // A completed pass supersedes an earlier failure. A pass that emits a
+        // run document and then fails sets the error again on close.
+        this.lastError = null;
         this.options.onRun?.(run);
         this.endBusy();
         this.state = "watching";
@@ -486,7 +510,10 @@ export class CorpusService {
 
     this.failures += 1;
     this.options.onCrash?.(Date.now() - this.spawnedAt);
-    this.lastError = `autoindex watcher exited (${code ?? signal ?? "signal"})`;
+    this.lastError = withReason(
+      `autoindex watcher exited (${code ?? signal ?? "signal"})`,
+      this.lastStderr,
+    );
     this.options.logger.warn(this.lastError);
 
     if (this.restarts >= MAX_RESTARTS) {
@@ -526,6 +553,9 @@ export class CorpusService {
         this.lastRun = { ...this.lastRun, at: Date.now() };
         void this.persist(this.lastRun);
       }
+      // A pass that completed supersedes an earlier failure; keeping the old
+      // error would hold the badge at degraded forever.
+      this.lastError = null;
       this.state = this.options.config.index.watch ? "watching" : "idle";
       this.options.onChange?.();
       return;
@@ -549,7 +579,7 @@ export class CorpusService {
     this.lastError =
       meaning === "decision"
         ? "autoindex needs a decision: the estimate exceeds the configured limits"
-        : `autoindex exited ${code ?? "signal"}`;
+        : withReason(`autoindex exited ${code ?? "signal"}`, this.lastStderr);
     this.options.logger.warn(this.lastError);
     this.options.onChange?.();
   }
