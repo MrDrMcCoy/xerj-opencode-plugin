@@ -388,6 +388,28 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-07: Third audit pass. Fixed: JSONC parsing was string-blind, so
+  `//host` or a UNC path lost the whole config; config discovery accepted a
+  single unrelated plugin entry as the XERJ options; an explicit
+  `opencode.json` with no entry was used as the options object; a failed MCP
+  web pass after `index url` was reported as success; an index holding no
+  documents was listed as a dataset; and the MCP's recent block included
+  debug lines. Tests cover the parser, discovery, the URL pass, and dataset
+  grouping. 1,361 unit and 15 integration tests pass;
+  coverage 91.2% lines and 85.5% functions.
+
+  Open findings:
+  The MCP's `index.watch` is true but no watcher starts, so an edit is visible
+  only after `reindex`; the status reports `watch: true` while the corpus is
+  idle.
+  `sampleProcess` sleeps 120 ms on every status call that reports CPU, and the
+  MCP status now pays it; the point-reading path (`readProcessCounters` plus
+  the previous tick) would avoid the delay.
+  The MCP status `disk`, `map`, and `frameworks` remain empty. `dreamer` and
+  `telemetry` remain plugin-only: the first needs a host session, the second
+  is local diagnostics. The plugin's prompt hooks and TUI have no MCP
+  equivalent by design.
+
 - 2026-11-07: Closed the MCP gaps. The standalone host now reads the project
   and global `opencode.json` (or `XERJ_MCP_CONFIG`) for the plugin options, so
   hidden folders, brains, corpus mode, and the capability gates match an

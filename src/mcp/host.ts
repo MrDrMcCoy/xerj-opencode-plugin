@@ -788,7 +788,9 @@ export class McpHost {
             exists: false,
           }));
     const recent = (await this.logger.entries())
-      .filter((entry) => entry.level !== "info")
+      // Debug lines include the per-prefix "no mappings" chatter from every
+      // search; the recent block is for things that went wrong.
+      .filter((entry) => entry.level === "warn" || entry.level === "error")
       .slice(-4)
       .map((entry) => `${entry.level}: ${entry.message}`);
 
