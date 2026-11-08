@@ -388,6 +388,15 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-07: Released 0.8.0. The tag covers 163 commits: the remaining
+  roadmap tiers, the local jevos distillation judge with autotune, local
+  telemetry with per-feature cost, command-output management, the turn
+  archive and rehydration, the expanded standalone MCP server, and three
+  audit passes. Bundle builds and typecheck were rerun before the tag;
+  1,362 unit (1 skipped) and 15 integration tests pass at 91.2% lines and
+  85.5% functions. `publish.yml` stages the version when the staging-scoped
+  token requires approval.
+
 - 2026-11-07: Third audit pass. Fixed: JSONC parsing was string-blind, so
   `//host` or a UNC path lost the whole config and a leading BOM made it
   empty; config discovery accepted a
