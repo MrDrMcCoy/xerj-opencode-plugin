@@ -7,7 +7,10 @@
 // document.
 
 export function parseJsonc(text: string): Record<string, unknown> {
-  const withoutComments = stripComments(text);
+  // A Windows editor may save a BOM; JSON.parse rejects it before it can
+  // even see the object.
+  const source = text.replace(/^\uFEFF/, "");
+  const withoutComments = stripComments(source);
   const withoutTrailing = stripTrailingCommas(withoutComments);
 
   try {

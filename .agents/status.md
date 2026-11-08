@@ -389,7 +389,8 @@ publish, and live TUI verification remain.
 ## Log
 
 - 2026-11-07: Third audit pass. Fixed: JSONC parsing was string-blind, so
-  `//host` or a UNC path lost the whole config; config discovery accepted a
+  `//host` or a UNC path lost the whole config and a leading BOM made it
+  empty; config discovery accepted a
   single unrelated plugin entry as the XERJ options; an explicit
   `opencode.json` with no entry was used as the options object; a failed MCP
   web pass after `index url` was reported as success; an index holding no

@@ -44,6 +44,10 @@ describe("parseJsonc", () => {
     expect(parseJsonc('{"text":"a\\"b"}')).toEqual({ text: 'a"b' });
   });
 
+  test("strips a leading BOM", () => {
+    expect(parseJsonc('\uFEFF{"a":1}')).toEqual({ a: 1 });
+  });
+
   test("a malformed document is empty rather than a throw", () => {
     expect(parseJsonc("{not json")).toEqual({});
     expect(parseJsonc("[]")).toEqual({});
