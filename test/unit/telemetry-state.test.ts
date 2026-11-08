@@ -17,7 +17,7 @@ const ready = {
   nodePhase: "ready" as const,
   nodeState: "running" as const,
   corpora,
-  memoryExists: true,
+  memoryState: "present" as const,
   jobs: [],
 };
 
@@ -55,13 +55,17 @@ describe("serviceState", () => {
     expect(result.detail).toContain("index missing");
   });
 
-  test("a missing memory index degrades only when corpora exist", () => {
+  test("a lost memory index degrades only when corpora exist", () => {
     expect(
-      serviceState({ ...ready, memoryExists: false }).name,
+      serviceState({ ...ready, memoryState: "lost" }).name,
     ).toBe("degraded");
     expect(
-      serviceState({ ...ready, memoryExists: false, corpora: [] }).name,
+      serviceState({ ...ready, memoryState: "lost", corpora: [] }).name,
     ).toBe("ready");
+  });
+
+  test("a memory store that was never populated is not a fault", () => {
+    expect(serviceState({ ...ready, memoryState: "empty" }).name).toBe("ready");
   });
 
   test("a running job reports busy with its label", () => {

@@ -4,7 +4,7 @@
 // Memory cannot be rebuilt from the corpus, so the files are copied aside
 // before the index is dropped; the next remember creates a fresh one.
 
-import { cp, readFile, stat } from "node:fs/promises";
+import { cp, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { XerjClient } from "../node/client.ts";
 import type { Logger } from "../log.ts";
@@ -13,6 +13,32 @@ const MEMORY_INDEX_PREFIX = ".xerj-memory-";
 const HEALTHY = "green";
 const BACKUP_DIR = "embed-backup";
 const UNREADABLE_BACKUP = "unreadable";
+// Marks that the project's memory index existed at least once. It lives in the
+// node directory so deleting `.xerj*` also clears it: a deliberate reset reads
+// as a fresh store, not as a loss.
+const SEEN_MARKER = "memory-seen";
+
+/** The engine index name that backs one memory namespace. */
+export function memoryIndexName(namespace: string): string {
+  return `${MEMORY_INDEX_PREFIX}${namespace}`;
+}
+
+function memorySeenPath(nodeDir: string): string {
+  return join(nodeDir, SEEN_MARKER);
+}
+
+/** True when the marker says this project's memory index existed before. */
+export async function readMemorySeen(nodeDir: string): Promise<boolean> {
+  return stat(memorySeenPath(nodeDir)).then(
+    () => true,
+    () => false,
+  );
+}
+
+/** Records that the memory index exists; best effort, never throws. */
+export async function writeMemorySeen(nodeDir: string): Promise<void> {
+  await writeFile(memorySeenPath(nodeDir), "").catch(() => {});
+}
 
 /**
  * Repairs a memory index the node cannot open. Returns true when the index
@@ -62,19 +88,20 @@ export async function recoverMemoryIndex(options: {
 }
 
 /**
- * True when a project corpus exists but the memory index does not: memories
- * stored earlier are gone, which an empty store cannot otherwise signal. A
- * fresh project has no corpus yet, so it reports false.
+ * True when a project corpus exists but the memory index does not, and the
+ * marker says memories existed before: that is a loss. A store that was never
+ * populated reports false — there is nothing to recover.
  */
 export function memoryIndexMissing(
   indices: ReadonlyArray<{ index: string }>,
   namespace: string,
   projectPrefix: string,
+  seenBefore: boolean,
 ): boolean {
   const names = indices.map((entry) => entry.index);
-  const hasMemory = names.includes(`${MEMORY_INDEX_PREFIX}${namespace}`);
+  const hasMemory = names.includes(memoryIndexName(namespace));
   const hasCorpus = names.some((name) => name.startsWith(`${projectPrefix}-`));
-  return hasCorpus && !hasMemory;
+  return hasCorpus && !hasMemory && seenBefore;
 }
 
 // Health is a cluster reading, not proof that the index cannot be read: a

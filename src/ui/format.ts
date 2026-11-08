@@ -203,8 +203,8 @@ export function sidebarView(
     value:
       `${formatCount(snapshot.memory.count)}` +
       (snapshot.memory.stale > 0 ? ` · ${formatCount(snapshot.memory.stale)} stale` : "") +
-      (snapshot.memory.exists ? "" : " · missing"),
-    tone: snapshot.memory.exists ? "ok" : "bad",
+      (snapshot.memory.exists ? "" : snapshot.memory.lost ? " · missing" : " · empty"),
+    tone: snapshot.memory.exists || !snapshot.memory.lost ? "ok" : "bad",
   };
 
   const state = snapshot.state;
@@ -448,7 +448,11 @@ export function statusSummary(
       ((memory?.stale ?? 0) > 0
         ? ` · ${formatCount(memory?.stale ?? 0)} stale`
         : "") +
-      (memory === undefined || memory.exists ? "" : " · missing"),
+      (memory === undefined || memory.exists
+        ? ""
+        : memory.lost
+          ? " · missing"
+          : " · empty"),
     `corpora ${corpora.length === 0 ? "none" : corpora.join(" · ")}`,
     `usage ${formatCount(snapshot.usage?.queries ?? 0)} queries · ` +
       `${formatPercent(snapshot.usage?.hitRate ?? 0)} hit · ` +
@@ -676,7 +680,7 @@ export function panelSections(snapshot: StatusSnapshot, now: number): PanelSecti
       lines: [
         [
           `${formatCount(memory.count)} ${plural(memory.count, "entry", "entries")}` +
-            (memory.exists ? "" : " · index missing") +
+            (memory.exists ? "" : memory.lost ? " · index missing" : " · empty") +
             (memory.stale > 0 ? ` · ${formatCount(memory.stale)} stale` : ""),
           memory.namespace,
         ].join(" · "),

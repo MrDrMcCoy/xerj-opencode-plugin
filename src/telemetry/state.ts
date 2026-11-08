@@ -98,7 +98,11 @@ export interface ServiceStateInput {
   readonly nodePhase: "starting" | "ready" | "error" | "disabled";
   readonly nodeState: "stopped" | "starting" | "running" | "error";
   readonly corpora: ReadonlyArray<CorpusStateInput>;
-  readonly memoryExists: boolean;
+  /**
+   * Evidence about the project's memory store. `empty` is a store that was
+   * never populated; `lost` is one whose index vanished, which is a fault.
+   */
+  readonly memoryState: "present" | "empty" | "lost";
   readonly jobs: ReadonlyArray<JobView>;
 }
 
@@ -131,7 +135,7 @@ export function serviceState(input: ServiceStateInput): ServiceStateResult {
       detail: broken.error ?? `${broken.name} index missing`,
     };
   }
-  if (!input.memoryExists && input.corpora.length > 0) {
+  if (input.memoryState === "lost" && input.corpora.length > 0) {
     return { name: "degraded", detail: "memory missing" };
   }
 

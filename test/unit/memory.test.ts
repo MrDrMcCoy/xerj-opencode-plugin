@@ -247,31 +247,43 @@ describe("MemoryStore.list", () => {
 });
 
 describe("memoryIndexMissing", () => {
-  test("a corpus without a memory index reports missing", () => {
-    const indices = [
-      { index: "xop-proj-1234-docs", health: "green" },
-      { index: "xop-proj-1234-hidden-docs", health: "green" },
-    ];
+  const indices = [
+    { index: "xop-proj-1234-docs", health: "green" },
+    { index: "xop-proj-1234-hidden-docs", health: "green" },
+  ];
 
-    expect(memoryIndexMissing(indices, "proj-1234", "xop-proj-1234")).toBe(true);
+  test("a populated store whose index vanished reports missing", () => {
+    expect(memoryIndexMissing(indices, "proj-1234", "xop-proj-1234", true)).toBe(
+      true,
+    );
+  });
+
+  test("a store that was never populated is not a warning", () => {
+    expect(memoryIndexMissing(indices, "proj-1234", "xop-proj-1234", false)).toBe(
+      false,
+    );
   });
 
   test("a fresh project has nothing to lose and is not a warning", () => {
-    expect(memoryIndexMissing([], "proj-1234", "xop-proj-1234")).toBe(false);
+    expect(memoryIndexMissing([], "proj-1234", "xop-proj-1234", true)).toBe(false);
   });
 
   test("a present memory index is fine", () => {
-    const indices = [
-      { index: "xop-proj-1234-docs", health: "green" },
+    const withMemory = [
+      ...indices,
       { index: ".xerj-memory-proj-1234", health: "green" },
     ];
 
-    expect(memoryIndexMissing(indices, "proj-1234", "xop-proj-1234")).toBe(false);
+    expect(memoryIndexMissing(withMemory, "proj-1234", "xop-proj-1234", true)).toBe(
+      false,
+    );
   });
 
   test("another project's corpus does not count", () => {
-    const indices = [{ index: "xop-other-9999-docs", health: "green" }];
+    const other = [{ index: "xop-other-9999-docs", health: "green" }];
 
-    expect(memoryIndexMissing(indices, "proj-1234", "xop-proj-1234")).toBe(false);
+    expect(memoryIndexMissing(other, "proj-1234", "xop-proj-1234", true)).toBe(
+      false,
+    );
   });
 });

@@ -50,6 +50,12 @@ export interface MemoryStatus {
    * both report `count: 0`, and only this tells them apart.
    */
   readonly exists: boolean;
+  /**
+   * True when the index existed before (the node-dir marker records it) and is
+   * gone now — a loss. Absent or false with `exists: false` means a store that
+   * was never populated, which is not a fault.
+   */
+  readonly lost?: boolean;
   /** Memories whose every named path is gone; set by the verification pass. */
   readonly stale: number;
   /** The active local-judge floor and the last autotune result. */
@@ -432,8 +438,9 @@ const definition = {
               tunedAt: { type: ["string", "null"] },
               f1: { type: ["number", "null"] },
             }),
+            lost: { type: "boolean" },
           },
-          ["tuning"],
+          ["tuning", "lost"],
         ),
         dreamer: object({
           enabled: { type: "boolean" },

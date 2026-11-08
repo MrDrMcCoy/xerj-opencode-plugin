@@ -3,7 +3,12 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { XerjClient } from "../../src/node/client.ts";
-import { recoverMemoryIndex } from "../../src/memory/health.ts";
+import {
+  memoryIndexName,
+  readMemorySeen,
+  recoverMemoryIndex,
+  writeMemorySeen,
+} from "../../src/memory/health.ts";
 
 interface Stub {
   readonly client: XerjClient;
@@ -144,6 +149,46 @@ describe("memory index health", () => {
     expect(recovered).toBe(false);
     expect(deleted).toEqual([]);
     expect(created).toEqual([]);
+  });
+});
+
+describe("memory seen marker", () => {
+  let root: string;
+  let nodeDir: string;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "opencode-memory-seen-"));
+    nodeDir = join(root, "node");
+    await mkdir(nodeDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  test("an unwritten marker reads as false", async () => {
+    expect(await readMemorySeen(nodeDir)).toBe(false);
+  });
+
+  test("a written marker survives a restart and dies with the node dir", async () => {
+    await writeMemorySeen(nodeDir);
+    expect(await readMemorySeen(nodeDir)).toBe(true);
+
+    // Deleting `.xerj*` removes the node directory, so a deliberate reset
+    // reads as a fresh store rather than a loss.
+    await rm(nodeDir, { recursive: true, force: true });
+    expect(await readMemorySeen(nodeDir)).toBe(false);
+  });
+
+  test("writing into a missing directory is not an error", async () => {
+    await expect(writeMemorySeen(join(root, "absent"))).resolves.toBeUndefined();
+    expect(await readMemorySeen(join(root, "absent"))).toBe(false);
+  });
+
+  test("the index name the marker stands for is stable", () => {
+    expect(memoryIndexName("proj-demo-abc12345")).toBe(
+      ".xerj-memory-proj-demo-abc12345",
+    );
   });
 });
 

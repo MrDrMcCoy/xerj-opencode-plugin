@@ -90,7 +90,13 @@ import { blockedPipeMessage, isFilteredCommand } from "./cmd/filter.ts";
 import { cmdTools } from "./tools/cmd.ts";
 import { registerCompactionArchive } from "./archive/window.ts";
 import { registerCompactionExtraction } from "./memory/extract.ts";
-import { memoryIndexMissing, recoverMemoryIndex } from "./memory/health.ts";
+import {
+  memoryIndexMissing,
+  memoryIndexName,
+  readMemorySeen,
+  recoverMemoryIndex,
+  writeMemorySeen,
+} from "./memory/health.ts";
 import { curateMemories } from "./memory/curate.ts";
 import { verifyMemories } from "./memory/verify.ts";
 import { sampleProcess } from "./process-stats.ts";
@@ -462,7 +468,7 @@ export default Plugin.define({
      */
     const stateStatus = (
       corpora: ReadonlyArray<CorpusHealth>,
-      memoryExists: boolean,
+      memoryState: "present" | "empty" | "lost",
       nodePhase: "starting" | "ready" | "error" | "disabled",
       nodeState: "stopped" | "starting" | "running" | "error",
       mode: SettleMode,
@@ -478,7 +484,7 @@ export default Plugin.define({
           records: corpus.records,
           error: corpus.error,
         })),
-        memoryExists,
+        memoryState,
         jobs: active,
       });
       const view =
@@ -603,7 +609,7 @@ export default Plugin.define({
         // reached. Unknown is not missing: accusing flashed `degraded`.
         state: stateStatus(
           baseCorpora,
-          true,
+          "empty",
           runtime.phase,
           nodeState,
           SettleMode.Defer,
@@ -631,9 +637,10 @@ export default Plugin.define({
       if (!runtime.node) {
         return {
           ...base,
+          // No node means no memory evidence; unknown is not missing.
           state: stateStatus(
             baseCorpora,
-            true,
+            "empty",
             runtime.phase,
             nodeState,
             SettleMode.Record,
@@ -682,6 +689,14 @@ export default Plugin.define({
           typeof (overview as { edges: unknown }).edges === "object" &&
           (overview as { edges: { total?: unknown } }).edges?.total;
 
+        // An empty store and a lost one both answer "no index"; the marker
+        // file written when the index existed tells them apart.
+        const seenBefore = await readMemorySeen(nodeDir).catch(() => false);
+        if (summary?.exists === true && !seenBefore) void writeMemorySeen(nodeDir);
+        const memState = config.memory.enabled
+          ? memoryState(summary, datasets, seenBefore)
+          : "empty";
+
         const corpora = base.corpora.map((row) => {
           const docs = datasets.find((dataset) => dataset.name === row.name)?.docs ?? 0;
           // A last pass can outlive its index: a mode change or a reset drops
@@ -716,7 +731,7 @@ export default Plugin.define({
           corpora,
           state: stateStatus(
             corpora,
-            memoryExists(summary, datasets),
+            memState,
             runtime.phase,
             nodeState,
             SettleMode.Record,
@@ -757,6 +772,7 @@ export default Plugin.define({
               0,
             exists:
               summary?.exists ?? datasets.some((dataset) => dataset.name === "memory"),
+            lost: memState === "lost",
             ...(tuningView === null ? {} : { tuning: tuningView }),
           },
         };
@@ -765,7 +781,9 @@ export default Plugin.define({
           ...base,
           state: stateStatus(
             base.corpora,
-            base.memory.exists,
+            // The full snapshot failed, so the memory evidence is unknown and
+            // unknown is not missing.
+            "empty",
             runtime.phase,
             nodeState,
             SettleMode.Record,
@@ -1878,9 +1896,21 @@ export default Plugin.define({
       });
 
       // A corpus without a memory index means memories stored earlier are
-      // gone. An empty store looks the same, so say it once at startup.
+      // gone; the marker file says which stores were ever populated, so an
+      // empty one is not accused of losing anything.
       const indices = await activeClient.indices().catch(() => []);
-      if (memoryIndexMissing(indices, memoryNamespace(projectRoot), prefix)) {
+      const memoryName = memoryIndexName(memoryNamespace(projectRoot));
+      if (indices.some((entry) => entry.index === memoryName)) {
+        await writeMemorySeen(nodeDir);
+      }
+      if (
+        memoryIndexMissing(
+          indices,
+          memoryNamespace(projectRoot),
+          prefix,
+          await readMemorySeen(nodeDir).catch(() => false),
+        )
+      ) {
         logger.warn(
           "the memory index is missing",
           "memories stored earlier were not found; the next remember recreates it",
@@ -2496,15 +2526,21 @@ async function recordKinds(
 }
 
 /**
- * Whether the memory index exists. The node's own count is authoritative; the
- * dataset listing is the fallback when that request failed.
+ * The project's memory-store evidence. The node's own count is authoritative;
+ * the dataset listing is the fallback when that request failed. The marker
+ * file separates a store that was never populated from one whose index
+ * vanished, so only the latter degrades the service.
  */
-function memoryExists(
+function memoryState(
   summary: { readonly exists: boolean } | null,
   datasets: ReadonlyArray<DatasetStatus>,
-): boolean {
-  if (summary !== null) return summary.exists;
-  return datasets.some((dataset) => dataset.name === "memory");
+  seenBefore: boolean,
+): "present" | "empty" | "lost" {
+  if (summary !== null) {
+    return summary.exists ? "present" : seenBefore ? "lost" : "empty";
+  }
+  if (datasets.some((dataset) => dataset.name === "memory")) return "present";
+  return seenBefore ? "lost" : "empty";
 }
 
 /** The report as plain lines: no JSON, no prompt text, no file bodies. */

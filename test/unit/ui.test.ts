@@ -102,6 +102,7 @@ function snapshot(overrides: Partial<StatusSnapshot> = {}): StatusSnapshot {
       namespace: "proj-demo-1a2b3c4d",
       count: 2,
       exists: true,
+      lost: false,
       stale: 0,
       tuning: {
         threshold: 0.2,
@@ -471,13 +472,26 @@ describe("corpus and memory honesty", () => {
     expect(body).toContain("index is missing");
   });
 
-  test("a memory store with no index says so", () => {
-    const view = withRows([], { namespace: "ns", count: 0, exists: false, stale: 0 });
+  test("a memory store that lost its index says so", () => {
+    const view = withRows(
+      [],
+      { namespace: "ns", count: 0, exists: false, stale: 0, lost: true },
+    );
     const body = panelSections(view, NOW)
       .flatMap((section) => section.lines)
       .join("\n");
 
     expect(body).toContain("index missing");
+  });
+
+  test("a memory store that was never populated reads as empty", () => {
+    const view = withRows([], { namespace: "ns", count: 0, exists: false, stale: 0 });
+    const body = panelSections(view, NOW)
+      .flatMap((section) => section.lines)
+      .join("\n");
+
+    expect(body).toContain("empty");
+    expect(body).not.toContain("index missing");
   });
 
   test("a healthy memory store does not claim a missing index", () => {
@@ -705,6 +719,7 @@ describe("status output schema", () => {
     expect(delivered.process).not.toBeUndefined();
     expect(delivered.frameworks).not.toBeUndefined();
     expect(delivered.memory.exists).not.toBeUndefined();
+    expect(delivered.memory.lost).not.toBeUndefined();
     expect(delivered.memory.stale).not.toBeUndefined();
     expect(delivered.memory.tuning).not.toBeUndefined();
     expect(delivered.embeddings).not.toBeUndefined();

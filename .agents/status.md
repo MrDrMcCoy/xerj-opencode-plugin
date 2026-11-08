@@ -388,6 +388,24 @@ publish, and live TUI verification remain.
 
 ## Log
 
+- 2026-11-08: The false `degraded · memory missing` is fixed. The badge fired
+  whenever a corpus existed and the memory index did not, but the index is
+  created lazily by the first memory write — so a fresh project, or one whose
+  `.xerj*` was deleted, sat degraded indefinitely with nothing to recover to.
+  Confirmed live on three projects: corpora present, no `.xerj-memory-proj-*`
+  index, no memory writes that day, and `lifecycle.state` showing all three
+  entering `degraded · memory missing` at startup. Memory evidence is now a
+  tri-state: `present`, `empty` (never populated — healthy), and `lost` (the
+  marker file `<node dir>/memory-seen` says the index existed before and is
+  gone — degraded, warning, `missing` rows). The marker lives in the node
+  directory, so deleting `.xerj*` clears it and a deliberate reset reads as
+  fresh. Memory disabled reads as `empty`. The two unknown-evidence paths (no
+  node, failed full snapshot) read `empty` instead of degrading. `lost` is
+  declared in the status output schema; sidebar, statusSummary, and the panel
+  say `empty` rather than `missing` for a never-populated store. 1368 unit
+  (1 skip) and 15 integration tests pass; typecheck clean; bundles rebuilt.
+  Needs an OpenCode restart to load.
+
 - 2026-11-07: Released 0.8.0. The tag covers 163 commits: the remaining
   roadmap tiers, the local jevos distillation judge with autotune, local
   telemetry with per-feature cost, command-output management, the turn
